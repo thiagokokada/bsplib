@@ -416,6 +416,7 @@ workstation:
                      SRCS_S="bsp_callstack_i386.s"                         \
                      BUILD_DEFINES="-DCALLGRAPH_PROFILE                    \
 				    -DUNDERSCORE -ansi -DLINUX             \
+				    -Di386                                 \
 				    -DCHECKPOINTING_ARCH                   \
 				    -D_I386_BITOPS_H -O2                   \
                                     -D_GNU_SOURCE"                         \
