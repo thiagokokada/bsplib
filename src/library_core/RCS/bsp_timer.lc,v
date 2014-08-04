@@ -1,0 +1,325 @@
+head	1.1;
+access;
+symbols;
+locks
+	jonh:1.1; strict;
+comment	@# @;
+
+
+1.1
+date	95.12.15.16.17.03;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@\begin{code}
+/*
+ *   Oxford BSP Library: Version 1.2
+ *
+ *      Copyright (C) 1994,1995, Richard Miller
+ *
+ * Permission to use, copy, modify, and distribute this software,
+ * and to incorporate it, in whole or in part, into other software,
+ * is hereby granted without fee, provided that
+ *   (1) the above copyright notice and this permission notice appear in
+ *       all copies of the source code, and the above copyright notice
+ *       appear in clearly visible form on all supporting documentation
+ *       and distribution media;
+ *   (2) modified versions of this software be accompanied by a complete
+ *       change history describing author, date, and modifications made;
+ *       and
+ *   (3) any redistribution of the Oxford BSP Library, in original or modified
+ *       form, be without fee and subject to these same conditions.
+ *
+ * Version 1.2 of the Oxford BSP Library is a snapshot of software under
+ * active development, and is provided "as is" without express or implied
+ * warranty.
+ */
+
+/*
+ * High-resolution timing routines
+ *
+ *      bsp_time()      returns real time since start of program
+ *      bsp_dtime()     returns real time since previous call to bsp_dtime
+ *                        - values are in seconds (double precision)
+ */
+
+#define SGI_HARDWARE    1
+#define BSD_TIMER       2
+#define POSIX_TIMER     3
+#define RS6_HARDWARE    4
+#define CRAY_HARDWARE   5
+#define CS2_HARDWARE    6
+
+#ifdef sgi
+#define DEFAULT         SGI_HARDWARE
+#define UNDERSCORE
+#define TFP_TIMER_BUG
+#endif
+
+#ifdef sun
+#define DEFAULT         BSD_TIMER
+#define UNDERSCORE
+#endif
+
+#ifdef _AIX
+#define DEFAULT         RS6_HARDWARE
+#endif
+
+#ifdef titan
+#define DEFAULT         BSD_TIMER
+#define UPPERCASE
+#endif
+
+#ifdef cray
+#define DEFAULT         CRAY_HARDWARE
+#define UPPERCASE
+#endif
+
+#ifndef DEFAULT
+#define DEFAULT         BSD_TIMER
+#endif
+#ifndef VERSION
+#define VERSION         DEFAULT
+#endif
+
+#if VERSION == SGI_HARDWARE
+typedef long long int TIMER_TYPE;
+static double sgitimer_init();
+static void (*sgitimer_read)();
+static volatile TIMER_TYPE *timerp;
+#define TIMER_READ(v)   (*sgitimer_read)(&v)
+#endif
+
+#if VERSION == CRAY_HARDWARE
+typedef unsigned long TIMER_TYPE;
+extern int __cycle;
+#define TIMER_READ(v)   v = IRTC()
+#define TIMER_RES       (1.0e-12*(double)__cycle)
+#endif
+
+#if VERSION == RS6_HARDWARE
+typedef struct { int tv_sec, tv_nsec; } TIMER_TYPE;
+#define TIMER_READ(v) \
+    do { \
+	 v.tv_sec = rtc_upper();  \
+	 v.tv_nsec = rtc_lower(); \
+       } while (rtc_upper() != v.tv_sec)
+#define TIMER_FRAC(v)   v.tv_nsec
+#define TIMER_RES       1.0e-9
+#endif
+
+#if VERSION == CS2_HARDWARE
+extern void *ew_ctx;
+typedef struct { long tv_nsec, tv_sec; } TIMER_TYPE;
+#define TIMER_READ(v)   elan_clock(ew_ctx, &v)
+#define TIMER_FRAC(v)   v.tv_nsec
+#define TIMER_RES       1.0e-9
+#endif
+
+#if VERSION == POSIX_TIMER
+#include <sys/time.h>
+typedef struct timestruc_t TIMER_TYPE;
+#define TIMER_READ(v)   gettimer(TIMEOFDAY, &v)
+#define TIMER_FRAC(v)   v.tv_nsec
+#define TIMER_RES       1.0e-9
+#endif
+
+#if VERSION == BSD_TIMER
+#include <sys/time.h>
+typedef struct timeval TIMER_TYPE;
+#define TIMER_READ(v)   gettimeofday(&v, 0)
+#define TIMER_FRAC(v)   v.tv_usec
+#define TIMER_RES       1.0e-6
+#endif
+
+#ifdef TIMER_FRAC
+#define TIMER_DIFF(old, new) ((double)(new.tv_sec - old.tv_sec) + \
+	  resolution*(double)(TIMER_FRAC(new) - TIMER_FRAC(old)))
+#else
+#define TIMER_DIFF(old, new) (resolution*(double)(new - old))
+#endif
+
+static double           resolution, mintime;
+static TIMER_TYPE       epoch, start, finish;
+static void             timer_init();
+
+double bsp_time()
+{
+	if (resolution == 0.0)
+		timer_init();
+	TIMER_READ(finish);
+	return (TIMER_DIFF(epoch, finish));
+}
+
+#if defined(UNDERSCORE) || defined(UPPERCASE)
+double
+#ifdef UNDERSCORE
+bsp_time_()
+#else
+BSP_TIME()
+#endif
+{
+	if (resolution == 0.0)
+		timer_init();
+	TIMER_READ(finish);
+	return (TIMER_DIFF(epoch, finish));
+}
+#endif
+
+double
+bsp_dtime()
+{
+	register double sec;
+
+	if (resolution == 0.0)
+		timer_init();
+	TIMER_READ(finish);
+	sec = TIMER_DIFF(start, finish) - mintime;
+	start = finish;
+	return(sec >= 0.0? sec : 0.0);
+}
+
+#if defined(UNDERSCORE) || defined(UPPERCASE)
+double
+#ifdef UNDERSCORE
+bsp_dtime_()
+#else
+BSP_DTIME()
+#endif
+{
+	register double sec;
+
+	if (resolution == 0.0)
+		timer_init();
+	TIMER_READ(finish);
+	sec = TIMER_DIFF(start, finish) - mintime;
+	start = finish;
+	return(sec >= 0.0? sec : 0.0);
+}
+#endif
+
+static void
+timer_init()
+{
+#ifdef ADJUST_FOR_OVERHEAD
+	register double sec, minsec;
+	register int i;
+#endif
+
+#if VERSION == SGI_HARDWARE
+	resolution = sgitimer_init();
+#else
+	resolution = TIMER_RES;
+#endif
+	TIMER_READ(epoch);
+	start = epoch;
+#ifdef ADJUST_FOR_OVERHEAD
+	minsec = bsp_dtime();
+	for (i = 32; i; i--)
+	    if ((sec = bsp_dtime()) < minsec)
+		minsec = sec;
+	mintime = minsec;
+#endif
+}
+
+#if VERSION == SGI_HARDWARE
+#include <sys/types.h>
+#include <sys/mman.h>
+#include <sys/syssgi.h>
+#include <sys/immu.h>
+#include <sys/fcntl.h>
+#include <signal.h>
+#include <setjmp.h>
+
+static void
+sgitimer_read64(p)
+	long long *p;
+{
+#ifdef TFP_TIMER_BUG
+	*(int *)p = get_fpc_csr();
+#endif
+	*p = *timerp;
+}
+
+#ifdef USE_32BIT_CYCLECOUNTER
+/* Don't use this -- wraparound is not handled correctly */
+static void
+sgitimer_read32(p)
+	long long *p;
+{
+	*p = *(long *)timerp;
+}
+#endif
+
+#include <sys/time.h>
+static void
+sgitimer_readbsd(p)
+	long long *p;
+{
+	static struct timeval now;
+
+	gettimeofday(&now, 0);
+	*p = (1000000*now.tv_sec) + now.tv_usec;
+}
+
+static jmp_buf sgitimer_jmp;
+
+static void
+sgitimer_catch()
+{
+	longjmp(sgitimer_jmp, 0);
+}
+
+static double
+sgitimer_init()
+{
+	register volatile TIMER_TYPE *iotimer_addr;
+	register long phys_addr;
+	register fd;
+	int cycleval;
+	double res;
+	void (*oldsig)();
+
+	fd = -1;
+	if ((phys_addr = syssgi(SGI_QUERY_CYCLECNTR, &cycleval)) == -1 ||
+	    (fd = open("/dev/mmem", O_RDONLY)) == -1 ||
+	    (long)(iotimer_addr = (TIMER_TYPE *)mmap(0, POFFMASK,
+	      PROT_READ, MAP_PRIVATE, fd,
+	      (off_t)(phys_addr & ~POFFMASK))) == -1) {
+		if (fd >= 0) close(fd);
+		sgitimer_read = sgitimer_readbsd;
+		return (1.0e-6);
+	}
+	res = (double)cycleval * 1.0e-12;
+	close(fd);
+	timerp = iotimer_addr = (TIMER_TYPE *)((char *)iotimer_addr +
+			 poff(phys_addr));
+	oldsig = signal(SIGBUS, sgitimer_catch);
+	if (setjmp(sgitimer_jmp)) {
+#ifdef USE_32BIT_CYCLECOUNTER
+		sgitimer_read = sgitimer_read32;
+#else
+		sgitimer_read = sgitimer_readbsd;
+		res = 1.0e-6;
+#endif
+	} else {
+		if (*iotimer_addr)
+			;
+		sgitimer_read = sgitimer_read64;
+	}
+	signal(SIGSEGV, oldsig);
+	return(res);
+}
+#endif
+\end{code}
+@

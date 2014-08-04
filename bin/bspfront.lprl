@@ -1,0 +1,1178 @@
+\begin{code}#! @PERL@
+\end{code}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bspfront.lprl,v 1.1 1995/09/01 13:55:36 jonh Exp jonh $
+% $Log: bspfront.lprl,v $
+# Revision 1.1  1995/09/01  13:55:36  jonh
+# Initial revision
+#
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{The all new singing and dancing BSP compilation driver}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+These variables are overwritten by the makefile.
+\begin{code}
+$bindir        = "@bindir@";
+$includedir    = "@includedir@";
+$libdir        = "@libdir@";
+$mandir        = "@mandir@";
+$mpiincludedir = "@mpiincludedir@";
+$mpilibdir     = "@mpilibdir@";
+\end{code}
+
+\begin{code}
+push(@INC,$includedir);
+push(@INC,$bindir);
+require "bsputil";
+
+($Pgm = $0) =~ s|.*/||;
+$Version           = "1.3, 25th Nov 1997";
+$bug_reports_to    = 'bsplib-bugs\@comlab.ox.ac.uk';
+$Arch   = &backtick("$bindir/bsparch -arch");
+$Arch   = &backtick("bsparch -arch")  if ($Arch eq "");
+$Device = &backtick("$bindir/bsparch -device");
+$Device = &backtick("bsparch -device") if ($Device eq "");
+$FPP    = "$bindir/bspfpp";
+
+require "bspfrontenv";
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Initialisation---don't change anything below here}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+# Various helper programs---they do the real work :-)
+$CC        = $ccArch{$Arch};
+$CPLUSPLUS = $cplusplusArch{$Arch};
+$F77       = $f77Arch{$Arch};
+$CPP       = $cppArch{$Arch};
+$UNLIT     = "litToPgm";
+$LD_is_f77 =0;
+\end{code}
+
+\begin{code}
+
+$f77_compiler_include   = "-I";
+$f77_compiler_define    = "-D";
+$f77_compiler_undefine  = "-U";
+$f77_compiler_nolink    = "-c";
+$f77_libpath_flag       = "-L";
+
+$c_compiler_include     = "-I";
+$c_compiler_define      = "-D";
+$c_compiler_undefine    = "-U";
+$c_compiler_nolink      = "-c";
+$c_compiler_cpponly     = "-E";
+$c_libpath_flag         = "-L";
+$object_file_suffix     = ".o";
+$move_command           = "mv ";
+$move_command           = "@MOVE_COMMAND@ " if ($Arch eq "WIN32");
+\end{code}
+
+\begin{code}
+$Do_cc     =1;
+$Do_cpponly=0;
+$Do_f77    =0;
+$Do_fpp    =1;
+$Do_ld     =1;
+
+if ($Pgm eq "bspf77") {
+  $LD= $f77Arch{$Arch};
+  $LD_is_f77 = 1;
+  $Do_cc     = 0;
+  $Do_f77    = 1;
+  if ($Arch eq "WIN32") {
+    $f77_compiler_include  = "@F77_COMPILER_INCLUDE@";
+    $f77_compiler_define   = "@F77_COMPILER_DEFINE@";
+    $f77_compiler_undefine = "@F77_COMPILER_UNDEFINE@";
+    $f77_compiler_nolink   = "@F77_COMPILER_COMPILE@";
+    $f77_libpath_flag      = "@F77_LIBPATH_FLAG@";
+    $object_file_suffix    = "@OBJECT_FILE_SUFFIX@";
+  }
+
+} elsif ($Pgm eq "bspc++") {
+  $LD= $cplusplusArch{$Arch};
+  if ($Arch eq "WIN32") {
+    $c_compiler_include   = "@COMPILER_INCLUDE@";
+    $c_compiler_define    = "@COMPILER_DEFINE@";
+    $c_compiler_undefine  = "@COMPILER_UNDEFINE@";
+    $c_compiler_nolink    = "@COMPILER_COMPILE@";
+    $c_compiler_cpponly   = "@COMPILER_CPPONLY@";
+    $c_libpath_flag       = "@LIBPATH_FLAG@";
+    $object_file_suffix   = "@OBJECT_FILE_SUFFIX@";
+  }
+
+} else {
+  $LD= $ccArch{$Arch};
+  if ($Arch eq "WIN32") {
+    $c_compiler_include   = "@COMPILER_INCLUDE@";
+    $c_compiler_define    = "@COMPILER_DEFINE@";
+    $c_compiler_undefine  = "@COMPILER_UNDEFINE@";
+    $c_compiler_nolink    = "@COMPILER_COMPILE@";
+    $c_compiler_cpponly   = "@COMPILER_CPPONLY@";
+    $c_libpath_flag       = "@LIBPATH_FLAG@";
+    $object_file_suffix   = "@OBJECT_FILE_SUFFIX@";
+  }
+}
+\end{code}
+
+\begin{code}
+select(STDERR); $| = 1; select(STDOUT); # no STDERR buffering, please.
+
+$Status            = 0;
+$Verbose           = 0;
+$Debug             = 0;
+$UnixDebug         = 0;
+$isSharedMemory    = 0;
+$Mpi               = 0;
+$Prof              = 0;
+$CGProf            = 0;
+$Stat              = 0;
+$Optimisation      = 0;
+$LibraryLevel      = 0;
+$KeepTemps         = 0;
+$Given_output_file = "";
+
+$Opt_fcombine_puts        = 1;
+$Opt_fcontention_resolve  = 1;
+
+@Input_files       = ();
+@Link_files        = ();
+\end{code}
+
+Include, import directories, and CPP defines.
+\begin{code}
+@CComp_flags    = ($ccompFlagsArch{$Arch});  # Fortran specific flags 
+@FComp_flags    = ($fcompFlagsArch{$Arch});  # C specific flags
+@Comp_flags     = ();                        # Language independant flags
+@Ld_flags       = ($ldFlagsArch{$Arch},$ldFlagsDevice{$Device});
+@Import_dir     = ($includedir);
+if ($Arch ne "WIN32") {
+  @Library_dir    = ('.',"$libdir/$Arch");      #-L things
+} else {
+  @Library_dir    = ('.',"$libdir\\\\$Arch");
+}
+@Library_user   = ();    
+@Library_sys    = ();    
+@Cpp_defines    = ('_BSPFRONT_',$Arch);   
+@Cpp_undefines  = (); 
+@Inject_includes= ();
+@Inject_bspcpp  = ();
+$User_overide_compiler= 0;
+
+$CC_extra_flags  = "";
+$F77_extra_flags = "";
+$LD_extra_flags  = "";
+\end{code}
+
+Default values for buffers (may be overwridden by the packages flags).
+\begin{code}
+$bsp_check_syncs          = 1;
+$bsp_no_buffers           = 3;
+$bsp_buffer_stalls        = 2;
+$bsp_buffer_size          = 16384;
+$bsp_slot_size            = 1400;
+$bsp_send_latency         = 1400;
+$bsp_noslots              = 1;
+$bsp_round_trip           = 0;
+$bsp_throttle_procs       = 0;
+$bsp_checkpointing        = 0;
+$bsp_processmigration     = 0;
+$bsp_comm_fifo_size       = 200;
+$Opt_fcombine_puts_size   = $bsp_buffer_size;
+$Opt_fcombine_puts_max    = -1;
+$Opt_fcombine_puts_min    = -1;
+$Opt_fbsmp_buffers        = -1;   # Infinite buffers as default
+\end{code}
+
+\begin{code}
+$bsp_log_usage = @PERL_DBMOK@ ;  #Log linkages to the above file
+$bsp_log_name  = "bspfront";
+&main();
+&tidy_up();
+exit(0);
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Main program}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub main {
+  local($i,$j);
+
+  unshift(@ARGV,split(/\s+/,$bspfrontOptimisationPackages{$Device}));
+arg: while($_=$ARGV[0]) {
+  shift(@ARGV);
+
+  #--------HELP------------------------------------------------
+  /^(\/|-)(help|man)$/ && do { &FormatManual("bspfront.1"); exit(0);};
+  
+  #--------VERBOSE---------------------------------------------
+  /^(\/|-)v$/i   && do {$Verbose = 1; next arg;};
+
+  #--------Optimisation----------------------------------------
+  /^(\/|-)O$/    && do {$Optimisation=1;
+                   next arg;};
+
+  /^(\/|-)O2$/   && do {$Optimisation=2; 
+                   next arg;};
+
+  /^(\/|-)O3$/   && do {$Optimisation=3; 
+                   next arg;};
+
+  /^(\/|-)flibrary-level$/ &&
+                  do {$LibraryLevel = &grab_next_arg("-flibrary-level");
+ 
+                      if ($LibraryLevel  =~ /^(\d+)$/) {
+                        $LibraryLevel = int($1);
+                        if ($LibraryLevel<0 ||  $LibraryLevel>2) {
+                          print STDERR 
+                                "$Pgm: -flibrary-level requires an ",
+                                "optimisation level in range 0--2\n";
+                        $Status++;
+                        }
+                      } else {
+                        print STDERR 
+                              "$Pgm: -flibrary-level requires an ",
+                              "optimisation level\n";
+                        $Status++;
+                      }
+                      next arg;};
+
+  /^(\/|-)fcombine-puts$/ && 
+                  do {$Opt_fcombine_puts=1;next arg;};
+
+  /^(\/|-)fcombine-puts-buffer$/ && 
+                  do {$Opt_fcombine_puts_size 
+                        = &grab_next_arg("-fcombine-puts-buffer");
+                      if ($Opt_fcombine_puts_size =~ /^(.*),(.*),(.*)/) {
+                        $Opt_fcombine_puts_size=$1;
+                        $Opt_fcombine_puts_max =$2;
+                        $Opt_fcombine_puts_min =$3;
+                        $Opt_fcombine_puts_max
+                          = &bytesToInt("-fcombine-puts-buffer max",
+                                        $Opt_fcombine_puts_max);
+                        $Opt_fcombine_puts_min
+                          = &bytesToInt("-fcombine-puts-buffer min",
+                                        $Opt_fcombine_puts_min);
+                      } 
+                      $Opt_fcombine_puts_size
+                        = &bytesToInt("-fcombine-puts-buffer number",
+                                      $Opt_fcombine_puts_size); 
+                      next arg;};
+
+  /^(\/|-)fnocombine-puts$/ && 
+                  do {$Opt_fcombine_puts=0;next arg;};
+
+  /^(\/|-)fcontention-resolve$/ &&
+                  do {$Opt_fcontention_resolve 
+                        = &grab_next_arg("-fcontention-resolve");
+ 
+                      if ($Opt_fcontention_resolve  =~ /^(\d+)$/) {
+                        $Opt_fcontention_resolve = $1;
+                      } else {
+                        print STDERR 
+                              "$Pgm: -fcontention-resolve requires an ",
+                              "optimisation level\n";
+                        $Status++;
+                      }
+                      next arg;};
+
+  #--------Debugging-------------------------------------------
+  /^(\/|-)debug$/   && do {$Debug    = 1; 
+                      push(@Cpp_defines,"DEBUG");
+		      push(@Comp_flags,"-g");
+                      next arg;};
+
+  /^(\/|-)g$/       && do {$UnixDebug= 1; 
+		      push(@Comp_flags,"-g");
+                      next arg;};
+
+  /^(\/|-)keep$/    && do {$KeepTemps= 1; next arg;};
+
+  /^(\/|-)fcheck-syncs$/   && do {$bsp_check_syncs= 1; next arg;};
+  /^(\/|-)fnocheck-syncs$/ && do {$bsp_check_syncs= 0; next arg;};
+
+  #--------Profiling-------------------------------------------
+  /^(\/|-)stat$/  && do {$Stat     = 1; next arg;};
+  /^(\/|-)prof$/  && do {$Prof     = 1; next arg;};
+  /^(\/|-)cgprof$/&& do {$CGProf   = 1; 
+		    if ($Arch =~ /CRAY/) {
+                      if ($Do_f77) {
+                        push(@FComp_flags,"-g");
+                      } else {
+                        push(@CComp_flags,"-g");
+                      }
+	            }
+		    next arg;};
+  /^(\/|-)nof77munging$/
+             && do {$Do_fpp    =0; next arg;};
+
+  /^(\/|-)fthrottle-procs$/   && do {$bsp_throttle_procs = 1; next arg;};
+  /^(\/|-)fnothrottle-procs$/ && do {$bsp_throttle_procs = 0; next arg;};
+  
+
+  #--------Suppress linker-------------------------------------
+  /^(\/|-)c$/    && do {$Do_ld = 0; next arg;};
+
+  #--------Output file-----------------------------------------
+  # -o <file>
+  /^(\/|-)o$/    && do {$Given_output_file = &grab_next_arg("-o");
+                   if ($Given_output_file =~ /\/[^\/]*$/) {
+                     if (! -d $`) {
+                        print STDERR "$Pgm: no such directory $`\n";
+                        $Status++;
+                     }
+                   }
+                   next arg;
+                  };
+  #--------CPP Defines----------------------------------------
+  /^(\/|-)E$/    && do {$Do_ld = 0; $Do_cpponly = 1; next arg;};
+  /^(\/|-)D/     && do {push(@Cpp_defines,$'); next arg;};
+  /^(\/|-)U/     && do {push(@Cpp_undefines,$'); next arg;};
+
+  #--------FLAGS passed straight onto a compiler phase--------
+  /^(\/|-)f77$/      && do {$LD       = $f77Arch{$Arch}; 
+                       $LD_is_f77=1;
+                       next arg;};
+
+  /^(\/|-)c\+\+$/&& do {$LD = $cplusplusArch{$Arch};next arg;};
+
+  /^(\/|-)cflags$/   && do {$CC_extra_flags=&grab_next_arg("-cflags");  
+                       next arg;};
+
+  /^(\/|-)c\+\+flags$/ && do {$CC_extra_flags=&grab_next_arg("-cflags");  
+                       next arg;};
+
+  /^(\/|-)f77flags$/ && do {$F77_extra_flags=&grab_next_arg("-f77flags"); 
+                       next arg;};
+
+  /^(\/|-)ldflags$/  && do {$LD_extra_flags=&grab_next_arg("-ldflags");  
+                       next arg;};
+
+  /^(\/|-)overridecc$/ && do {$CC=&grab_next_arg("-overridecc");
+                         $User_overide_compiler=1;
+                         next arg;};
+
+  /^(\/|-)overridec\+\+$/ && do {$CPLUSPLUS=&grab_next_arg("-overridec++");
+                         $User_overide_compiler=1;
+                         next arg;};
+
+  /^(\/|-)overridef77$/ && do {$F77=&grab_next_arg("-overridef77");
+                         $User_overide_compiler=1;
+                         next arg;};
+
+  /^(\/|-)overrideld$/  && do {$LD=&grab_next_arg("-overrideld");
+                         $User_overide_compiler=1;
+                         next arg;};
+
+  #--------Set runtime buffer sizes (BSPlib internals)----------------------
+  /^(\/|-)bspbuffer$/&& do {$bsp_buffer_size = &grab_next_arg("-bspbuffer");
+                       $bsp_buffer_size = &bytesToInt("-bspbuffer",
+						      $bsp_buffer_size);
+                       next arg;};
+
+  /^(\/|-)bspnobuffers$/&& 
+                    do {$bsp_no_buffers = &grab_next_arg("-bspnobuffers");
+                        $bsp_no_buffers = &bytesToInt("-fbspnobuffers",
+ 					              $bsp_no_buffers);
+                       next arg;};
+
+  /^(\/|-)bspbufferstalls$/&& 
+                    do {$bsp_buffer_stalls=&grab_next_arg("-bspbufferstalls");
+                        $bsp_buffer_stalls= &bytesToInt("-bspbufferstalls",
+							$bsp_buffer_stalls);
+                       next arg;};
+
+  /^(\/|-)bspfifo$/  && do {$bsp_comm_fifo_size=&grab_next_arg("-bspfifo");
+                       $bsp_comm_fifo_size = &bytesToInt("-bspfifo",
+ 						         $bsp_comm_fifo_size);
+                       next arg;};
+
+
+  /^(\/|-)bspslotsize$/ && do {
+                          $bsp_slot_size = &grab_next_arg("-bspslotsize");
+                          if ($bsp_slot_size =~ /^(\d+)$/) {
+                            $bsp_slot_size = int($bsp_slot_size);
+                          } else {
+                            print STDERR 
+                              "$Pgm: -bspslotsize requires an ",
+                              "integer time in usecs ",
+                              "(\"$bsp_slot_size\" not valid)\n";
+                          $Status++;
+                          }
+                          next arg;};
+
+  /^(\/|-)bspnoslots$/ && do {
+                          $bsp_noslots = &grab_next_arg("-bspnoslots");
+                          if ($bsp_noslots =~ /^(\d+)$/) {
+                            $bsp_noslots = int($bsp_noslots);
+                          } else {
+                            print STDERR 
+                              "$Pgm: -bspnoslots requires an ",
+                              "integer argument\n";
+                          $Status++;
+                          }
+                          next arg;};
+
+  /^(\/|-)bsproundtrip$/ && do {
+                          $bsp_round_trip = &grab_next_arg("-bsproundtrip");
+                          if ($bsp_round_trip =~ /^(\d+)$/) {
+                            $bsp_round_trip = int($bsp_round_trip);
+                          } else {
+                            print STDERR 
+                              "$Pgm: -bsproundtrip requires an ",
+                              "integer time in usecs\n";
+                          $Status++;
+                          }
+                          next arg;};
+  /^(\/|-)bspsendlatency$/ && do {
+                          $bsp_send_latency=&grab_next_arg("-bspsendlatency");
+                          if ($bsp_send_latency =~ /^(\d+)$/) {
+                            $bsp_send_latency = int($bsp_send_latency);
+                          } else {
+                            print STDERR 
+                              "$Pgm: -bspsendlatency requires an ",
+                              "integer time in usecs\n";
+                          $Status++;
+                          }
+                          next arg;};
+
+ 
+  #--------Set runtime buffer sizes (user flags)---------------
+
+  /^(\/|-)ffixed-bsmp-buffers$/  
+                && do {$Opt_fbsmp_buffers= 
+                          &grab_next_arg("-ffixed-bsmp-buffers");
+                       $Opt_fbsmp_buffers = &bytesToInt("-ffixed-bsmp-buffers",
+							$Opt_fbsmp_buffers);
+                       next arg;};
+
+  /^(\/|-)finfinite-bsmp-buffers$/ && do {$Opt_fbsmp_buffers=-1;next arg;};
+
+  /^(\/|-)fnocheckpointing$/ && do {$bsp_checkpointing = 0; next arg;};
+  /^(\/|-)fcheckpointing$/   
+	        && do {$bsp_checkpointing 
+		          = &grab_next_arg("-fcheckpointing");; 
+		       next arg;};
+
+  /^(\/|-)fnoprocess-?migration$/ && do {$bsp_processmigration = 0; next arg;};
+  /^(\/|-)fprocess-?migration$/   
+	        && do {$bsp_processmigration 
+		          = &grab_next_arg("-fprocessmigration");; 
+		       next arg;};
+
+  #--------Libraries------------------------------------------
+  /^(\/|-)l/   && do {push(@Library_user,$'); next arg;};
+
+  /^(\/|-)L/   && do {if (-d $') {
+                     push(@Library_dir,$'); 
+                  } else {
+                     print STDERR "$Pgm: Library directory \"$'\" does",
+                                  " not exist";
+                     $Status++;
+                  }
+                  next arg;};
+  #--------BSP library munging--------------------------------
+
+  /^(\/|-)mpi$/        && do {unshift(@ARGV,"-device","MPASS_MPI");  
+                              next arg;};
+
+  /^(\/|-)tcpip$/      && do {unshift(@ARGV,"-device","MPASS_TCPIP");
+                              next arg;};
+
+  /^(\/|-)udpip$/      && do {unshift(@ARGV,"-device","MPASS_UDPIP");
+                              next arg;};
+
+  /^(\/|-)shmemsysv$/  && do {unshift(@ARGV,"-device","SHMEM_SYSV"); 
+                              next arg;};
+
+  /^(\/|-)shmemwin32$/ && do {unshift(@ARGV,"-device","SHMEM_WIN32"); 
+                              next arg;};
+
+  /^(\/|-)device$/ && do {$Device = &grab_next_arg("-device");
+                     if (!(-d "$libdir/$Arch/$Device/")) {
+                       print STDERR "$Pgm: the communication ",
+                                    "device \"$Device\" has not been ",
+				    "installed in $libdir.\n";
+		       $Status++;
+		     }
+                     unshift(@ARGV,
+			     split(/\s+/,
+                                   $bspfrontOptimisationPackages{$Device}));
+		     next arg;};
+
+
+  #--------Imports---------------------------------------------
+
+  /^(\/|-)I/ && do {if (-d $') {
+                     push(@Import_dir,$'); 
+                  } else {
+                     print STDERR "\n**warning** Import directory \"$'\"",
+                                  " does not exist\n";
+                  }
+                  next arg;};
+
+  #--------Special options-------------------------------------
+
+  /^(\/|-)showlog$/&& do {if (!opendir(LIBDIR,$libdir)) {
+                       print STDERR "$Pgm: unable to open the directory ",
+                                    "$libdir\n";
+                       $Status++;
+                     }
+                     foreach $i (sort (readdir(LIBDIR))) {
+                       $j = "$libdir/$i/$bsp_log_name";
+                       if (-e $j.".pag") {
+                         print "Reading usage for $i\n" if $Verbose;
+                         &readUsageInformation($j,$i);
+                       }
+                     }
+                     closedir(LIBDIR);
+                     next arg;};
+
+  #--------Input file-----------------------------------------
+  /\.(o|a|obj)$/   && do {push(@Link_files, $_); 
+                   next arg;};
+
+  if (/\.lf$/    || /\.f$/i    || 
+      /\.lc$/    || /\.c$/     || 
+      /\.lc\+\+/ || /\.c\+\+$/ ||
+      /\.lcc/    || /\.cc$/) {
+      if (-f $_) {
+        push(@Input_files,$_);
+      } else {
+        print STDERR "$Pgm: input file doesn't exit: $_\n";
+        $Status++;
+      }
+  } elsif (/^(\/|-)/) {
+    if ($Do_f77) {
+      push(@FComp_flags,$_);
+    } else {
+      push(@CComp_flags,$_);
+    }
+  } else {
+    push(@Link_files, $_); 
+  }
+  }
+
+  if (($#Input_files <0) && ($#Link_files<0)) {
+    printf STDERR "$Pgm: no input files specified\n";
+    $Status++;
+  }
+  
+  if ($Status > 0) {
+    print STDERR "\n$Pgm usage: for basic information, try ",
+                 "the `-help' option\n";
+    exit(1);
+  }
+  $Device      =~ /SHMEM/     && ($isSharedMemory =1);
+  $Device      =~ /MPASS_MPI/ && do {$Mpi = 1;
+                                     push(@Library_dir,$mpilibdir);
+                                    };
+  push(@Cpp_defines,$Device);
+  push(@Library_dir,"$libdir/$Arch/$Device");
+  
+  &driverTag()     if $Verbose;
+  local($file);
+  
+  push(@Input_files,&preloadInitFile(@Input_files,@Link_files)) if $Do_ld;
+  foreach $file (@Input_files) {
+    &compileFile($file);
+  }
+  if ($Do_ld) {
+   foreach $file (@Input_files) {
+     $file =~ /\.[^\.]+$/ && (push(@Link_files,$`."$object_file_suffix"));
+   }
+   if ($LD eq "f2c") {
+     $LD_is_f77=0;
+     $LD=$CC;
+     push(@Library_sys,"f2c") if ("-lf2c" eq "@F2C_LIBRARY@");
+     push(@Library_sys,"F77") if ("-lF77" eq "@F77_LIBRARY@");
+     push(@Library_sys,"I77") if ("-lI77" eq "@I77_LIBRARY@");
+     push(@Library_sys,"m");
+   }
+   if ($Mpi) {
+     push(@Library_sys,"mpi");
+     push(@Library_sys,"mpihack")  if (!$LD_is_f77);
+   } 
+
+   if($Arch eq "WIN32") {
+	push(@Library_sys,"bspcore". &libraryExtension().".lib");
+	push(@Library_sys,"bsplevel1_O$LibraryLevel.lib");
+   	push(@Library_sys,$librariesArch{$Arch});
+	($Given_output_file eq "") && ($Given_output_file = "a.exe");
+   } else {
+	push(@Library_sys,"bspcore". &libraryExtension());
+	push(@Library_sys,"bsplevel1_O$LibraryLevel");
+   	push(@Library_sys,$librariesArch{$Arch});
+	($Given_output_file eq "") && ($Given_output_file = "a.out");
+   }   
+   if ($Device=~ /MPASS_TCPIP/) {
+    push(@Library_sys,"bsptcpip");
+    push(@Library_sys,"cpr") if ($canCheckpoint{$Arch});
+   }
+
+   if ($Device=~ /MPASS_UDPIP/) {
+    push(@Library_sys,"bspudpip");
+    push(@Library_sys,"cpr") if ($canCheckpoint{$Arch});
+   }
+
+   if ($Device=~ /MPASS_3C905B/) {
+    push(@Library_sys,"bspudpip3c905b");
+    push(@Library_sys,"cpr") if ($canCheckpoint{$Arch});
+   }
+
+   push(@Library_sys,"bspkernel") if ($Device=~ /MPASS_3C905B/);
+
+   if ($LD_is_f77) {
+     $LD_extra_flags .= " " . &addprefix_concat(" ",@FComp_flags);
+   } else {
+     $LD_extra_flags .= " " . &addprefix_concat(" ",@CComp_flags);
+   }
+   if($Arch eq "WIN32" ) {
+   	&run_something("$LD " .
+                      &addprefix_concat(" ",@Comp_flags)     .
+                      &addprefix_concat(" ",@Ld_flags)       .
+                      " $LD_extra_flags "                    .
+                      join(" ",@Link_files)                  .
+		      " /link "				     .
+                      " /OUT:$Given_output_file "              .
+                      &addprefix_concat(" $c_libpath_flag",@Library_dir)  .
+                      &addprefix_concat(" ",@Library_user) .
+                      &addprefix_concat(" ",@Library_sys)  ,
+                  "$Arch linker");   
+   } else {
+   	&run_something("$LD " .
+                      &addprefix_concat(" ",@Comp_flags)     .
+                      &addprefix_concat(" ",@Ld_flags)       .
+                      " $LD_extra_flags "                    .
+                      &addprefix_concat(" -I",@Import_dir)   .
+                      " -o $Given_output_file "              .
+                      join(" ",@Link_files)                  .
+                      &addprefix_concat(" -L",@Library_dir)  .
+                      &addprefix_concat(" -l",@Library_user) .
+                      &addprefix_concat(" -l",@Library_sys)  ,
+                  "$Arch linker");   
+   }             
+   print STDERR 
+        "**warning** to run the program on N processors use:\n",
+        "\tmpirun -machinefile <host-list> -np N ",
+        "$Given_output_file\n" if $Mpi;
+   &logUsageInformation() if $bsp_log_usage;
+   if ($CGProf && $cgprofNeedNM{$Arch} && (int($cgprofNeedNM{$Arch})==1)) {
+     &run_something("bspnm -o ". 
+		     $Given_output_file. 
+		     ".tab ".
+		     $Given_output_file,
+		     "Symbol table extractor");
+   }
+
+   if ($LibraryLevel!=2) {
+     print STDERR
+       "**warning** programs may run slow at ",
+       "-flibrary-level $LibraryLevel. See $Pgm -help\n";
+   }
+ }
+}
+
+sub libraryExtension {
+   local($prefix);
+
+   $prefix = "_O";
+   $Debug             && ($prefix = "_G");
+   $UnixDebug         && ($prefix = "_g");
+   ($Prof || $CGProf) && ($prefix = "_P");
+   return ("$prefix$LibraryLevel");
+}
+
+sub bytesToInt {
+  local($option,$x) = @_;
+
+  if ($x =~ /^(\d+)K$/i) {
+    return (1024*int($1));
+  } elsif ($x =~ /^(\d+)M$/i) {
+    return (1048576*int($1));
+  } elsif ($x =~ /^(\d+)$/) {
+    return (int($1));
+  } else {
+    print STDERR "$Pgm: $option requires an integer argument\n";
+    $Status++;
+  }
+}
+
+\end{code}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Compile file}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+sub compileFile {
+  local($filename) =$_[0];
+  local($CCcomp);
+  local($basename);
+  local($filename_postlit); 
+  local($filename_precpp);
+  local($filename_postcpp);
+  local($filename_bspcpp);
+  local($filename_object);
+  local($f77infile,$f2coutfile);
+  local($cfile_extension)=".c";
+
+  $filename =~ /\.[^\.]+$/ && ($basename = $`);
+
+  if      ($filename =~ /\.lc$/) {
+     &run_something("$UNLIT $filename", 
+                    "Program that extracts C from a literate program");
+     $filename_postlit = $basename . ".c";
+     push(@Files_to_tidy,$filename_postlit) if (!$UnixDebug);
+     $CCcomp = $CC;
+  }
+  elsif ($filename =~ /\.lc\+\+$/) {
+     &run_something("$UNLIT $filename", 
+                    "Program that extracts C from a literate program");
+     $filename_postlit = $basename . ".c++";
+     $cfile_extension  = ".c++";
+     push(@Files_to_tidy,$filename_postlit) if (!$UnixDebug);  
+     $CCcomp = $CPLUSPLUS;
+  } 
+  elsif ($filename =~ /\.lcc$/) {
+     &run_something("$UNLIT $filename", 
+                    "Program that extracts C from a literate program");
+     $filename_postlit = $basename . ".cc";
+     $cfile_extension  = ".cc";
+     push(@Files_to_tidy,$filename_postlit) if (!$UnixDebug);  
+     $CCcomp = $CPLUSPLUS;
+  } 
+  elsif ($filename =~ /\.lf$/) {
+     $Do_f77          = 1;
+     $Do_cc           = 0;
+     &run_something("$UNLIT $filename", 
+                    "Program that extract F77 from a literate program");
+     $filename_postlit = $basename       . ".f";
+     push(@Files_to_tidy,$filename_postlit) if (!$UnixDebug);
+  } 
+  elsif ($filename =~ /\.f$/i) {
+     $Do_f77          = 1;
+     $Do_cc           = 0;
+     $filename_postlit = $filename;
+  } 
+  elsif ($filename =~ /\.cc$/) {
+     $Do_f77          = 0;
+     $Do_cc           = 1;
+     $cfile_extension  = ".cc";
+     $filename_postlit = $filename;
+     $CCcomp = $CPLUSPLUS;
+  }
+  elsif ($filename =~ /\.c\+\+$/) {
+     $Do_f77          = 0;
+     $Do_cc           = 1;
+     $filename_postlit = $filename;
+     $cfile_extension  = ".c++";
+     $CCcomp = $CPLUSPLUS;
+  }
+  elsif ($filename =~ /\.c$/) {
+     $Do_f77          = 0;
+     $Do_cc           = 1;
+     $filename_postlit = $filename;
+     $CCcomp = $CC;
+  }
+  
+  if (!$User_overide_compiler) {
+    push(@CComp_flags,$coptFlagsArch{$Arch ."-O".$Optimisation});
+    push(@FComp_flags,$foptFlagsArch{$Arch ."-O".$Optimisation});
+  }
+   
+  if (!$Do_ld && $Given_output_file ne "") {
+    $filename_object = $Given_output_file;
+  } else {
+    $filename_object = $basename . $object_file_suffix;
+  }
+
+
+  
+  if ($Do_cc) {
+    if ($Do_cpponly) {
+       $CCcmd = "$CCcomp $c_compiler_cpponly ";
+    } else {
+       $CCcmd = "$CCcomp $c_compiler_nolink ";
+    }
+    &run_something($CCcmd .
+                     &addprefix_concat(" $c_compiler_include",@Import_dir) .
+                     &addprefix_concat(" $c_compiler_define",@Cpp_defines) .
+                     &addprefix_concat(" $c_compiler_undefine",
+                                       @Cpp_undefines) .
+                     &addprefix_concat(" ",@CComp_flags) .
+                     &addprefix_concat(" ",@Comp_flags) .
+                     " $CC_extra_flags ".
+                     " $filename_postlit ",
+                   "C compiler");                           
+  } else {
+    if ($Do_fpp) {
+      $f77infile = $Tmpfile_prefix  . ".f";
+      &run_something("$FPP  ".
+                       $filename         . " ".
+                       $filename_postlit . " ".
+                       $f77infile,
+                     "BSP Fortran pre-processor");
+                    
+                            
+    } else {
+      $f77infile = $filename_postlit;
+    }
+    if (!$f77doesCpp{$Arch}) {
+       @Cpp_defines  =();
+       @Cpp_undefines=();
+    }
+    &run_something("$F77 $f77_compiler_nolink ". 
+                     &addprefix_concat(" $f77_compiler_include",@Import_dir) .
+                     &addprefix_concat(" $f77_compiler_define",@Cpp_defines) .
+                     &addprefix_concat(" $f77_compiler_undefine",
+                                       @Cpp_undefines) .
+                     &addprefix_concat(" ",@FComp_flags) .
+                     &addprefix_concat(" ",@Comp_flags) .
+                     " $F77_extra_flags ".
+                     " $f77infile ",
+                   "Fortran 77 compiler (file $filename)");
+    
+    if ($F77 eq "f2c") {
+      $f77infile  =~ /\.f$/i;
+      $f2coutfile = $` . ".c";
+      &run_something("$CC $c_compiler_nolink ". 
+                     &addprefix_concat(" $c_compiler_include",@Import_dir) .
+                     &addprefix_concat(" $c_compiler_define",@Cpp_defines) .
+                     &addprefix_concat(" $c_compiler_undefine",
+                                       @Cpp_undefines) .
+                     &addprefix_concat(" ",@CComp_flags) .
+                     &addprefix_concat(" ",@Comp_flags) .
+                     " $CC_extra_flags ".
+                     $f2coutfile ,
+                     "C compiler on f2c source");
+       push(@Files_to_tidy,$f2coutfile);
+     }
+   }
+
+  if ((-e ($Tmpfile_prefix.$object_file_suffix)) && 
+      (($Tmpfile_prefix.$object_file_suffix) ne $filename_object)) {
+    &run_something($move_command . $Tmpfile_prefix. $object_file_suffix .
+		   " ".$filename_object,
+                   "unix mv of the temporary object file");
+  } elsif (($basename . $object_file_suffix) ne $filename_object) {
+    &run_something($move_command . $basename . $object_file_suffix . 
+                   " " . $filename_object,
+                   "unix mv of the temporary object file");
+  }
+  push(@Files_to_tidy,$basename.$object_file_suffix) if ($Do_ld);
+}
+
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Create the preload file}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub preloadInitFile {
+  local(@linker_files);
+  local(@extra_flags);
+  local($aout) = "a.out";
+  local($bsp_library_type);
+
+  $aout = "a.exe" if ($Arch eq "WIN32");
+  $aout = $Given_output_file if $Given_output_file ne "";
+
+  @extra_flags = ();
+  push(@extra_flags,"-O$Optimisation")     if $Optimisation>0;
+  push(@extra_flags,"-prof")               if $Prof;
+  push(@extra_flags,"-flibrary-level $LibraryLevel");
+  if ($Opt_fcombine_puts) {
+    push(@extra_flags,"-fcombine-puts-buffer ".
+                      "$Opt_fcombine_puts_size,".
+                      "$Opt_fcombine_puts_max,".
+                      "$Opt_fcombine_puts_min");
+    $fcombine_size = $Opt_fcombine_puts_size;
+  } else {
+    $fcombine_size = 0;
+  }
+  if ($Opt_fcontention_resolve) {
+    push(@extra_flags,"-fcontention-resolve $Opt_fcontention_resolve");
+  } 
+
+  if ($Prof) {
+    $bsp_library_type = "'P'";
+  } else {
+    $bsp_library_type = "'O'";
+  }
+
+  $includedir =~ s/\\/\\\\/g;
+  print STDERR "Preload file:\n\t" 		if $Verbose;
+  print STDERR "creating $Tmpfile_prefix\n"	if $Verbose;
+
+  open(PRELOAD,"> " . $Tmpfile_prefix . "_pre.c") ||
+  &tidy_up_and_die(1,"$Pgm: cannot create temporary file. File system full?");
+
+  print PRELOAD "/* " , @linker_files , "*/\n";
+  print PRELOAD<<"_ENDPRELOAD_";
+
+#include "bsp.h"
+#include <stdlib.h>
+#include <string.h>
+
+extern int _bsp_do_stat;
+extern int _bsp_do_cgprof;
+extern int _bsp_do_prof;
+extern int _bsp_checkpointing;
+extern int _bsp_processmigration;
+extern int _bsp_nbuffers;
+extern int _bsp_buffer_size;
+extern int _bsp_slotsize_usecs;
+extern int _bsp_noslots;
+extern int _bsp_roundtrip_usecs;
+extern int _bsp_sendlatency_usecs;
+extern int _bsp_buffer_stalls;
+extern int _bsp_throttle_procs;
+extern int _bsp_comm_fifo_size;
+extern int _bsp_opt_contention_level;
+extern int _bsp_opt_fcombine_puts;
+extern int _bsp_opt_fcombine_puts_max;
+extern int _bsp_opt_fcombine_puts_min;
+extern int _bsp_opt_bsmp_buffer_size;
+extern char *_bsp_compile_flags;
+extern char *_bsp_arch;
+extern char *_bsp_device;
+extern char *_bsp_include_dir;
+extern int _bsp_check_syncs;
+extern char *_bsp_exec_file;
+extern char _bsp_library_type;
+extern int  _bsp_opt_flibrary_level;
+void _bsp_preload_init() {
+   _bsp_do_cgprof        = $CGProf;
+   _bsp_do_prof          = $Prof;
+   _bsp_do_stat          = $Stat;
+   _bsp_checkpointing    = $bsp_checkpointing;
+   _bsp_processmigration = $bsp_processmigration;
+   _bsp_nbuffers         = $bsp_no_buffers;
+   _bsp_buffer_size      = $bsp_buffer_size;
+   _bsp_slotsize_usecs   = $bsp_slot_size;
+   _bsp_noslots          = $bsp_noslots;
+   _bsp_roundtrip_usecs  = $bsp_round_trip;
+   _bsp_sendlatency_usecs= $bsp_send_latency;
+   _bsp_throttle_procs   = $bsp_throttle_procs;
+   _bsp_comm_fifo_size   = $bsp_comm_fifo_size;
+   _bsp_buffer_stalls    = $bsp_buffer_stalls;
+   _bsp_opt_contention_level = $Opt_fcontention_resolve;
+   _bsp_opt_fcombine_puts= $fcombine_size;
+   _bsp_opt_fcombine_puts_max=$Opt_fcombine_puts_max;
+   _bsp_opt_fcombine_puts_min=$Opt_fcombine_puts_min;
+   _bsp_opt_bsmp_buffer_size =$Opt_fbsmp_buffers;
+   _bsp_check_syncs  =$bsp_check_syncs;
+   _bsp_library_type =$bsp_library_type;
+   _bsp_opt_flibrary_level=$LibraryLevel;
+ 
+   _bsp_compile_flags  = (char*) malloc(1+strlen("@Comp_flags @extra_flags"));
+   _bsp_arch=(char*) malloc(1+strlen("$Arch"));
+   _bsp_device=(char*) malloc(1+strlen("$Device"));
+   _bsp_include_dir=(char*) malloc(1+strlen("$includedir/"));
+   _bsp_exec_file= (char*)malloc(1+strlen("$aout"));
+   if (_bsp_compile_flags==NULL || _bsp_arch==NULL || 
+       _bsp_include_dir==NULL || _bsp_exec_file==NULL)
+     bsp_abort("{bsp_begin}: unable to malloc for compile flags");
+
+   _bsp_compile_flags=strcpy(_bsp_compile_flags, "@Comp_flags @extra_flags");
+   _bsp_arch         =strcpy(_bsp_arch,"$Arch");
+   _bsp_device       =strcpy(_bsp_device,"$Device");
+   _bsp_include_dir  =strcpy(_bsp_include_dir,"$includedir/");
+   _bsp_exec_file    =strcpy(_bsp_exec_file,"$aout");
+}
+_ENDPRELOAD_
+  close(PRELOAD);
+  return($Tmpfile_prefix . "_pre.c");
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Function like \texttt{join} but also puts something at the front}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub addprefix_concat {
+  local($prefix,@list) = @_;
+  if ($#list<0) {
+    return "";
+  } else {
+    return ($prefix . join($prefix,@list));
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Compilation driver tag}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub driverTag {
+  local($str)="";
+  if ($Opt_fbsmp_buffers==-1) {
+    $str .= "-fininite-bsmp-buffers ";
+  } else {
+    $str .= "-ffixed-bsmp-buffers $Opt_fbsmp_buffers ";
+  }
+  $str .= "-fcheck-syncs " 	if $bsp_check_syncs;
+  $str .= "-fcombine-puts "	if $Opt_fcombine_puts;
+  $str .= "-fcombine-puts-buffer $Opt_fcombine_puts_size,".
+          "$Opt_fcombine_puts_max,$Opt_fcombine_puts_min "
+				if $Opt_fcombine_puts;
+  $str .= "-fcontention-resolve " if $Opt_fcontention_resolve;
+  $str .= "-bspnobuffers $bsp_no_buffers ";
+  $str .= "-bspbuffer $bsp_buffer_size ";
+  $str .= "-bspfifo $bsp_comm_fifo_size ";
+  $str .= "-bspslotsize $bsp_slot_size ";
+  $str .= "-bspnoslots $bsp_noslots ";
+  $str .= "-bsproundtrip $bsp_round_trip ";
+  $str .= "-bspsendlatency $bsp_send_latency ";
+  $str .= "-bspbufferstalls $bsp_buffer_stalls ";
+  $str .= "-O$Optimisation ";
+  $str .= "-flibrary-level $LibraryLevel ";
+  $str .= "-g " if $UnixDebug;
+  $str .= "-keep " if $KeepTemps;
+  $str .= "-prof " if $Prof;
+  $str .= "-stat " if $Stat;
+  $str .= "-cgprof " if $CGProf;
+  $str .= "-nof77munging " if !$Do_fpp;
+  $str .= "-fthrottle-procs " if $bsp_throttle_procs;
+  
+print <<"_ENDTAG_";
+===================================================
+===  This is $Pgm version $Version.           
+===  Using a $Arch to compile a BSP C or Fortran 
+===  programs for a $Arch.
+===================================================
+BSPlib system options:
+$str
+===================================================
+_ENDTAG_
+}
+\end{code}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Log usage information}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\texttt{username -> last date @@ van0 van1 van2 P0 P1 P2 g0 g1 g2}
+
+\begin{code}
+sub logUsageInformation {
+  local(%bigbrotherfile);
+  local($i,$user,$bigbrotherfilename);
+  local($timestr,$van0,$van1,$van2,$P0,$P1,$P2,$g0,$g1,$g2,$ext);
+  require "ctime.pl";
+
+  chop($timestr = &ctime(time) );
+
+  $bigbrotherfilename = "$libdir/$Arch/$bsp_log_name";
+  print "Logging usage to $bigbrotherfilename\n" if $Verbose;
+  if (dbmopen(%bigbrotherfile,$bigbrotherfilename,0777)) {
+    $user = $ENV{'USER'};
+    $user = "<anonymous>" if ($user eq "");
+    if (!$bigbrotherfile{$user}) {
+      $bigbrotherfile{$user} = $timestr . '@@ 0 0 0 0 0 0 0 0 0';
+    } else {
+      $bigbrotherfile{$user}=~/(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)/;
+      $van0 = int($1);
+      $van1 = int($2);
+      $van2 = int($3);
+      $P0   = int($4);
+      $P1   = int($5);
+      $P2   = int($6);
+      $g0   = int($7);
+      $g1   = int($8);
+      $g2   = int($9);
+     
+      $ext = &libraryExtension();
+      $van0++ if ($ext eq "_O0");
+      $van1++ if ($ext eq "_O1");
+      $van2++ if ($ext eq "_O2");
+      $P0++   if ($ext eq "_P0");
+      $P1++   if ($ext eq "_P1");
+      $P2++   if ($ext eq "_P2");
+      $g0++   if ($ext eq "_g0");
+      $g1++   if ($ext eq "_g1");
+      $g2++   if ($ext eq "_g2");
+      $bigbrotherfile{$user} = "$timestr \@\@ $van0 $van1 $van2 $P0 $P1 $P2 $g0 $g1 $g2";
+    }
+    dbmclose(%bigbrotherfile);
+  }
+}
+\end{code}
+
+\begin{code}
+sub readUsageInformation {
+  local($dbmfile,$machine)=@_;
+  local(%bigbrotherfile);
+  local($user,$van0,$van1,$van2,$P0,$P1,$P2,$g0,$g1,$g2,$ext);
+  
+  format top =
+____________________________________________________________________________
+ Machine|  User |     Date    |  0 | 1  | 2  | P0 | P1 | P2 | g0 | g1 | g2 |
+--------+-------+-------------+----+----+----+----+----+----+----+----+----|
+.
+
+
+  format STDOUT =
+@>>>>>>>|@>>>>>>|@>>>>>>>>>>>>|@>>>|@>>>|@>>>|@>>>|@>>>|@>>>|@>>>|@>>>|@>>>|
+$machine, $user,$time,$van0,$van1,$van2,$P0,$P1,$P2,$g0,$g1,$g2
+.
+
+  print "Reading usage to $bsp_bigbrotherfile\n" if $Verbose;
+  if (dbmopen(%bigbrotherfile,$dbmfile,0700)) {
+    
+    foreach $user (sort (keys %bigbrotherfile)) {
+      $bigbrotherfile{$user}=~/(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)\s(\d+)/;
+      $time    = $`;
+      $van0    = $1;
+      $van0    = "" if $van0 eq "0";
+
+      $van1    = $2;
+      $van1    = "" if $van1 eq "0";
+
+      $van2    = $3;
+      $van2    = "" if $van2 eq "0";
+
+      $P0      = $4;
+      $P0      = "" if $P0 eq "0";
+
+      $P1      = $5;
+      $P1      = "" if $P1 eq "0";
+
+      $P2      = $6;
+      $P2      = "" if $P2 eq "0";
+
+      $g0      = $7;
+      $g0      = "" if $g0 eq "0";
+
+      $g1      = $8;
+      $g1      = "" if $g1 eq "0";
+
+      $g2      = $9;
+      $g2      = "" if $g2 eq "0";
+
+      $time    =~ /\s*(\S+)\s+(\d+)\s+(\d+:\d+)/ && ($time = "$1 $2 $3");
+      write;
+    }
+    dbmclose(%bigbrotherfile);
+  }
+}
+\end{code}

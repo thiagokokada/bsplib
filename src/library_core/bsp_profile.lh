@@ -1,0 +1,159 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsp_profile.lh,v 1.3 1996/09/09 16:09:29 jonh Exp jonh $
+% $Log: bsp_profile.lh,v $
+% Revision 1.3  1996/09/09  16:09:29  jonh
+% Just about to add WYSIWYG profiling information
+%
+% Revision 1.2  1996/03/11  09:09:05  jonh
+% removing accumulated profile
+%
+% Revision 1.1  1995/08/31  16:39:36  jonh
+% Initial revision
+%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Buffer sizes}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{itemize}
+\item[Comm]  The size of the buffer used to put info as each super-step
+             is executed. A buffer proportional to Comm is required in
+             each process, and $Comm >> p$.
+
+\item[Sstep] The extent of the hash table used to collate accumulated
+             superstep information.
+\end{itemize}
+
+\begin{code}
+#define PROFILE_COMM_BUFFER_SIZE    4000
+#define PROFILE_SSTEP_BUFFER_SIZE    100
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{File IO for profiling stats}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+File IO routines that are only guarenteed to work from process zero.
+\begin{code}
+#ifdef MPASS_EXPRESS
+#define PROF_FILETYPE FILE*
+#define PROF_DATETYPE int
+#define prof_fopen(filename)   fopen(filename,"wA")
+#define prof_freopen(filename) fopen(filename,"aA")
+#define prof_fflush(fptr)      fflush(fptr)
+#define prof_fclose(fptr)      fclose(fptr)
+#define prof_datestring(clock) "date unknown\n"
+#else
+
+#define PROF_FILETYPE FILE*
+#define PROF_DATETYPE          time_t
+#define prof_fopen(filename)   fopen(filename,"w")
+#define prof_freopen(filename) fopen(filename,"a")
+#define prof_fflush(fptr)      fflush(fptr)
+#define prof_fclose(fptr)      fclose(fptr)
+#define prof_datestring(clock) (time(&clock), ctime(&clock))
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Include for profiling statistics}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+typedef struct {
+   int    super_steps;
+   int    packet_puts_src;
+   int    packet_puts_srcnbytes;
+   int    packet_puts_dst;
+   int    packet_puts_dstnbytes;
+   int    buffer_high_water_mark;
+   int    write_waits;
+   int    read_waits;
+   int    combput_fails;
+   int    combput_hits;
+ } _BSPstat_info;
+
+extern _BSPstat_info _bspstat;
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Include for profiling statistics}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef CALLGRAPH_PROFILE
+typedef struct {
+   double     proc_comp;
+   double     proc_comm;
+   double     proc_idle;
+   long int   proc_hin;
+   long int   proc_hout;
+} _BSPprof_callgraph_proc;
+#endif
+
+typedef struct __BSPprof_sstep_info {
+   bsp_int32                    sstep_id;
+   bsp_int32                    lineno;
+   char                        *filename;
+#ifdef CALLGRAPH_PROFILE
+   char     **call_stack;
+   bsp_int32  accum_syncs;
+   double     accum_comp_max, accum_comp_avg, accum_comp_min;
+   double     accum_comm_max, accum_comm_avg, accum_comm_min;
+   double     accum_idle_max, accum_idle_avg, accum_idle_min;
+   long int   accum_h_max,    accum_h_avg,    accum_h_min;
+   _BSPprof_callgraph_proc *proc; /* Entry per process */
+#endif
+   struct __BSPprof_sstep_info *next;
+} _BSPprof_sstep_info;
+
+typedef int _BSPprof_sstep_id;
+\end{code}
+
+The value for \texttt{time\_fix} represents a reference point to which
+all other timings are made.
+\begin{code}
+typedef struct {
+  _BSPprof_sstep_id    sstep_id;
+  double               time_delta_start;
+  double               time_fix;
+  double               time_delta_comm;
+  double               time_delta_end;
+  bsp_int32            in_bytes;
+  bsp_int32            out_bytes;
+  bsp_int32            no_in;
+  bsp_int32            no_out;
+} _BSPprof_comm_info;
+\end{code}
+
+\begin{code}
+extern void bspstat_init();
+extern void bspstat_create();
+extern void bspstat_truncate();
+extern void bspstat_recreate();
+extern void bspstat_close();
+extern void bspstat_incoming(int,int);
+extern void bspstat_updateremote();
+extern void bspstat_finalise();
+extern void bspprof_init();
+extern void bspprof_create();
+extern void bspprof_recreate();
+extern void bspprof_truncate();
+extern void bspprof_close();
+extern void bspprof_sstep_start();
+extern void bspprof_sstep_fix();
+extern void bspprof_sstep_end();
+\end{code}
+

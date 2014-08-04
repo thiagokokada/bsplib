@@ -1,0 +1,351 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id$
+% $Log$
+
+\begin{code}
+#include <stdio.h>
+#include "symbol.h"
+#include "cgprof.h"
+#include "matrix.h"
+#include "daVinci.h"
+
+#define NoDeletes 80
+
+int     CriticalPath=CRITICAL_SYNCS;
+int     CriticalType=CRITTYPE_ABSOLUTE;
+int     Verbose=0;
+int     NodeviewTime=1;
+int     NodeviewCompress=1;
+int     PrintLogo=1;
+int     Colour=1;
+int     DeltaNormalise=1;
+int     PieView=TCL_COMP;
+int     PieCombine=0;
+char   *Pgm;
+char   *ProfileData;
+int     NoNodes,root;
+char    usage[]="usage:  cgprof profile-data [See man 1 cgprof]";
+char    helpUrl[]="http://www.bsp-worldwide.org/implmnts/oxtool/callgraph_frame.html";
+Matrix  graph; /* NoNodes x NoNodes matrix of integers */
+Matrix  costs; /* NoNodes x 1       matrix of costs    */
+
+double   TotalComp, TotalComm, TotalCompIdle;
+int      TotalSyncs;
+long int TotalH;
+
+char    *dateProfiled, *machineName;
+double minNodeSize = 0.01;   /* i.e, don't show nodes with _combined_
+				    comp and comm % less than this */
+double bsp_s = 74.0;
+double bsp_l = 1902;
+double bsp_g = 9.3;
+int    bsp_p;
+
+FILE *log;
+\end{code}
+
+\begin{code}
+extern void printDaVinci(int);
+
+void main(int argc, char *argv[]) {
+  char davinci_stdin[MAX_PROFILE_LINE_LENGTH];
+  FILE   *fptr;
+  int i,j,k,going=1,*select_nodes, select_nodes_next;
+  int *path,      path_len=0;
+  davinciCmd cmd;
+  int *undo_stack, undo_stack_next;
+  float temp_f;
+
+  if (argc!=13) {
+    fprintf(stderr,"The perl script bspsgprof is buggered\n");
+    exit(1);
+  }
+  Pgm         = argv[0];
+  ProfileData = argv[1];
+  bsp_p       = atoi(argv[2]);
+  machineName = argv[3];
+  dateProfiled= argv[4];
+  sscanf(argv[5],"%f",&temp_f);
+  bsp_s = temp_f;
+  sscanf(argv[6],"%f",&temp_f);
+  bsp_l = temp_f;
+  sscanf(argv[7],"%f",&temp_f);
+  bsp_g = temp_f;
+  sscanf(argv[8],"%f",&temp_f);
+  minNodeSize=temp_f;
+  Verbose = atoi(argv[9]);
+  PrintLogo=atoi(argv[10]);
+  Colour=atoi(argv[11]);
+  DeltaNormalise=atoi(argv[12]);
+  if (Verbose) sleep(10);  
+  if (!(fptr=fopen(ProfileData,"r"))) {
+    fprintf(stderr,"%s: unable to open profile data in \"%s\".\n%s\n",
+            Pgm,ProfileData,usage);
+    exit(1);
+  }
+  if (!(log=fopen("bspcgprof.log","w"))) {
+    fprintf(stderr,"%s: unable to open log file for writing\n",Pgm);
+    exit(1);
+  }
+  if (!gets(davinci_stdin) || 
+       strcmp(davinci_stdin,"ok")) {
+    fprintf(stderr,"%s{%s}: failed to receive ok from daVinci.\n",
+	    davinci_stdin,Pgm);
+    exit(1);
+  }
+  initDaVinci();
+  if (Verbose) fprintf(log,"%s: opened profile file \"%s\".\n",Pgm,ProfileData);
+  readRawProfile(fptr,&NoNodes);
+  fclose(fptr);
+  if (Verbose) fprintf(log,"%s: %d nodes in profile.\n",Pgm,NoNodes);
+
+  if (NoNodes<=0) {
+    fprintf(log,"%s: no call-graph profile data in \"%s\".\n"
+            "Re-link using the -cgprof to bspfront\n",
+            Pgm,ProfileData);
+    exit(1);
+  }
+  if (Verbose) printRawProfile();
+  createConnectivityMatrix(NoNodes,&graph,&costs,&root);
+  TotalComp     = Mat(object_cost,costs,root,0).comp_max;
+  TotalComm     = Mat(object_cost,costs,root,0).comm_max;
+  TotalCompIdle = Mat(object_cost,costs,root,0).comp_idle_max;
+  TotalH        = Mat(object_cost,costs,root,0).hrel_max;
+  TotalSyncs    = Mat(object_cost,costs,root,0).syncs;
+  if (Verbose) printConnectivityMatrix(graph,costs,root);
+  fflush(log);
+  graphToDaVinci(root,&graph,&costs);
+  fflush(stdout);
+  undo_stack   = calloc(NoDeletes,sizeof(int));
+  select_nodes = calloc(NoNodes,sizeof(int));
+  if (undo_stack==NULL || select_nodes==NULL) {
+    fprintf(stderr,"Unable to allocate storage for undo stack\n");
+    exit(1);
+  }
+  undo_stack_next=0;
+  select_nodes_next=0;
+  tclPieInit(); 
+  tclPieUpdate(&Mat(object_cost,costs,root,0),root,PieView);
+  select_nodes_next=1;
+  select_nodes[0]=root;
+  while (gets(davinci_stdin) && going) {
+    cmd = parseDaVinciCmd(davinci_stdin);
+    if (Verbose) fprintf(log,"From davinci=\"%s\"\n",davinci_stdin);
+    switch (cmd.type) {
+    case DAVINCI_OK:
+      continue;
+
+    case DAVINCI_QUIT:
+      going=0;
+      break;
+
+    case DAVINCI_NODE:
+      select_nodes_next=cmd.size;
+      for(i=0;((i<cmd.size) && (i<NoNodes));i++)
+        select_nodes[i]=atoi(cmd.list[i]);
+      if (select_nodes_next>0)
+        tclPieUpdate(&Mat(object_cost,costs,select_nodes[0],0),
+		     select_nodes[0],
+		     PieView);
+      break;
+
+    case DAVINCI_MENU:
+      if (cmd.size>0) {
+        if (strcmp(cmd.list[0], "jump")==0)  {
+	  if ((select_nodes_next>=0)      && 
+              (select_nodes[0]>0)         &&
+	      (select_nodes[0] < NoNodes) &&
+	      (Mat_dense(graph,select_nodes[0],select_nodes[0]))) {
+	    cmdDaVinci("special(focus_node(\"%d\"))\n",select_nodes[0]);
+	  }
+        }
+      }
+      break;
+
+    case DAVINCI_ICON:
+      if (cmd.size>0) {
+        if (strcmp(cmd.list[0], "sync")==0) {
+	  CriticalPath=CRITICAL_SYNCS;
+	  activateDaVinciMenu(cmd.list[0]);
+	  cmdDaVinci("window(show_status(\"Synchronisation critical path\"))");
+          updateColours(root,&graph,&costs);
+
+	} else if (strcmp(cmd.list[0], "comp")==0) {
+	  CriticalPath=CRITICAL_COMP;
+	  activateDaVinciMenu(cmd.list[0]);
+	  cmdDaVinci("window(show_status(\"Computational critical path\"))");
+          updateColours(root,&graph,&costs);
+          
+        } else if (strcmp(cmd.list[0], "comm")==0) {
+	  CriticalPath=CRITICAL_COMM;
+	  activateDaVinciMenu(cmd.list[0]);
+	  cmdDaVinci("window(show_status(\"Communication critical path\"))");
+          updateColours(root,&graph,&costs);
+          
+        } else if (strcmp(cmd.list[0], "wait")==0) {
+	  CriticalPath=CRITICAL_WAIT;
+	  activateDaVinciMenu(cmd.list[0]);
+	  cmdDaVinci("window(show_status(\"Waiting/idle time critical path\"))");
+          updateColours(root,&graph,&costs);
+          
+        } else if (strcmp(cmd.list[0], "hrel")==0) {
+	  CriticalPath=CRITICAL_HREL;
+	  activateDaVinciMenu(cmd.list[0]);
+	  cmdDaVinci("window(show_status(\"Accumulated h-relation critical path\"))");
+          updateColours(root,&graph,&costs);
+
+        } else if (strcmp(cmd.list[0], "absolute")==0) {
+	  CriticalType=CRITTYPE_ABSOLUTE;
+          activateDaVinciMenu(cmd.list[0]);
+	  cmdDaVinci("window(show_status(\"Absolute critical path\"))");
+          updateColours(root,&graph,&costs);
+
+        } else if (strcmp(cmd.list[0], "absdelta")==0) {
+	  CriticalType=CRITTYPE_ABSDELTA;
+          activateDaVinciMenu(cmd.list[0]);
+	  cmdDaVinci("window(show_status(\"Absolute imbalance critical path\"))");
+          updateColours(root,&graph,&costs);
+
+        } else if (strcmp(cmd.list[0], "reldelta")==0) {
+	  CriticalType=CRITTYPE_RELDELTA;
+          activateDaVinciMenu(cmd.list[0]);
+	  cmdDaVinci("window(show_status(\"Relative imbalance critical path\"))");
+          updateColours(root,&graph,&costs);
+	  
+        } else if (strcmp(cmd.list[0], "weightdelta")==0) {
+	  CriticalType=CRITTYPE_WEIGHTDELTA;
+          activateDaVinciMenu(cmd.list[0]);
+	  cmdDaVinci("window(show_status(\"Weighted imbalance critical path\"))");
+          updateColours(root,&graph,&costs);
+	  
+        } else if (strcmp(cmd.list[0],"help")==0) {
+          cmdDaVinci("special(show_url(\"%s\"))",helpUrl);
+
+	} else if (strcmp(cmd.list[0],"time")==0) {
+	  NodeviewTime=1;
+	  activateDaVinciMenu(cmd.list[0]);
+	  cmdDaVinci("window(show_status(\"Time view\"))");
+          graphToDaVinci(root,&graph,&costs);
+
+	} else if (strcmp(cmd.list[0],"percent")==0) {
+	  NodeviewTime=0;
+	  activateDaVinciMenu(cmd.list[0]);
+	  cmdDaVinci("window(show_status(\"Percentage view\"))");
+          graphToDaVinci(root,&graph,&costs);
+
+	} else if (strcmp(cmd.list[0],"compress")==0) {
+	  NodeviewCompress=1;
+	  activateDaVinciMenu(cmd.list[0]);
+	  cmdDaVinci("window(show_status(\"Compressed node view\"))");
+	  cmdDaVinci("menu(layout(compact_all))");
+          graphToDaVinci(root,&graph,&costs);
+
+	} else if (strcmp(cmd.list[0],"uncompress")==0) {
+	  NodeviewCompress=0;
+	  activateDaVinciMenu(cmd.list[0]);
+	  cmdDaVinci("window(show_status(\"Uncompressed node view\"))");
+          graphToDaVinci(root,&graph,&costs);
+
+	} else if ((strcmp(cmd.list[0],"delete")==0) ||
+		   (strcmp(cmd.list[0],"undo")==0)) {
+          if (strcmp(cmd.list[0],"delete")==0) {
+	    if (undo_stack_next==0) 
+	      activateDaVinciMenu("undo");
+            for(i=0;(i<select_nodes_next) && (undo_stack_next<NoNodes);i++) 
+	      undo_stack[undo_stack_next++] = select_nodes[i];
+	    if (undo_stack_next==NoDeletes) 
+	      activateDaVinciMenu("delete");
+	    cmdDaVinci("window(show_status(\"Deleted %d node(s)\"))",
+		       select_nodes_next);
+            select_nodes_next=0;
+	  } else {
+	    if (undo_stack_next==NoDeletes) 
+	      activateDaVinciMenu("delete");
+	    undo_stack_next--;
+	    if (undo_stack_next==0) 
+	      activateDaVinciMenu("undo");
+	    cmdDaVinci("window(show_status(\"Undone deletion\"))");
+	    select_nodes_next=1;
+	    select_nodes[0]=undo_stack[undo_stack_next];
+            
+	    for(i=0;i<raw_profile_next;i++)
+	      raw_profile[i].active=1;
+	  }
+	  activateDaVinciMenu("default");
+	  for(i=0;i<undo_stack_next;i++) {
+	    for(j=0;j<raw_profile_next;j++) {
+              for(k=0;k<raw_profile[j].stack_size;k++) {
+                if (raw_profile[j].stack[k]==undo_stack[i])
+		  raw_profile[j].active=0;
+	      }
+            }
+          }
+          cmdDaVinci("window(show_message(\"Deleting node...\"))");
+          freeMat(&graph);
+	  freeMat(&costs);
+          createConnectivityMatrix(NoNodes,&graph,&costs,&root);
+          graphToDaVinci(root,&graph,&costs);
+          if (strcmp(cmd.list[0],"undo")==0) {
+            if ((select_nodes[0]>0)         &&
+	        (select_nodes[0] < NoNodes) &&
+	        (Mat_dense(graph,select_nodes[0],select_nodes[0]))) {
+	    cmdDaVinci("special(focus_node(\"%d\"))\n",select_nodes[0]);
+	    cmdDaVinci("special(select_nodes([\"%d\"]))",select_nodes[0]);
+	    tclPieUpdate(&Mat(object_cost,costs,select_nodes[0],0),
+		       select_nodes[0],
+		       PieView); 
+            }
+          }
+	}    
+      }
+      break;
+    case DAVINCI_TCL:
+      if (cmd.size>0) {
+        if        (strcmp(cmd.list[0], "comm")==0)  {
+	  PieView=TCL_COMM;
+	} else if (strcmp(cmd.list[0], "comp")==0)  {
+	  PieView=TCL_COMP;
+	} else if (strcmp(cmd.list[0], "hrel")==0)  {
+	  PieView=TCL_HREL;
+	} else if (strcmp(cmd.list[0], "wait")==0)  {
+	  PieView=TCL_WAIT;
+	} else if (strcmp(cmd.list[0], "combine")==0)  {
+	  PieCombine=!PieCombine;
+        } else if (strlen(cmd.list[0])==0) {
+	  break;
+	}
+	if (select_nodes_next>0) 
+	  tclPieUpdate(&Mat(object_cost,costs,select_nodes[0],0),
+		       select_nodes[0],
+		       PieView);
+      }
+      break;
+    case DAVINCI_ERROR:  
+    default:
+      fprintf(stderr,"CGPROF error:\n"
+                     "\tCommand = %s\n"
+	             "\tError   = %s\n",lastDavinciCmd,davinci_stdin);
+      exit(1);
+      break;
+    }
+    fflush(stdout);
+    fflush(log);
+  }  
+}
+\end{code}
+

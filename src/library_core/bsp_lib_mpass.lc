@@ -1,0 +1,1460 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997,1998 University of Oxford           %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsp_lib_mpass.lc,v 1.7 1996/06/13 10:16:53 jonh Exp jonh $
+% $Log: bsp_lib_mpass.lc,v $
+% Revision 1.7  1996/06/13  10:16:53  jonh
+% Preliminary BSPlib proposal
+%
+% Revision 1.6  1996/04/03  10:59:02  jonh
+% changing over to bsp_init
+%
+% Revision 1.5  1996/02/26  10:09:43  jonh
+% going to reduce L
+%
+% Revision 1.4  1996/01/09  16:51:26  jonh
+% Removing undefined on the receive type
+%
+% Revision 1.3  1995/11/08  09:52:50  jonh
+% Solved CSS Transmit bug, and added combining puts optimisation
+%
+% Revision 1.2  1995/08/31  16:27:45  jonh
+% seems to be working on Sp2 and on top of MPI
+%
+% Revision 1.1  1995/08/29  14:05:54  jonh
+% Initial revision
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+\chapter{A BSP library built ontop of message passing}
+
+\begin{code}
+#include "bsp_lib.h"
+#include "bsp_profile.h"
+#include "bsp_contentionfree.h"
+
+#ifdef DEBUG
+#ifdef PARAMID
+#define gethostname(str,size) strcpy(str,"unknown")
+#else
+#include <sys/utsname.h>
+#endif
+#endif
+
+STATIC void            bufferGets();
+STATIC void            bsmp_buffersizes();
+STATIC void            dumpFifoCommTable(char*,_BSPcomm_thunk**,int*);
+STATIC void            receiveSomething(int,int);
+STATIC _BSPcomm_thunk* nextPacket(int*);
+STATIC int             sendPacket(_BSPcomm_thunk*,int);
+STATIC void            bspEnlargeFifo(char*,_BSPcomm_thunk**,int);
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Per-process global variables}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+int _bsp_pid;         /* An indivduals process number. */
+                      /* (different on each process)   */
+int _bsp_nprocs=0;    /* Total number of BSP processes */
+
+int _bsp_fork_nprocs; /* Number of processes at startup*/
+
+int _bsp_done_begin=0, _bsp_done_init=0;
+
+int _bsp_odd_even_sstep=0;
+int _bsp_no_in_messages;
+int _bsp_no_out_messages;
+
+_BSPinfo _mpass;     /* Global variables required for message passing */
+
+#if defined(CHECKPOINTING_DEV) && defined(CHECKPOINTING_ARCH)
+#include "../library_cpr/chkprest.h"
+FILE cpr_saved_stdout, cpr_saved_stderr;
+char *cpr_filename;
+int  cpr_number=0, cpr_depth=4;
+double cpr_time_last_checkpoint=0.0;
+double cpr_cputime_last_checkpoint=0.0;
+#endif
+\end{code}
+
+These global variables are used with the macros that I use to specify
+the message passing communication.
+\begin{code}
+comm_handle   _bspmpass_msgid;
+status_handle _bspmpass_status;
+int           _bspmpass_errno;
+int           _bspmpass_type;
+#ifdef MPASS_MPI
+status_handle *_bspmpi_status_arr;
+int            _bspmpi_next_msgid;
+MPI_Group      _bspmpi_group,_bspmpi_group_world;
+#endif
+#ifdef MPASS_MPL
+int        _bspmpl_nbytes;
+int        _bspmpl_nbuf[2];
+#endif
+#ifdef MPASS_PARIX
+RR_Message_t _bspparix_message, *_bspparix_received=NULL;
+#endif
+
+#ifdef MPASS_EXPRESS
+struct nodenv _bspexpress_params;
+int           _bspexpress_dst;
+#endif
+\end{code} 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Common code to all versions of the BSP library}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+The following is included here, and not linked into the library. The
+reason for this is efficiency, as some data-structures are static, and
+wouldnt otherwise be visable in the respective files. The efficiency
+of static arrays (e.g., the address table) is far better than
+dynamically allocated arrays on some pipelined architecures because
+the compiler can often speculatively preget information. 
+\begin{code}
+#include "bsp_lib_common.h"
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\texttt{bsp\_init}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+STATIC void bsp_init_setup(int main_is_fortran,int argc,char **argv) {
+  int    errno;
+  
+#if defined(CHECKPOINTING_DEV) && defined(CHECKPOINTING_ARCH)
+  if (!cpr_restart_ind) {
+    /* First time in program */
+    cpr_init(cpr_depth);
+#ifdef CHECKPOINTING_SAVEIO
+    memcpy(&cpr_saved_stdout,stdout,sizeof(FILE));
+    memcpy(&cpr_saved_stderr,stderr,sizeof(FILE));
+#endif
+  } else {
+    /* Re-entered checkpointed program, jump to the checkpoint */
+#ifdef CHECKPOINTING_SAVEIO
+    memcpy(stdout,&cpr_saved_stdout,sizeof(FILE));
+    memcpy(stderr,&cpr_saved_stderr,sizeof(FILE));
+#endif
+    cpr_restart();
+  }
+#endif
+  /* Procedure defined by the BSP compilation driver bspfront */
+  _bsp_preload_init();
+  bsp_check_setup_before_init();
+  setup_nonblocksend_buffersize(&_bsp_buffer_size,
+				&_bsp_nbuffers,
+				_bsp_slotsize_usecs,
+				_bsp_roundtrip_usecs,
+				_bsp_sendlatency_usecs);
+  if (_bsp_buffer_size%sizeof(void*))
+    _bsp_buffer_size -= _bsp_buffer_size%sizeof(void*);
+
+#if defined(MPASS_TCPIP) || defined(MPASS_UDPIP) || defined(MPASS_3C905B)
+  if (getenv("BSPTCP_PID") && (atoi(getenv("BSPTCP_PID"))>=0)) {
+#endif
+  if (main_is_fortran)
+    errno  = f77whatis_nprocs_mypid(&_bsp_fork_nprocs,&_bsp_pid);
+  else
+    errno  = cwhatis_nprocs_mypid(&argc,&argv,&_bsp_fork_nprocs,&_bsp_pid);
+
+#ifdef DEBUG
+  bsp_debug("{bsp_init_setup} %d processes are active. I am %d",
+            _bsp_fork_nprocs,_bsp_pid);
+#endif
+  _bsp_nprocs = _bsp_fork_nprocs; /* This may be changed by start */
+  if (_bsp_fork_nprocs > BSP_MAX_PROCS) 
+    bsp_abort("{bsp_begin}: BSP_MAX_PROCS too small (=%d) . Recompile library",
+              BSP_MAX_PROCS);
+  if (errno)
+    bsp_abort("{bsp_init_setup}: parallel program wouldn't start");
+  _bsp_done_init=1;
+#if defined(MPASS_TCPIP) || defined(MPASS_UDPIP) || defined(MPASS_3C905B)
+  }
+#endif
+}
+\end{code}
+
+\begin{code}
+void BSPINIT(void (*startproc)(void)) {
+  extern void _bsp_init(void (*)(void));
+
+  bsp_init_setup(1,0,NULL);
+  _bsp_init(startproc);
+}
+
+void bsp_init_cpp(void (*startproc)(void),int argc,char **argv,
+		  int lineno, const char* filename) {
+  extern void _bsp_init(void (*)(void));
+
+  bsp_init_setup(0,argc,argv);
+  _bsp_init(startproc);
+}
+
+void _bsp_init(void (*startproc)(void)) {
+  if (_bsp_pid==0) {
+    /* If processor zero, or compiled with a semantics the same as */
+    /* Richards library (i.e., start is  the first thing executed), */
+    /* then just return from this procedure. */
+#ifdef DEBUG
+    bsp_debug("{bsp_init} process zero returning");
+#endif
+  } else {
+    
+#ifdef DEBUG
+    bsp_debug("{bsp_init} process %d calling starting procedure",_bsp_pid);
+#endif
+    /* Call  the procedure that contained bsp_begin. Remember that    */
+    /* bsp_finish must be called during the lifetime of the procedure */
+    (*startproc)();
+    bsp_abort("Leaving the scope of the procedure that contained "
+              "bsp_begin before finding a bsp_finish.");
+    messg_exit(0);
+    exit(0);
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Starting a BSP process: \texttt{bsp\_begin}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+void BSPBEGIN(int *maxprocs) {
+  extern void _bsp_begin(int,int);
+  if (!_bsp_done_init) bsp_init_setup(1,0,NULL); 
+  _bsp_begin(1,*maxprocs);
+  _bsp_done_begin=1;
+#ifdef MPASS_NEEDS_HOST_PROGRAM
+  mpass_argv_fromhost(NULL,NULL);
+#endif
+#ifdef REALDEBUG
+  bsp_begin_end();
+#endif
+}
+
+void bsp_begin(int maxprocs) {
+  extern void _bsp_begin(int,int);
+  if (!_bsp_done_init) bsp_init_setup(0,0,NULL); 
+  _bsp_begin(0,maxprocs);
+  _bsp_done_begin=1;
+#ifdef MPASS_NEEDS_HOST_PROGRAM
+  mpass_argv_fromhost(NULL,NULL);
+#endif
+#ifdef REALDEBUG
+  bsp_begin_end();
+#endif
+}
+
+void _bsp_begin(int main_is_fortran,int maxprocs) {
+  int *gids,i,errno;
+  char hostname[512];
+
+
+  if (_bsp_pid==0) {
+    if      (_bsp_done_begin) bsp_abort("{bsp_begin}:already started");
+    else if (maxprocs<0)     bsp_abort("{bsp_begin}:positive number required");
+#if defined(MPASS_TCPIP) || defined(MPASS_UDPIP) || defined(MPASS_3C905B)
+    else
+      _bsp_nprocs = maxprocs;
+#else
+    else if (maxprocs==0)    _bsp_nprocs = _bsp_fork_nprocs;
+    else 
+      _bsp_nprocs = (maxprocs>_bsp_fork_nprocs)?_bsp_fork_nprocs:maxprocs;
+#endif
+  }
+  if (_bsp_nprocs>1) {
+#if defined(MPASS_TCPIP) || defined(MPASS_UDPIP) || defined(MPASS_3C905B)
+    if (!getenv("BSPTCP_PID") || (atoi(getenv("BSPTCP_PID"))<0)) {
+#ifdef DEBUG
+      gethostname(hostname,sizeof(hostname));
+      bsp_debug("I am process zero on %s",hostname);
+#endif
+
+#ifdef MPASS_TCPIP
+      if (getenv("BSP_EXEC")==NULL)
+        bsp_abort("{bsp_begin}\n"
+		  "\tPlease use bsprun(1), or set the environment\n"
+		  "\tvariable BSP_DEVICE to MPASS_TCPIP to execute\n"
+		  "\tthis BSPlib program\n");
+      bsptcp_env(_bsp_nprocs,getenv("BSP_EXEC"));
+      bsptcp_init(&_bsp_nprocs);
+#else
+      if (getenv("BSP_EXEC")==NULL)
+        bsp_abort("{bsp_begin}\n"
+		  "\tPlease use bsprun(1), or set the environment\n"
+		  "\tvariable BSP_DEVICE to MPASS_UDPIP to execute\n"
+		  "\tthis BSPlib program\n");
+      bspudp_env(_bsp_nprocs,getenv("BSP_EXEC"));
+      bspudp_init(&_bsp_nprocs);
+
+#endif
+    } else {
+#ifdef DEBUG
+      gethostname(hostname,sizeof(hostname));
+      bsp_debug("I am slave pid=%d of %d on %s",_bsp_pid,_bsp_nprocs,hostname);
+#endif
+    }
+    _bsp_fork_nprocs=_bsp_nprocs;
+#endif
+    messg_broadcast(_bsp_fork_nprocs,_bsp_pid,0,
+		    (char*)&_bsp_nprocs,SIZEOF(int));
+  }
+#ifdef DEBUG
+  bsp_debug("{bsp_begin} process %d starting",_bsp_pid);
+#endif
+  _bsp_done_begin = 1;
+  bsp_check_setup_after_init();
+\end{code}
+
+Create the group communicator.
+\begin{code}
+  /* Create the group identifier for the barrier*/
+  gids = CALLOC(_bsp_nprocs,SIZEOF(int));
+  for(i=0;i<_bsp_nprocs;i++) gids[i]=i;
+
+  setup_group_before_kill_unwanted(_bsp_nprocs,gids);
+  if (_bsp_pid >= _bsp_nprocs) {
+#ifdef DEBUG
+    bsp_debug("{bsp_begin}: process not needed so exiting");
+#endif
+    messg_exit(0);
+    exit(0);
+  } 
+  setup_group_after_kill_unwanted(_bsp_nprocs,gids);
+\end{code}
+
+Initialise the message passing global variable structure.
+\begin{code}
+#ifdef DEBUG
+  bsp_debug("{bsp_begin} initialising global variables for %d procs",
+	    _bsp_nprocs);
+#endif
+  /* Create in and out message queues */
+  _mpass.proc_comm_out_fifo
+    = CALLOC(_bsp_nprocs,SIZEOF(_BSPcomm_thunk*));
+  _mpass.proc_comm_in_fifo
+    = CALLOC(_bsp_nprocs,SIZEOF(_BSPcomm_thunk*));
+  if (_mpass.proc_comm_out_fifo==NULL || _mpass.proc_comm_in_fifo ==NULL)
+    bsp_abort("{bsp_begin}: unable to create outer comm fifo");
+
+  for(i=0;i<_bsp_nprocs;i++) {
+    _mpass.proc_comm_out_fifo[i]
+      = CALLOC(_bsp_comm_fifo_size,SIZEOF(_BSPcomm_thunk));
+    _mpass.proc_comm_in_fifo[i]
+      = CALLOC(_bsp_comm_fifo_size,SIZEOF(_BSPcomm_thunk));
+    if (_mpass.proc_comm_out_fifo[i]==NULL ||
+        _mpass.proc_comm_in_fifo[i] ==NULL)
+      bsp_abort("{bsp_begin}: unable to create inner comm fifo");
+  }
+  _mpass.proc_comm_out_next=CALLOC(_bsp_nprocs,SIZEOF(int));
+  _mpass.proc_comm_in_next =CALLOC(_bsp_nprocs,SIZEOF(int));
+  _mpass.proc_comm_out_size=CALLOC(_bsp_nprocs,SIZEOF(int));
+  _mpass.proc_comm_in_size =CALLOC(_bsp_nprocs,SIZEOF(int));
+  
+  if (_mpass.proc_comm_out_next==NULL ||
+      _mpass.proc_comm_in_next ==NULL ||
+      _mpass.proc_comm_out_size==NULL ||
+      _mpass.proc_comm_in_size ==NULL)
+    bsp_abort("{bsp_begin} unable to create next array");
+  for(i=0;i<_bsp_nprocs;i++) {
+   _mpass.proc_comm_out_next[i]=0;
+   _mpass.proc_comm_in_next[i] =0;
+   _mpass.proc_comm_out_size[i]=_bsp_comm_fifo_size;
+   _mpass.proc_comm_in_size[i] =_bsp_comm_fifo_size;
+  } 
+
+  i = (((_bsp_nprocs+2)*_bsp_nprocs)/(SIZEOF(bsp_bitvec_t)*8))+1;
+  _mpass.proc_comm_exchange_matrix      = CALLOC(i,SIZEOF(bsp_bitvec_t));
+  _mpass.proc_comm_exchange_matrix_copy = CALLOC(i,SIZEOF(bsp_bitvec_t));
+  if (_mpass.proc_comm_exchange_matrix      ==NULL ||
+      _mpass.proc_comm_exchange_matrix_copy ==NULL)
+    bsp_abort("{bsp_begin{ unable to create exchange matrices");
+  process_globals_init();
+  config_contention_free_communication();
+\end{code}
+
+The timers across each of the processors are not synchronised. We
+therefore barrier synchronise a few times for the processors to start
+working instep, and then initialise the timing routines. The
+time-shift between the processors may be quite large....
+
+\begin{code}
+#ifdef DEBUG
+  bsp_debug("{bsp_begin} synchronising timers");
+#endif
+#if !(defined(MPASS_TCPIP))&& !(defined(MPASS_UDPIP))&& !defined(MPASS_3C905B)
+  for(i=0;i<10;i++) barrier_sync();
+#endif
+  bsp_time_init();
+  bsp_sync_cpp(__LINE__,"bsp_begin");
+  bsplib_routines_init();
+}
+\end{code}
+
+    
+          
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Checkpointing}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+int bsp_isready_checkpoint() {
+  int retval=0;
+#if defined(CHECKPOINTING_DEV) && defined(CHECKPOINTING_ARCH)
+  double timenow, cputimenow, loadthisjob;
+
+  if (_bsp_checkpointing) {
+    timenow=bsp_time();
+    if ((timenow-((double)_bsp_checkpointing))>
+	cpr_time_last_checkpoint) {
+      cpr_time_last_checkpoint=timenow;
+      cpr_cputime_last_checkpoint=bsp_cputime();
+      
+      retval = 1;
+    }
+  }
+
+  if (!retval && _bsp_processmigration) {
+    timenow=bsp_time();
+    if ((timenow-((double)_bsp_processmigration))>
+	       cpr_time_last_checkpoint) {
+      
+#if defined(MPASS_TCPIP) || defined(MPASS_UDPIP) || defined(MPASS_3C905B)
+      cputimenow = bsp_cputime();
+      loadthisjob = (cputimenow - cpr_cputime_last_checkpoint)/
+                    (timenow    - cpr_time_last_checkpoint);
+      if (loadthisjob<0.0) loadthisjob=0.0;
+      if (loadthisjob>1.0) loadthisjob=1.0;
+      retval = !bspnow_isin_topp_globalload(_bsp_nprocs,loadthisjob);
+#else
+      retval = 1;
+#endif
+      cpr_time_last_checkpoint=timenow;
+      cpr_cputime_last_checkpoint=timenow;
+    }
+  }
+#endif
+  return retval;
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Finishing a BSP process: \texttt{bsp\_end}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_end_atexit() {
+  messg_exit(0);
+}
+
+void bsp_end() {
+
+#ifdef PROFILE
+  _bsp_lineno   = 0;
+  _bsp_filename = "bsp_end";
+  bspprof_sstep_start();
+#endif
+  /*barrier_sync();*/
+#ifdef PROFILE
+  bspprof_sstep_fix();
+  bspprof_sstep_end();
+  bspprof_close();
+#endif
+
+#ifdef STATISTICS
+  if (_bsp_do_stat) bspstat_close();
+#endif
+  
+  wait_sends(); 
+#ifdef MPASS_ATEXIT
+  if (_bsp_pid==0) atexit(bsp_end_atexit);
+#endif
+  if (_bsp_pid > 0) {
+    messg_exit(0);
+    exit(0);
+  }
+  /* Only process zero should get here */
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\texttt{bsp\_sync}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+void bsp_sync_cpp(int lineno,const char* filename) {
+  int i,j,k,l,temp,temp_pid,left,right,type,nbytes_recv, left_recv,bucket,src;
+  int fifo_chunk_size, fifo_chunk_togo,fifo_max_chunk_size,fifo_chunk_offset;
+  _BSPcomm_thunk temp_thunk, *ptr_thunk, *packet;
+  int active_procs,sendbackoff, in_degree;
+  int do_checkpoint=0;
+
+  _bsp_no_out_messages=0;
+  _bsp_no_in_messages =0;
+  _bsp_odd_even_sstep =(_bsp_odd_even_sstep)?0:1;
+
+   messg_comm_status(1);
+#ifdef PROFILE
+  bspprof_sstep_start();
+#endif
+#ifdef STATISTICS
+  _bspstat.super_steps++;
+#endif
+#if defined(PROFILE) || !defined(TURBO)
+  _bsp_lineno   = lineno;
+  if (filename==NULL) _bsp_filename="<null>";
+  else                _bsp_filename=(char*)filename;
+#endif
+#ifdef SANITY_CHECK
+  fflush(stdout);
+  fflush(stderr);
+  if (!_bsp_constant(bsp_register_total()))
+    bsp_error_reg_inconsitent();
+
+  if (_bsp_check_syncs && 
+      !_bsp_constant((lineno*20000) + (hashpjw(_bsp_filename) % 20000)))
+    bsp_error_sync_out_of_phase(lineno,_bsp_filename);
+#endif
+  bspcombputs_flush();
+  init_contention_free_communication();
+\end{code}
+
+\begin{code}
+#ifdef DEBUG
+  dumpFifoCommTable("Out table",_mpass.proc_comm_out_fifo,
+                    _mpass.proc_comm_out_next);
+
+  barrier_sync();
+  dumpFifoCommTable("In table",_mpass.proc_comm_in_fifo,
+                    _mpass.proc_comm_in_next);
+    
+#endif
+\end{code}
+
+
+Make each processor exchange $out_i$ with process $i$. This ensures
+that all the processes know exactly how many packets are being sent
+out and received. The following exchange is the bulk syncronisation of
+a super-step. 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Logarithmic exchange}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+  k = (_bsp_nprocs+2)*_bsp_nprocs;
+  i = 8*SIZEOF(bsp_bitvec_t);       /* Eight bits in a byte */
+  k = (k%i)?((k/i)+1):(k/i);
+#ifndef REDUCTION_INIT_EXCHANGE
+  for(i=0;i<k;i++) _mpass.proc_comm_exchange_matrix[i]=~0;
+#else
+  for(i=0;i<k;i++) _mpass.proc_comm_exchange_matrix[i]=0;
+  for(i=0;i<_bsp_nprocs;i++) {
+    if (_mpass.proc_comm_out_next[i]>0) 
+      messg_matrix_set((_bsp_pid*(_bsp_nprocs+2))+i);
+  }
+  for(i=0;i<_bsp_nprocs;i++) {
+    if (_mpass.proc_comm_out_next[i]>0) {
+      messg_matrix_set((_bsp_pid*(_bsp_nprocs+2))+_bsp_nprocs);
+      break;
+    }
+  }
+#if defined(CHECKPOINTING_DEV) && defined(CHECKPOINTING_ARCH)
+  if (bsp_isready_checkpoint()) {
+    messg_matrix_set((_bsp_pid*(_bsp_nprocs+2))+(_bsp_nprocs+1));
+  }
+#endif
+
+  if (_bsp_noslots>=_bsp_nprocs) {
+    /* Shared media network */
+    if (_bsp_pid==0) {
+      for(i=1;i<_bsp_nprocs;i++) {
+        type = BSP_MPASS_LAST_DEFINE+1;
+        left = PID_DONTCARE;  
+        block_recv(_mpass.proc_comm_exchange_matrix_copy,
+                   k*SIZEOF(bsp_bitvec_t),&left,&type,&nbytes_recv);
+        for(j=0;j<k;j++)
+           _mpass.proc_comm_exchange_matrix[j] 
+               |=_mpass.proc_comm_exchange_matrix_copy[j];
+      }
+      messg_active_procs(1); /* Turn off slotting */
+      type = BSP_MPASS_LAST_DEFINE+2;
+      for(i=1;i<_bsp_nprocs;i++) 
+        if (!nonblock_send(_mpass.proc_comm_exchange_matrix,
+                           k*SIZEOF(bsp_bitvec_t),i,type,0))
+	  wait_sends();
+      messg_active_procs(_bsp_nprocs); /* Turn on for ACKS */
+    } else {
+      type = BSP_MPASS_LAST_DEFINE+1;
+      if (!nonblock_send(_mpass.proc_comm_exchange_matrix,
+			 k*SIZEOF(bsp_bitvec_t),0,type,0))
+        wait_sends();
+      type = BSP_MPASS_LAST_DEFINE+2;
+      left = 0;
+      block_recv(_mpass.proc_comm_exchange_matrix,
+                   k*SIZEOF(bsp_bitvec_t),&left,&type,&nbytes_recv);
+    }
+  } else {
+    for(i=1;i<_bsp_nprocs;i=2*i) {
+      type  = BSP_MPASS_LAST_DEFINE+i;
+      right = _bsp_pid+i; if (right>=_bsp_nprocs) right -= _bsp_nprocs;
+      left  = _bsp_pid-i; if (left<0)             left  += _bsp_nprocs;
+      if (!nonblock_send(_mpass.proc_comm_exchange_matrix,
+                         k*SIZEOF(bsp_bitvec_t),right,type,0)) {
+        wait_sends();
+      }
+      block_recv(_mpass.proc_comm_exchange_matrix_copy,
+                 k*SIZEOF(bsp_bitvec_t),&left,&type,&nbytes_recv);
+      for(j=0;j<k;j++)
+        _mpass.proc_comm_exchange_matrix[j] 
+          |=_mpass.proc_comm_exchange_matrix_copy[j];
+    }
+  }
+
+  active_procs=0;
+  for (i=0;i<_bsp_nprocs;i++)
+    if (messg_matrix_isset((i*(_bsp_nprocs+2))+_bsp_nprocs)) 
+       active_procs++;
+
+  wait_sends();
+  /* This informs the lower level communication system how many
+     processors (globally) are involved in the communication within a
+     superstep */
+  messg_active_procs(active_procs);
+#ifdef PROFILE
+  /* Fixed point within a superstep where all timing is relative to */
+  bspprof_sstep_fix();
+#endif
+#if defined(CHECKPOINTING_DEV) && defined(CHECKPOINTING_ARCH)
+  do_checkpoint=0;
+  for(i=0;i<_bsp_nprocs;i++) {
+    if (messg_matrix_isset((i*(_bsp_nprocs+2))+(_bsp_nprocs+1))) {
+      do_checkpoint=1;
+      break;
+    }
+  }
+#endif
+#endif
+\end{code}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Exchanging using asynchronous sends}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+  fifo_max_chunk_size = _bsp_buffer_size / SIZEOF(_BSPcomm_thunk);
+  if (fifo_max_chunk_size>10*_bsp_comm_fifo_size)
+    fifo_max_chunk_size = _bsp_comm_fifo_size;
+
+  for (i=1;i<_bsp_nprocs; i++) {
+    right     = next_contention_free_pid();
+#ifdef REDUCTION_INIT_EXCHANGE
+    if (_mpass.proc_comm_out_next[right]>0) {
+#endif
+      type      = (_bsp_odd_even_sstep)?BSP_MPASS_SSTEP_EXCHANGE_ODD:
+	                                BSP_MPASS_SSTEP_EXCHANGE_EVEN;
+      fifo_chunk_offset=0;
+      fifo_chunk_togo  =_mpass.proc_comm_out_next[right];
+
+      /* Make sure that if fifo_chunk_togo==fifo_max_chunk_size, two
+         messages are sent */
+      while (fifo_chunk_togo>=0) {
+        if (fifo_chunk_togo >= fifo_max_chunk_size) {
+          fifo_chunk_size  = fifo_max_chunk_size;
+          fifo_chunk_togo -= fifo_max_chunk_size;
+        } else {
+          fifo_chunk_size  = fifo_chunk_togo;
+          fifo_chunk_togo  = -1;
+        }
+        sendbackoff=1;
+        while (!nonblock_send(&_mpass.proc_comm_out_fifo[right]
+			                             [fifo_chunk_offset],
+                              SIZEOF(_BSPcomm_thunk)*fifo_chunk_size,
+			      right,type,0)){
+\end{code}
+
+If the send fails (due to saturation of the network), then we
+\emph{have} to back off and try and receive some data to drain the network.
+\begin{code}
+#ifdef DEBUG
+          bsp_debug("{bsp_sync} totex to %d, type=%d, backoff=%d,"
+                    "total size=%d msg_size=%d, msg_togo=%d",
+		    right,type,sendbackoff,
+		    _mpass.proc_comm_out_next[right],
+		    fifo_chunk_size,fifo_chunk_togo);
+#endif
+          src = PID_DONTCARE;
+          type      = (_bsp_odd_even_sstep)?BSP_MPASS_SSTEP_EXCHANGE_ODD:
+	                                    BSP_MPASS_SSTEP_EXCHANGE_EVEN;
+          if (nonblock_probe(&src,&type,sendbackoff)) {
+	    if (_mpass.proc_comm_in_next[src] + fifo_max_chunk_size >
+                _mpass.proc_comm_in_size[src]) {  
+              _mpass.proc_comm_in_size[src] += fifo_max_chunk_size;
+               bspEnlargeFifo("bsp_sync",
+			      &_mpass.proc_comm_in_fifo[src],
+			     _mpass.proc_comm_in_size[src]);
+          
+            }
+	    block_recv(&_mpass.proc_comm_in_fifo[src]
+                                            [_mpass.proc_comm_in_next[src]],
+                       fifo_max_chunk_size*SIZEOF(_BSPcomm_thunk),
+                       &src,&type,&nbytes_recv);
+            _mpass.proc_comm_in_next[src] 
+              += (nbytes_recv/SIZEOF(_BSPcomm_thunk));
+            if ((nbytes_recv/SIZEOF(_BSPcomm_thunk)) != fifo_max_chunk_size)
+	      messg_matrix_unset(((_bsp_nprocs+2)*src)+_bsp_pid);
+	  }
+          if (sendbackoff<BSP_MPASS_MAXBACKOFF) sendbackoff*=2;
+	}
+        fifo_chunk_offset += fifo_chunk_size;
+      }
+#ifdef  REDUCTION_INIT_EXCHANGE  
+    } 
+#endif
+  }
+
+  in_degree     =0;
+  for(i=0;i<_bsp_nprocs;i++) 
+    if ((i!=_bsp_pid) && messg_matrix_isset(((_bsp_nprocs+2)*i)+_bsp_pid))
+      in_degree++;
+  for(i=0;i<in_degree;i++) {
+    type = (_bsp_odd_even_sstep)?BSP_MPASS_SSTEP_EXCHANGE_ODD:
+                                 BSP_MPASS_SSTEP_EXCHANGE_EVEN;
+    left = PID_DONTCARE;
+    block_probe(&left,&type);      
+    fifo_chunk_size = fifo_max_chunk_size;
+    while (fifo_chunk_size == fifo_max_chunk_size) {
+      if (_mpass.proc_comm_in_next[left] + fifo_max_chunk_size >
+	  _mpass.proc_comm_in_size[left]) {  
+	_mpass.proc_comm_in_size[left] += fifo_max_chunk_size;
+	bspEnlargeFifo("bsp_sync",
+	        &_mpass.proc_comm_in_fifo[left],
+	        _mpass.proc_comm_in_size[left]);      
+      }
+      block_recv(&_mpass.proc_comm_in_fifo[left]
+	         [_mpass.proc_comm_in_next[left]],
+		 fifo_max_chunk_size*SIZEOF(_BSPcomm_thunk),
+		 &left,&type,&nbytes_recv);
+      fifo_chunk_size =  nbytes_recv/SIZEOF(_BSPcomm_thunk);
+      _mpass.proc_comm_in_next[left] += fifo_chunk_size;
+    }
+  }
+\end{code}
+
+
+Make sure that the sends really gone out. We change some of the
+buffers that are being sent.
+\begin{code}
+#ifndef REDUCTION_INIT_EXCHANGE
+#ifdef PROFILE
+   bspprof_sstep_fix();
+#endif
+#endif
+#if defined(MPASS_UDPIP) || defined(MPASS_3C905B)
+  bspudp_purge_seq();
+#endif
+  wait_sends(); 
+
+#ifdef DEBUG
+  barrier_sync();
+  dumpFifoCommTable("exchanged in table",_mpass.proc_comm_in_fifo,
+                      _mpass.proc_comm_in_next);
+#endif 
+\end{code}
+
+Squeeze out any off-processor gets from the out buffer.
+\begin{code}
+  for(i=0;i<_bsp_nprocs;i++) {
+    temp = _mpass.proc_comm_out_next[i];
+    k=0;
+    for(j=0;j<temp;j++) {
+      ptr_thunk = &_mpass.proc_comm_out_fifo[i][j];
+      if (COMM_IS_PUTLIKE(ptr_thunk->comm_pid) || 
+          COMM_GET_PID(ptr_thunk->comm_pid)==_bsp_pid) {
+        if(j!=k) _mpass.proc_comm_out_fifo[i][k] = *ptr_thunk;
+        k++;
+      } else 
+        _mpass.proc_comm_out_next[i]--;
+    }
+  }
+\end{code}
+
+Move any \emph{newly sent} gets from the in buffer into the out
+buffer. Any gets that are in the in buffer as a receiving pair of
+a get should be left alone.
+\begin{code}
+  for(i=0;i<_bsp_nprocs;i++) {
+    k=0;
+    temp=_mpass.proc_comm_in_next[i];
+    for(j=0;j<temp;j++) {
+      temp_pid = _mpass.proc_comm_in_fifo[i][j].comm_pid;
+      if (COMM_IS_GETLIKE(temp_pid) && (COMM_GET_PID(temp_pid)==_bsp_pid)){
+        _mpass.proc_comm_out_fifo[i][_mpass.proc_comm_out_next[i]++] =
+          _mpass.proc_comm_in_fifo[i][j];
+        _mpass.proc_comm_in_next[i]--;
+	if (_mpass.proc_comm_out_next[i] >=_mpass.proc_comm_out_size[i]) {
+          _mpass.proc_comm_out_size[i]+=_bsp_comm_fifo_size;
+          bspEnlargeFifo("bsp_get",
+		         &_mpass.proc_comm_out_fifo[i],
+	                 _mpass.proc_comm_out_size[i]);
+        }
+      } else {
+        if(j!=k) 
+          _mpass.proc_comm_in_fifo[i][k] = _mpass.proc_comm_in_fifo[i][j];
+        
+        k++;
+      }      
+    }
+  }
+#ifdef DEBUG
+  barrier_sync();
+  dumpFifoCommTable("Munged out table",_mpass.proc_comm_out_fifo,
+                    _mpass.proc_comm_out_next);
+#endif
+\end{code}
+
+And finally make sure that all the off-processor get statements are at
+the end of the in table. This will mean that all the puts will be at
+the start of the in and out table, and the gets at the end. This will
+make it extremely easy to ``clock'' each message into the processor
+when communication starts. All you will have to do is have a look
+where it came from, and it can be looked up in the in table where the
+message should go in local memory.
+
+\begin{code}
+  for(i=0;i<_bsp_nprocs;i++) {
+    temp=_mpass.proc_comm_in_next[i]; /* Size of the queue */
+    l=0;
+    for(j=0;j<temp;j++) {
+      if (COMM_IS_PUTLIKE(_mpass.proc_comm_in_fifo[i][l].comm_pid)) l++;
+      else {
+        temp_thunk = _mpass.proc_comm_in_fifo[i][l];
+
+        /* Shift everything down by one place */
+        for(k=l+1;k<temp;k++) {
+          _mpass.proc_comm_in_fifo[i][k-1]=_mpass.proc_comm_in_fifo[i][k];
+        }
+        _mpass.proc_comm_in_fifo[i][temp-1]=temp_thunk;
+      }   
+    }
+  }
+\end{code}
+
+\begin{code}
+  bufferGets();
+  bsmp_buffersizes();
+  if (_bsp_opt_bsmp_buffer_size==BSMP_INFINITE_BUFFERS) {
+    bsmp_enlargebuffers();
+    bsmp_reregisterbuffers();
+  }
+  bsmp_resetincoming();
+#ifdef DEBUG
+  barrier_sync();
+  dumpFifoCommTable("Sorted in table",_mpass.proc_comm_in_fifo,
+                    _mpass.proc_comm_in_next);
+#endif
+\end{code}
+
+Deal gets to and from myself.
+\begin{code}
+  for(i=0;i<_mpass.proc_comm_out_next[_bsp_pid];i++) {
+    ptr_thunk=&_mpass.proc_comm_out_fifo[_bsp_pid][i];
+    if (COMM_IS_GETLIKE(ptr_thunk->comm_pid)) {
+#ifdef SANITY_CHECK
+          if (bsp_register_nbytes(ptr_thunk->addr_global,_bsp_pid) - 
+                ptr_thunk->offset < ptr_thunk->nbytes)
+            bsp_error_reg_small(_bsp_pid,ptr_thunk->addr_global,
+                                ptr_thunk->nbytes,ptr_thunk->offset);
+#endif
+          MEMCPY(ptr_thunk->addr_real,
+                 bsp_register_global_to_local(ptr_thunk->addr_global,_bsp_pid)+
+                   ptr_thunk->offset,
+                 ptr_thunk->nbytes);
+    }
+  } 
+\end{code}
+
+Deal puts to and from myself.
+\begin{code}
+  for(i=0;i<_mpass.proc_comm_out_next[_bsp_pid];i++) {
+    ptr_thunk=&_mpass.proc_comm_out_fifo[_bsp_pid][i];
+    if (COMM_IS_PUTLIKE(ptr_thunk->comm_pid)) {
+#ifdef SANITY_CHECK
+      if (bsp_register_nbytes(ptr_thunk->addr_global,_bsp_pid) - 
+            ptr_thunk->offset < ptr_thunk->nbytes)
+        bsp_error_reg_small(_bsp_pid,ptr_thunk->addr_global,
+                            ptr_thunk->nbytes,ptr_thunk->offset);
+#endif
+      MEMCPY((bsp_register_global_to_local(ptr_thunk->addr_global,_bsp_pid)+
+                ptr_thunk->offset),
+             (char *) ptr_thunk->addr_real,
+             ptr_thunk->nbytes);
+    }
+  } 
+  _mpass.proc_comm_out_next[_bsp_pid]=0;
+  _mpass.proc_comm_in_next[_bsp_pid]=0;
+\end{code}
+
+Now comes the proper inter-processor communication.
+\begin{code}
+  for(i=0;i<_bsp_nprocs;i++) {
+    _bsp_no_out_messages += _mpass.proc_comm_out_next[i];
+    _bsp_no_in_messages  += _mpass.proc_comm_in_next[i];
+   }
+\end{code}
+
+Messages either coming in or going out.
+\begin{code}
+  bucket=next_contention_free_pid();
+  sendbackoff=1;
+  packet     =NULL;
+
+  while ((_bsp_no_out_messages>0)  &&  (_bsp_no_in_messages>0)) {
+#ifdef DEBUG
+    bsp_debug("%d messages to go; %d messages to come in",
+              _bsp_no_out_messages,_bsp_no_in_messages);
+#endif
+    /* Check if a put hasn't come in*/
+    src = PID_DONTCARE;
+    type= (_bsp_odd_even_sstep)?BSP_MPASS_SSTEP_COMM_ODD:
+                                BSP_MPASS_SSTEP_COMM_EVEN;
+    if (nonblock_probe(&src,&type,sendbackoff-1)) {
+      receiveSomething(src,type);
+      if (sendbackoff>1) sendbackoff=sendbackoff/2;
+      _bsp_no_in_messages--;
+
+    } else {
+      if (packet==NULL) packet = nextPacket(&bucket);
+      if (sendPacket(packet,bucket)) {
+        packet=NULL;
+	_bsp_no_out_messages--;
+      } else if (sendbackoff<BSP_MPASS_MAXBACKOFF) {
+	  wait_sends();
+	  sendbackoff *= 2;
+      } else {
+          wait_sends();
+      }
+    }
+  }
+\end{code}
+
+Either messages are just going out...
+\begin{code}
+  while (_bsp_no_out_messages >0) {
+    if (packet==NULL) packet = nextPacket(&bucket); /* May be change bucket */
+    while (!sendPacket(packet,bucket)) {wait_sends();}
+    _bsp_no_out_messages--;
+    packet=NULL;
+  }
+\end{code}
+
+..or they are just coming in. If only one bucket has something in it,
+  then there is no need to probe.
+\begin{code}
+  if (_bsp_no_in_messages >0) {
+    src=-1;
+    for(i=0;i<_bsp_nprocs;i++)
+      if (_mpass.proc_comm_in_next[i]==_bsp_no_in_messages) 
+        src=i;
+    if (src>=0) {
+      type= (_bsp_odd_even_sstep)?BSP_MPASS_SSTEP_COMM_ODD:
+                                  BSP_MPASS_SSTEP_COMM_EVEN;
+      while(_bsp_no_in_messages  >0) {
+        receiveSomething(src,type);
+        _bsp_no_in_messages--; 
+      }
+    } else {
+      while (_bsp_no_in_messages  >0) {
+        src = PID_DONTCARE;
+        type= (_bsp_odd_even_sstep)?BSP_MPASS_SSTEP_COMM_ODD:
+                                    BSP_MPASS_SSTEP_COMM_EVEN;
+        block_probe(&src,&type);
+#ifdef DEBUG
+        bsp_debug("recv: a %d is coming in from %d [%d to go]",
+                   type,src,_bsp_no_in_messages-1);
+#endif
+        receiveSomething(src,type);
+        _bsp_no_in_messages--;  
+      } 
+    }             
+  }
+#if defined(MPASS_UDPIP) || defined(MPASS_3C905B)
+  bspudp_record_seq();
+#endif
+  wait_sends();
+\end{code}
+
+\begin{code}
+  messg_active_procs(_bsp_nprocs);
+#ifdef DEBUG
+  bsp_debug("{bsp_sync}:Finished communication");
+#endif
+  bspcombputs_finalise();
+  deallocateFreeList();
+  for(i=0;i<_bsp_nprocs;i++) {
+    _mpass.proc_comm_in_next[i] =0;
+    _mpass.proc_comm_out_next[i]=0;
+  }
+ 
+#ifdef PROFILE
+  /* Use the line number from the start of the super-step */
+  bspprof_sstep_end();
+#endif
+\end{code}
+
+The outbound commununication has finished, and if we checkpoint we
+have to wait for all the send queue to be acknowledged, otherwise we
+can not guarentee that inbound communication has quiesced.
+
+\begin{code}
+#if defined(CHECKPOINTING_DEV) && defined(CHECKPOINTING_ARCH)
+  if (do_checkpoint) {
+    bsp_time_stop();
+#if defined(MPASS_UDPIP) || defined(MPASS_3C905B)
+    bspudp_messg_exit(123); /* Close down comms, but dont exit */
+#else
+    bsptcp_messg_exit(123); /* Close down comms, but dont exit */
+#endif
+#ifdef STATISTICS
+    if (_bsp_do_stat) bspstat_truncate();
+#endif
+#ifdef PROFILE
+    bspprof_truncate();
+#endif
+    cpr_filename=malloc(strlen(_bsp_exec_file)+20);
+    if (cpr_filename==NULL)
+      bsp_abort("{bsp_begin}\n"
+		"\tUnable to allocate memory checkpoint filename\n");
+    sprintf(cpr_filename,"%s.cpr%d_%d.%d",
+	    _bsp_exec_file,_bsp_pid,_bsp_nprocs,cpr_number++);
+
+#ifdef DEBUG
+    bsp_debug("{bsp_sync} checkpointing into %s\n",cpr_filename);
+#endif
+#if defined(MPASS_TCPIP) || defined(MPASS_UDPIP) || defined(MPASS_3C905B)
+    if (_bsp_pid==0) bspnow_write_hostlist(".cprmasterlist");
+#endif    
+    cpr_prepare(cpr_filename,_bsp_exec_file);
+    fflush(stdout);
+    fflush(stderr);
+    cpr_take();
+    if (!cpr_restart_ind) {
+      /* Taken checkpoint, so now exit */
+      exit(123);
+    } else {
+      cpr_restart_ind=0;
+#if defined(MPASS_TCPIP) || defined(MPASS_UDPIP) || defined(MPASS_3C905B)
+      _bsp_fork_nprocs=_bsp_nprocs;
+#ifdef MPASS_TCPIP
+      bsptcp_env(_bsp_nprocs,getenv("BSP_EXEC"));
+      bsptcp_init(&_bsp_fork_nprocs);
+#else
+      bspudp_env(_bsp_nprocs,getenv("BSP_EXEC"));
+      bspudp_init(&_bsp_fork_nprocs);
+#endif
+      if (_bsp_fork_nprocs!=_bsp_nprocs)
+	bsp_abort("{bsp_sync}\n"
+		  "\tUnable to start %d processors (only got %d)\n"
+		  "\tafter a checkpoint\n",_bsp_nprocs,_bsp_fork_nprocs);
+      _bsp_pid=atoi(getenv("BSPTCP_PID"));
+#endif
+#ifdef DEBUG
+      bsp_debug("{bsp_sync} reconfigured BSPlib for %d procs",_bsp_nprocs);
+#endif
+#ifdef STATISTICS
+      if (_bsp_do_stat) bspstat_recreate();
+#endif
+#ifdef PROFILE
+      bspprof_recreate();
+#endif
+      bsp_time_restart();
+      cpr_time_last_checkpoint=bsp_time();
+      cpr_cputime_last_checkpoint=bsp_cputime();
+    }
+  }
+#endif
+  messg_comm_status(0);
+#ifdef REALDEBUG
+  bsp_sync_end();
+#endif
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Enlarge delayed communications queue}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+STATIC void bspEnlargeFifo(char* routine,_BSPcomm_thunk **fifo, int elems) {
+#ifdef DONT_USE_REALLOC
+  _BSPcomm_thunk *temp=*fifo;
+  
+  *fifo = (_BSPcomm_thunk*) malloc(elems*SIZEOF(_BSPcomm_thunk));
+  if (*fifo) {
+    memcpy(*fifo,temp,elems*SIZEOF(_BSPcomm_thunk));
+    free(temp);
+  }
+#else
+  *fifo = (_BSPcomm_thunk*) realloc(*fifo,elems*SIZEOF(_BSPcomm_thunk));
+#endif
+#ifdef DEBUG
+  bsp_debug("{bspEnlargeFifo} to %d elements",elems);
+#endif
+  if (*fifo==NULL)
+    bsp_abort("{%s} line %d of \"%s\"\n"
+	      "\tFailed to allocate %d bytes for delayed communications.",
+	      routine,_bsp_lineno,_bsp_filename,elems*SIZEOF(_BSPcomm_thunk));
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Receive a message, and write into user space}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+STATIC void receiveSomething(int src, int type) {
+  _BSPcomm_thunk *comm_thunk;
+  int nbytes_recv;
+
+  if (COMM_IS_PUTLIKE(_mpass.proc_comm_in_fifo[src]
+                    [--_mpass.proc_comm_in_next[src]].comm_pid)) {
+    comm_thunk=&_mpass.proc_comm_in_fifo[src][_mpass.proc_comm_in_next[src]];
+#ifdef DEBUG
+    bsp_debug("{bsp_sync} receiving a put from %d",src);
+#endif
+#ifdef SANITY_CHECK
+    if (bsp_register_nbytes(comm_thunk->addr_global,_bsp_pid) -
+        comm_thunk->offset < comm_thunk->nbytes)
+      bsp_error_reg_small(src,
+                          comm_thunk->addr_global,
+                          comm_thunk->nbytes,
+                          comm_thunk->offset);
+#endif
+    block_recv(bsp_register_global_to_local(comm_thunk->addr_global,_bsp_pid)+
+               comm_thunk->offset,
+               comm_thunk->nbytes,&src,&type,&nbytes_recv);
+#ifdef SANITY_CHECK
+    if (nbytes_recv !=comm_thunk->nbytes)
+      bsp_abort("{bsp_sync} put communication does not tally"
+                "received nbytes=%d; expected nbytes=%d",
+                src,nbytes_recv,comm_thunk->nbytes);
+#endif
+  } else {
+    comm_thunk=&_mpass.proc_comm_in_fifo[src][_mpass.proc_comm_in_next[src]];
+#ifdef DEBUG
+    bsp_debug("{bsp_sync} receiving a get from %d",src);
+#endif
+    block_recv(comm_thunk->addr_real,
+               comm_thunk->nbytes,&src,&type,&nbytes_recv);
+#ifdef SANITY_CHECK
+    if (nbytes_recv !=comm_thunk->nbytes)
+         bsp_abort("{bsp_sync} get communication does not tally");
+#endif
+  }
+#ifdef STATISTICS
+  _bspstat.packet_puts_dst++;
+  _bspstat.packet_puts_dstnbytes +=nbytes_recv; 
+#endif
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Return the next packet to send from the out queue}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+STATIC _BSPcomm_thunk *nextPacket(int *bucket) {
+  _BSPcomm_thunk *comm_thunk;
+
+  /* Find a bucket which has something going out */
+  while(_mpass.proc_comm_out_next[*bucket]==0) 
+    *bucket = next_contention_free_pid();
+
+  comm_thunk=&_mpass.proc_comm_out_fifo[*bucket]
+               [--_mpass.proc_comm_out_next[*bucket]];
+  return comm_thunk;
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Pass the next out packet to the communications medium}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+STATIC int sendPacket(_BSPcomm_thunk *comm_thunk,int bucket) {
+  int done,type;
+
+  type= (_bsp_odd_even_sstep)?BSP_MPASS_SSTEP_COMM_ODD:
+                              BSP_MPASS_SSTEP_COMM_EVEN;
+  if (COMM_IS_PUTLIKE(comm_thunk->comm_pid)) {
+#ifdef DEBUG
+    bsp_debug("{bsp_sync} send a put to %d",bucket);
+#endif
+    done = nonblock_send(comm_thunk->addr_real,comm_thunk->nbytes,
+                         bucket,type,
+			 _mpass.proc_comm_out_next[bucket]==0);
+  } else {
+#ifdef DEBUG
+    bsp_debug("{bsp_sync} sending a get to %d",bucket);
+#endif
+    done = nonblock_send(
+              bsp_register_global_to_local(comm_thunk->addr_global,_bsp_pid)+
+              comm_thunk->offset,
+	      comm_thunk->nbytes,bucket,type,
+	      _mpass.proc_comm_out_next[bucket]==0);
+  } 
+#ifdef STATISTICS
+  if (done) {
+    _bspstat.packet_puts_src++;
+    _bspstat.packet_puts_srcnbytes +=comm_thunk->nbytes; 
+  }
+#endif
+  return done;
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Dump the delayed communications queues to stderr}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+STATIC void dumpFifoCommTable(char* str,_BSPcomm_thunk** fifo,int *sizes) {
+#ifdef DEBUG
+  int i,j;
+  bsp_debug_start(str);
+  bsp_debug_block("Super-step on pid %d",_bsp_pid);
+  bsp_debug_block("%5s | %6s | %8s |%8s |%8s | %6s",
+                  "Type","Bucket","With pid","Source","Dest.","Nbytes");
+  bsp_debug_block("-----------------------------------------------------------");
+  for(i=0;i<_bsp_nprocs;i++) {
+    for(j=0;j<sizes[i];j++) 
+    if (COMM_IS_PUTLIKE(fifo[i][j].comm_pid))
+       bsp_debug_block("%5s | %6d | %8d |%8x |%2d[%4d] |%6d",
+                 (COMM_IS_SEND(fifo[i][j].comm_pid)?"send":"put"),
+		 i,
+                 COMM_GET_PID(fifo[i][j].comm_pid),
+                 fifo[i][j].addr_real,
+                 fifo[i][j].addr_global,
+                 fifo[i][j].offset,
+                 fifo[i][j].nbytes);
+    else
+       bsp_debug_block("%5s | %6d | %8d |%2d[%4d] |%8x |%6d",
+                 "get",i,
+                 COMM_GET_PID(fifo[i][j].comm_pid),
+                 fifo[i][j].addr_global,
+                 fifo[i][j].offset,
+                 fifo[i][j].addr_real,
+                 fifo[i][j].nbytes);
+   bsp_debug_end("bsp_sync");
+  }
+#endif
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Buffer gets}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+STATIC void bufferGets() {
+  int i,j;
+  _BSPcomm_thunk *comm_thunk;
+  BSPfreelist  *cons;
+
+  for(i=0;i<_bsp_nprocs;i++) {
+    for(j=0;j<_mpass.proc_comm_out_next[i];j++) {
+      comm_thunk = &_mpass.proc_comm_out_fifo[i][j];
+      if (COMM_IS_GET(comm_thunk->comm_pid)) {
+        cons = MALLOC(SIZEOF(BSPfreelist));
+        if (cons==NULL) 
+        bsp_abort("{bsp_get}: line %d of \"%s\"\n"
+                  "\tFailed to allocate storage for free list",
+                  _bsp_lineno,_bsp_filename);
+        cons->head = MALLOC(comm_thunk->nbytes);
+        if (cons->head==NULL)
+          bsp_abort("{bsp_get}: line %d of \"%s\"\n"
+                    "\tFailed to malloc %d bytes",
+                    _bsp_lineno,comm_thunk->nbytes);
+        cons->tail=_bsp_free_list;
+        _bsp_free_list = cons;
+#ifdef DEBUG
+        bsp_debug("{bufferGet} %d bytes at offset %d from hash(%d)=0x%x",
+                  comm_thunk->nbytes,comm_thunk->offset,
+                  comm_thunk->addr_global,
+                  bsp_register_global_to_local(comm_thunk->addr_global,
+                                               _bsp_pid));
+#endif
+        MEMCPY(cons->head,
+               bsp_register_global_to_local(comm_thunk->addr_global,_bsp_pid)+
+               comm_thunk->offset,
+               comm_thunk->nbytes);
+\end{code}
+
+We rewrite the comm thunk with the newly allocated data structure. A
+pre-registered area called \texttt{\_bsp\_buffget\_reference} is used
+as a point of reference against which the allocated data is referenced
+with respect to.
+\begin{code}
+        comm_thunk->addr_global
+          =bsp_register_local_to_global(&_bsp_buffget_reference);
+        comm_thunk->offset = (char*)cons->head - &_bsp_buffget_reference;
+      }
+    }
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Buffer BSMP}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+STATIC void bsmp_buffersizes() {
+  int i,j;
+  _BSPcomm_thunk *comm_thunk;
+
+  for(i=0;i<_bsp_nprocs;i++) {
+    _bsmp.incoming_messages_size[i]=0;
+    if (i!=_bsp_pid) 
+      for(j=0;j<_mpass.proc_comm_in_next[i];j++) {
+	comm_thunk = &_mpass.proc_comm_in_fifo[i][j];
+	if (COMM_IS_SEND(comm_thunk->comm_pid)) 
+	  _bsmp.incoming_messages_size[i] += comm_thunk->nbytes;
+      }
+#ifdef DEBUG
+    bsp_debug("{bsmp_buffersizes} %d bytes coming in from %d",
+	      _bsmp.incoming_messages_size[i],i);
+#endif
+  }
+  for(j=0;j<_mpass.proc_comm_out_next[_bsp_pid];j++) {
+    comm_thunk = &_mpass.proc_comm_out_fifo[_bsp_pid][j];
+    if (COMM_IS_SEND(comm_thunk->comm_pid)) 
+      _bsmp.incoming_messages_size[_bsp_pid] += comm_thunk->nbytes;
+  }   
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\texttt{bsp\_hpget}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void _bsp_get(int type_and_pid, const void *src, int offset,
+              void *dst, int nbytes){
+  int             pid,src_addr,togo_nbytes,chunk_nbytes,chunk_offset;
+  void           *chunk_dst;
+  char           *src_plus_offset;
+  _BSPcomm_thunk *comm_thunk;
+
+  pid = COMM_GET_PID(type_and_pid);
+#ifdef SANITY_CHECK
+  if (pid < 0 || pid >= _bsp_nprocs) 
+    bsp_abort("{bsp_get}: line %d  of \"%s\"\n"
+              "\tprocess %d is trying to get from no-existant processor %d.",
+              _bsp_lineno,_bsp_filename,_bsp_pid,pid);
+#endif
+
+  togo_nbytes  = nbytes;
+  chunk_dst    = dst;
+  chunk_offset = offset;
+  src_addr     = bsp_register_local_to_global(src);
+
+#ifdef STATISTICS
+  if (_bspstat.buffer_high_water_mark < nbytes)
+    _bspstat.buffer_high_water_mark = nbytes;      
+#endif
+  while(togo_nbytes>0) {
+    if (togo_nbytes > _bsp_buffer_size) {
+      togo_nbytes -= _bsp_buffer_size;
+      chunk_nbytes = _bsp_buffer_size;
+    } else {
+      chunk_nbytes = togo_nbytes;
+      togo_nbytes  = 0;
+    }
+    /* Put get in the in and out queues because we will */
+    /* receive a message back                             */
+    comm_thunk=&_mpass.proc_comm_out_fifo[pid]
+                                          [_mpass.proc_comm_out_next[pid]];
+    comm_thunk->comm_pid   = type_and_pid;
+    comm_thunk->addr_global = src_addr;
+    comm_thunk->offset     = chunk_offset;
+    comm_thunk->addr_real  = chunk_dst;
+    comm_thunk->nbytes     = chunk_nbytes;
+    /* Put a copy in the in buffer */
+    _mpass.proc_comm_in_fifo[pid][_mpass.proc_comm_in_next[pid]]=*comm_thunk;
+    _mpass.proc_comm_out_next[pid]++;
+    _mpass.proc_comm_in_next[pid]++;
+    if (_mpass.proc_comm_in_next[pid]>=_mpass.proc_comm_in_size[pid]) {
+      _mpass.proc_comm_in_size[pid]+=_bsp_comm_fifo_size;
+      bspEnlargeFifo("bsp_get",
+	             &_mpass.proc_comm_in_fifo[pid],
+		     _mpass.proc_comm_in_size[pid]);
+    }
+    if (_mpass.proc_comm_out_next[pid] >=_mpass.proc_comm_out_size[pid]) {
+      _mpass.proc_comm_out_size[pid]+=_bsp_comm_fifo_size;
+      bspEnlargeFifo("bsp_get",
+		     &_mpass.proc_comm_out_fifo[pid],
+	             _mpass.proc_comm_out_size[pid]);
+    }
+    chunk_offset += chunk_nbytes;
+    chunk_dst     = (char *)chunk_dst + chunk_nbytes;
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{The real code for \texttt{bsp\_put}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+This is where we really do the put. 
+\begin{code}
+void _bsp_put(int type_and_pid, const void *src, 
+              int dst_addr, int offset, int nbytes) {
+  int             pid,togo_nbytes,chunk_nbytes,chunk_offset;
+  void           *chunk_src;
+  _BSPcomm_thunk *comm_thunk;
+
+  pid          = COMM_GET_PID(type_and_pid);
+  togo_nbytes  = nbytes;
+  chunk_src    = (void*) src;
+  chunk_offset = offset;
+
+#ifdef STATISTICS
+  if (_bspstat.buffer_high_water_mark < nbytes)
+    _bspstat.buffer_high_water_mark = nbytes;      
+#endif
+  while (togo_nbytes>0) {
+    if (togo_nbytes > _bsp_buffer_size) {
+      togo_nbytes -= _bsp_buffer_size;
+      chunk_nbytes = _bsp_buffer_size;
+    } else {
+      chunk_nbytes = togo_nbytes;
+      togo_nbytes  = 0;  
+    }
+    comm_thunk=&_mpass.proc_comm_out_fifo[pid]
+                                          [_mpass.proc_comm_out_next[pid]];
+    comm_thunk->comm_pid   = type_and_pid;
+    comm_thunk->addr_global= dst_addr;
+    comm_thunk->offset     = chunk_offset;
+    comm_thunk->addr_real  = chunk_src;
+    comm_thunk->nbytes     = chunk_nbytes;
+    _mpass.proc_comm_out_next[pid]++;
+    
+ 
+    if(_mpass.proc_comm_out_next[pid]>=_mpass.proc_comm_out_size[pid]){
+      _mpass.proc_comm_out_size[pid]+=_bsp_comm_fifo_size;
+        bspEnlargeFifo("bsp_put",
+		       &_mpass.proc_comm_out_fifo[pid],
+		       _mpass.proc_comm_out_size[pid]);
+    }
+    chunk_offset += chunk_nbytes;
+    chunk_src     = ((char *)chunk_src) + chunk_nbytes;
+  }
+}
+\end{code}

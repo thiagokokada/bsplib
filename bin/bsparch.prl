@@ -1,0 +1,308 @@
+#! @PERL@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+$bindir        = "@bindir@";
+$includedir    = "@includedir@";
+$libdir        = "@libdir@";
+$mandir        = "@mandir@";
+$mpiincludedir = "@mpiincludedir@";
+$mpilibdir     = "@mpilibdir@";
+
+push(@INC,$includedir);
+push(@INC,$bindir);
+require "bsputil";
+
+
+
+($Pgm = $0) =~ s|.*/||;
+
+@archs   = ("SGIORIGIN","SGICHALL64",
+	    "CRAYT3D","CRAYT3E","CRAYJ90","CRAYC90","CRAYYMP",
+	    "SP2","FUJIAP1000","HITACHIMPP","PARSYTEC","CONVEXSPP","PARAMID",
+            "SGI","SGIN32",
+            "SunOS","Solaris","SolarisX86",
+            "LINUX","Windows_NT","WIN32",
+	    "OSF1","RS6000","HP"            
+	    );
+
+@devices = ("SHMEM_SYSV","SHMEM_SGI","SHMEM_NULL","SHMEM_WIN32",
+            "MPASS_TCPIP","MPASS_UDPIP","MPASS_3C905B","MPASS_MPI",
+            "MPASS_MPL","MPASS_PARIX","MPASS_EXPRESS", 
+	    "MPASS_PARMACS", "MPASS_FUJICELL",
+	    "DRMA_SHMEM");
+
+%archDevice = (
+  "SGIORIGIN", "SHMEM_SGI",
+  "SGICHALL64","SHMEM_SGI",
+  "SGI"       ,"SHMEM_SGI",
+  "SGIN32"    ,"SHMEM_SGI",
+  "SP2",       "MPASS_MPL",
+  "PARSYTEC",  "MPASS_PARIX",
+  "PARAMID",   "MPASS_PARMACS",
+  "CONVEXSPP", "SHMEM_SYSV",
+  "SunOS",     "SHMEM_SYSV",
+  "Solaris",   "SHMEM_SYSV",
+  "SolarisX86","SHMEM_SYSV",
+  "LINUX",     "SHMEM_SYSV",
+  "Windows_NT","SHMEM_SYSV",
+  "WIN32",     "SHMEM_WIN32",
+  "OSF1",      "SHMEM_SYSV",
+  "RS6000",    "MPASS_UDPIP",
+  "HP",        "SHMEM_SYSV",
+  "HITACHIMPP","MPASS_EXPRESS",
+  "FUJIAP1000","MPASS_FUJICELL",
+  "CRAYT3D",   "DRMA_SHMEM",
+  "CRAYT3E",   "DRMA_SHMEM",
+  "CRAYJ90",   "DRMA_SHMEM",
+  "CRAYC90",   "SHMEM_NULL",
+  "CRAYYMP",   "DRMA_SHMEM"
+  );
+
+%machineName = (
+  "SGIORIGIN", "SGI Origin 2000",
+  "SGICHALL64","SGI Power Challenge",
+  "SGI"       ,"SGI Workstation",
+  "SGIN32"    ,"SGI Workstation (-n32 objects)",
+  "SP2",       "IBM SP2",
+  "PARSYTEC",  "Parsytec Explorer",
+  "PARAMID",   "Transtech Paramid",
+  "CONVEXSPP", "Convex SPP",
+  "FUJIAP1000","Fujitsu AP1000",
+  "SunOS",     "Sun workstation running SunOS 4.1.x",
+  "Solaris",   "Sun workstation running Solaris",
+  "SolarisX86","Intel X86 running Solaris",
+  "LINUX",     "PC running Linux",
+  "Windows_NT","Windows NT PC with OpenNT Posix Subsystem",
+  "WIN32",     "Windows NT PC with Native Win32 Subsystem",
+  "OSF1",      "Digital Alpha",
+  "RS6000",    "IBM RS6000",
+  "HP",        "HP Workstation",
+  "HITACHIMPP","Hitachi SR2001",
+  "CRAYT3D",   "Cray T3D",
+  "CRAYT3E",   "Cray T3E",
+  "CRAYJ90",   "Cray J90",
+  "CRAYC90",   "Cray C90",
+  "CRAYYMP",   "Cray Y/MP",
+  );
+
+%deviceName = (
+  "SHMEM_SYSV",   "Shared memory using System V IPC",
+  "SHMEM_SGI",    "Shared memory for SGI machines",
+  "SHMEM_WIN32",  "Shared memory using Windows NT IPC",
+  "SHMEM_NULL",   "Pseudo shared memory for p=1",
+  "MPASS_TCPIP",  "Message passing using TCP/IP",
+  "MPASS_UDPIP",  "Message passing using UDP/IP (low latency)",
+  "MPASS_3C905B", "Message passing using UDP/IP + 3Com 3c905B kernel module",
+  "MPASS_MPI",    "Message passing using MPI (high latency ;-)",
+  "MPASS_MPL",    "Message passing for the IBM SP2 machines",
+  "MPASS_PARIX",  "Message passing for the Parsytec machines",
+  "MPASS_EXPRESS","Message passing using Parasoft Ltd IPC",
+  "MPASS_PARMACS","Message passing using Parallel Macros",
+  "MPASS_FUJICELL","Message passing for the Fujitsu machines",
+  "DRMA_SHMEM",   "One sided communication on the Cray T3D/E"
+);
+
+$use_default   =1;
+$default_arch  ="@BSPARCH_DEFAULT_ARCH@";
+$default_device="@BSPARCH_DEFAULT_DEVICE@";
+
+&main();
+exit(0);
+
+
+
+
+
+
+sub main {
+  local($i);
+  local($do_arch)       =1;
+  local($do_device)     =0;
+  local($do_default)    =0;
+  local($do_name)       =0;
+  local($do_help)       =0;
+  local($do_convertname)=0;
+  local($do_convertdev)=0;
+  local($do_defdevice)  =0;
+  local($do_allarch)    =0;
+  local($do_alldevice)  =0;
+  local(@inst_devices);
+  local($device,$valid_device,$machine);
+
+  arg: while($_ = $ARGV[0]) {
+    shift(@ARGV);
+    /-arch/        && do {$do_arch       = 1; next arg;};
+    /-nodefault/   && do {$use_default   = 0; next arg;};
+    /-device/      && do {$do_device     = 1; next arg;};
+    /-defdevice/   && do {$do_defdevice  = 1; $machine=shift(@ARGV);next arg;};
+    /-name/        && do {$do_name       = 1; next arg;};
+    /-convertname/ && do {$do_convertname= 1; $machine=shift(@ARGV);next arg;};
+    /-convertdevice/ &&do{$do_convertdev = 1; $device=shift(@ARGV);next arg;};
+    /-allarch/     && do {$do_allarch    = 1; next arg;};
+    /-alldevice/   && do {$do_alldevice  = 1; next arg;};
+    /-(help|man)/  && do {&FormatManual("bsparch.1"); exit(0);};
+  }
+  
+  if ($do_device) {
+    
+    if ($ENV{'BSP_DEVICE'}) {
+      $device = $ENV{'BSP_DEVICE'}; 
+    } elsif ($use_default && $default_device ne "") {
+      $device = $default_device;
+    } else {
+       $machine = &archName();
+       if (!$archDevice{$machine}) {
+          $device = $default_device;
+       } else {
+          $device = $archDevice{$machine};
+       }
+    }
+    print $device;
+
+  } elsif ($do_name) {
+    $machine = &archName();
+    if ($machineName{$machine}) {
+      print $machineName{$machine};
+    } else {
+      print "<unknown machine>";
+    }
+
+  } elsif ($do_convertname) {
+    if ($machineName{$machine}) {
+      print $machineName{$machine};
+    } else {
+      print "<unknown machine>";
+    }
+
+  } elsif ($do_convertdev) {
+    if ($deviceName{$device}) {
+      print $deviceName{$device};
+    } else {
+      print "<unknown device>";
+    }
+
+  } elsif ($do_defdevice) {
+    if ($archDevice{$machine}) {
+      print $archDevice{$machine};
+    } else {
+      print "<unknown device>";
+    }
+
+  } elsif ($do_allarch) {
+    foreach $i (@archs) {
+      printf "    %-18s %s\n",$i ,$machineName{$i};
+    }
+
+  } elsif ($do_alldevice) {
+    foreach $i (@devices) {
+      printf "    %-18s %s\n",$i ,$deviceName{$i};
+    }
+
+   } else {
+    print &archName();
+  }
+}
+
+
+
+
+
+
+sub archName {
+
+  if ($ENV{'BSP_MACHINE'}) {
+    return($ENV{'BSP_MACHINE'});
+  } elsif ($use_default && $default_arch ne "") {
+    return $default_arch;
+  }
+  chop($_ = &backtick("uname -s"));
+  /IRIX64/     && do { if (-e "/usr/include/sys/numa.h") {
+                         return("SGIORIGIN");
+                       } else {
+                         return("SGICHALL64");
+                       }
+                     };
+  /Linux/      && do { return("LINUX");};
+  /IRIX/       && do { return("SGI");};
+  /AIX/        && do { if (-e "/usr/bin/poe") {
+                         return("SP2");
+                       } else {
+                         return("RS6000");
+                       }
+                     };
+  /HP-UX/      && do { if (-e "/usr/convex") {
+                         return("CONVEXSPP");
+                       } else {
+                         return("HP");
+                       }
+                     };
+
+  /SunOS/      && do { if (-e "/usr/parix") {
+                          return("PARSYTEC");
+
+                       } elsif (-e "/opt/transtech") {
+			  return("PARAMID");
+
+                       } elsif (-e "/usr/cap/sys.c7/") {
+			  return("FUJIAP1000");
+
+                       } else {
+                           chop($_ = &backtick("uname -a"));
+                           if (/(\d+)\.(\d+)/  && ("$1.$2"/1.0)>5.0) {
+			     if (/i86pc$/) {
+                               return ("SolarisX86");
+			     } else {
+                               return ("Solaris");
+                             }
+                           } else {
+                            return("SunOS");
+                           }
+                       }
+                     };
+
+  /HI-UX/      && do { return("HITACHIMPP");};
+
+  /OSF1/       && do { return("OSF1");};
+
+  /Windows_NT/ && do { return("Windows_NT");};
+
+  chop($_ = &backtick("uname -m"));
+  /CRAY\s+T3E/ && do { return("CRAYT3E");};
+
+  /CRAY/       && do { if (-e "/mpp/bin/mppstat") {
+                         return ("CRAYT3D");
+                       } elsif (/Y-MP/) {
+                         return ("CRAYYMP");
+                       } elsif (/J90/) {
+                         return ("CRAYJ90");
+                       } elsif (/C90/) {
+                         return ("CRAYC90");
+                       } else {
+                         return ("CRAYUNKNOW");
+                       }
+                     };
+  return("GENERIC");
+}
+
+
+

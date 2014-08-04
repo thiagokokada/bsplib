@@ -1,0 +1,189 @@
+\begin{code}
+C ###########################################################################
+C ##      Copyright (C) 1995,1996,1997 1998University of Oxford            ##
+C ##                                                                       ##
+C ## Permission to use, copy, modify, and distribute this software,        ##
+C ## and to incorporate it, in whole or in part, into other software,      ##
+C ## is hereby granted without fee, provided that                          ##
+C ##   (1) the above copyright notice and this permission notice appear in ##
+C ##       all copies of the source code, and the above copyright notice   ##
+C ##       appear in clearly visible form on all supporting documentation  ##
+C ##       and distribution media;                                         ##
+C ##   (2) modified versions of this software be accompanied by a complete ##
+C ##       change history describing author, date, and modifications made; ##
+C ##       and                                                             ##
+C ##   (3) any redistribution of the software, in original or modified     ##
+C ##       form, be without fee and subject to these same conditions.      ##
+C ###########################################################################
+
+      !MS$FIXEDFORMLINESIZE:132
+
+      INTERFACE TO SUBROUTINE BspBegin [C,ALIAS:'_bsp_begin'] (maxprocs)
+         INTEGER*4 maxprocs [VALUE]
+      END
+
+
+      INTERFACE TO SUBROUTINE BspEnd [C,ALIAS:'_bsp_end']
+      END
+
+
+      INTERFACE TO SUBROUTINE BspInit [C,ALIAS:'_BSPINIT'] (spmdproc)
+         INTEGER*4 spmdproc [REFERENCE]
+      END
+
+
+      INTERFACE TO SUBROUTINE BspAbort [C,ALIAS:'_bsp_abort'] (errstring)
+         CHARACTER errstring [VALUE]
+      END
+
+
+      INTERFACE TO INTEGER*4 FUNCTION BspNProcs [C,ALIAS:'_bsp_nprocs']
+      END
+
+
+      INTERFACE TO INTEGER*4 FUNCTION BspPid [C,ALIAS:'_bsp_pid']
+      END
+
+
+      INTERFACE TO DOUBLE PRECISION FUNCTION BspTime [C,ALIAS:'_bsp_time']
+      END
+
+
+      INTERFACE TO SUBROUTINE BspSync [C,ALIAS:'_bsp_sync']
+      END
+
+
+      INTERFACE TO SUBROUTINE BspPushReg [C,ALIAS:'_bsp_push_reg'] (ident, size)
+         INTEGER*4 ident [REFERENCE]
+         INTEGER*4 size [VALUE]
+      END
+
+
+      INTERFACE TO SUBROUTINE BspPushRegister [C,ALIAS:'_bsp_push_reg'] (ident, size)
+         INTEGER*4 ident [REFERENCE]
+         INTEGER*4 size [VALUE]
+      END
+
+      INTERFACE TO SUBROUTINE BspPopReg [C,ALIAS:'_bsp_pop_reg'] (ident)
+         INTEGER*4 ident [REFERENCE]
+      END
+
+
+      INTERFACE TO SUBROUTINE BspPopRegister [C,ALIAS:'_bsp_pop_reg'] (ident)
+         INTEGER*4 ident [REFERENCE]
+      END
+
+
+      INTERFACE TO SUBROUTINE BspPut [C,ALIAS:'_bsp_put'] (pid, src, dst, offset, nbytes)
+         INTEGER*4 pid [VALUE]
+         INTEGER*4 src [REFERENCE]
+         INTEGER*4 dst [REFERENCE]
+         INTEGER*4 offset [VALUE]
+         INTEGER*4 nbytes [VALUE]
+      END
+
+
+      INTERFACE TO SUBROUTINE BspHpPut [C,ALIAS:'_bsp_hpput'] (pid, src, dst, offset, nbytes)
+         INTEGER*4 pid [VALUE]
+         INTEGER*4 src [REFERENCE]
+         INTEGER*4 dst [REFERENCE]
+         INTEGER*4 offset [VALUE]
+         INTEGER*4 nbytes [VALUE]
+      END
+
+
+      INTERFACE TO SUBROUTINE BspGet [C,ALIAS:'_bsp_get'] (pid, src, dst, offset, nbytes)
+         INTEGER*4 pid [VALUE]
+         INTEGER*4 src [REFERENCE]
+         INTEGER*4 dst [REFERENCE]
+         INTEGER*4 offset [VALUE]
+         INTEGER*4 nbytes [VALUE]
+      END
+
+
+      INTERFACE TO SUBROUTINE BspHpGet [C,ALIAS:'_bsp_hpget'] (pid, src, dst, offset, nbytes)
+         INTEGER*4 pid [VALUE]
+         INTEGER*4 src [REFERENCE]
+         INTEGER*4 dst [REFERENCE]
+         INTEGER*4 offset [VALUE]
+         INTEGER*4 nbytes [VALUE]
+      END
+
+
+      INTERFACE TO SUBROUTINE BspSetTagSize [C,ALIAS:'_bsp_set_tagsize'] (tag_nbytes)
+         INTEGER*4 tag_nbytes [REFERENCE]
+      END
+
+
+      INTERFACE TO SUBROUTINE BspSend [C,ALIAS:'_bsp_send'] (pid, tag, payload, payload_nbytes)
+         INTEGER*4 pid [VALUE]
+         INTEGER*4 tag [REFERENCE]
+         INTEGER*4 payload [REFERENCE]
+         INTEGER*4 payload_nbytes [VALUE]
+      END
+
+
+      INTERFACE TO SUBROUTINE BspQSize [C,ALIAS:'_bsp_qsize'] (nmessages, accum_nbytes)
+         INTEGER*4 nmessages [REFERENCE]
+         INTEGER*4 accum_nbytes [REFERENCE]
+      END
+
+
+      INTERFACE TO SUBROUTINE BspGetTag [C,ALIAS:'_bsp_get_tag'] (status, tag)
+         INTEGER*4 status [REFERENCE]
+         INTEGER*4 tag [REFERENCE]
+      END
+
+
+      INTERFACE TO SUBROUTINE BspMove [C,ALIAS:'_bsp_move'] (payload, reception_nbytes)
+      INTEGER*4 payload [REFERENCE]
+      INTEGER*4 reception_nbytes [VALUE]
+      END
+
+
+C ###########################################################################
+C #                                                                         #
+C #                     Interface to level 1 routines                       #
+C #                                                                         #
+C ###########################################################################
+
+
+      INTERFACE TO SUBROUTINE BspBcast [C,ALIAS:'_bsp_bcast'] (bcast_pid, src, dst, nbytes)
+         INTEGER*4 bcast_pid [VALUE]
+         INTEGER*4 src [REFERENCE]
+         INTEGER*4 dst [REFERENCE]
+         INTEGER*4 nbytes [VALUE]
+      END
+
+
+      INTERFACE TO SUBROUTINE BspFold [C,ALIAS:'_bsp_fold'] (op, src, dest, nbytes)
+         INTEGER*4 op [REFERENCE]
+         INTEGER*4 src [REFERENCE]
+         INTEGER*4 dest [REFERENCE]
+         INTEGER*4 nbytes [VALUE]
+      END
+
+
+C ###########################################################################
+C #                                                                         #
+C #                       Interface to cpp routines                         #
+C #                                                                         #
+C ###########################################################################
+
+      INTERFACE TO SUBROUTINE cppsync [C,ALIAS:'_bsp_sync_cpp'] (lineno, filename)
+         INTEGER*4 lineno [VALUE]
+         CHARACTER filename [REFERENCE]
+      END
+
+
+      INTERFACE TO SUBROUTINE cpphpput [C,ALIAS:'_bsp_hpput_cpp'] (pid, src, dst, offset, nbytes)
+         INTEGER*4 pid [VALUE]
+         INTEGER*4 src [REFERENCE]
+         INTEGER*4 dst [REFERENCE]
+         INTEGER*4 offset [VALUE]
+         INTEGER*4 nbytes [VALUE]
+      END
+
+
+      !MS$FIXEDFORMLINESIZE:72
+\end{code}

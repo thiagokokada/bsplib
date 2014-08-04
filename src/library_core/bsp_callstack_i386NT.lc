@@ -1,0 +1,9 @@
+\begin{code}
+long int cs_regsp() {
+	__asm
+	{
+	  /* Vasil, here is a job for you! */
+	  /* movl	%ebp, %eax */
+	}
+}
+\end{code}

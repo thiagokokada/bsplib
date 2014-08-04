@@ -1,0 +1,23 @@
+\documentclass{article}
+\usepackage{lit}
+\usepackage{makeidx}
+\makeindex
+
+\title{Collective communications in the Oxford BSP toolset}
+\author{Jonathan M. D. Hill}
+
+\newcommand{\nhalf}{N_{1/2}}
+\begin{document}
+\maketitle
+  \tableofcontents
+  \include{bsp_level1.lh}
+  \include{bsp_slg.c}
+  \include{bsp_bcast.c}
+  \include{bsp_scan.c}
+  \include{bsp_fold.c}
+  \include{bsp_fold_funs.c}
+  \include{bsp_gather.c}
+  \include{bsp_scatter.c}
+  \include{bsp_sort.c}
+\printindex
+\end{document}

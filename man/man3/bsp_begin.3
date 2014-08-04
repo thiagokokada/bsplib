@@ -1,0 +1,154 @@
+.TH "bsp_begin" 3 "1.4 25/9/98" "Oxford BSP Toolset" "BSPlib FUNCTIONS"
+.SH NAME
+bsp_begin \- spawn a number of BSP processes.
+
+
+.SH C SYNOPSIS
+.nf
+.B #include \&"bsp.h\&"
+.PP
+.BI "void bsp_begin(int " maxprocs ");"
+.fi
+.SH FORTRAN SYNOPSIS 
+.nf
+.BI "SUBROUTINE bspbegin(" maxprocs ")"
+.BI "INTEGER , intent(IN):: " maxprocs
+.fi
+
+.SH DESCRIPTION
+At most
+.I maxprocs
+processes are created in a 
+.B bsplib(3)
+program by the operations
+.B bsp_begin 
+and 
+.B bsp_end(3)\c
+\&. They bracket a piece of code to be run in an SPMD manner on a
+number of processors.  There can only be one instance of a
+.B bsp_begin/bsp_end
+pair within a program, although
+there are two different ways to start a 
+.B bsplib(3)\c
+\& program:
+.IP 1)
+If bsp_begin
+and 
+.B bsp_end(3)
+are the first and last statements in a program, then the entire
+.B bsplib(3)
+computation is SPMD. 
+
+.IP 2)
+An alternative mode (see 
+.B bsp_init(3)\c
+) is available where a single process starts execution and determines
+the number of parallel processes required for the calculation. It can
+then spawn the required number of processes using
+.B bsp_begin\c
+\&. Execution of the spawned processes then continue in an SPMD
+manner, until
+.B bsp_end(3)
+is encountered by all the processes. At that point, all but process
+zero is terminated, and process zero is left to continue the execution
+of the rest of the program sequentially.
+
+.SH EXAMPLE
+.IP 1)
+Consider a C program that starts as many processes as possible, each
+printing the string ``Hello World''.
+.nf
+#include "bsp.h"
+
+void main() {
+  bsp_begin(bsp_nprocs());
+    printf("Hello World from process %d of %d",
+           bsp_pid(),bsp_nprocs());
+  bsp_end();
+}
+.fi
+The example illustrates the minimum requirements of 
+.B bsplib(3)
+with respect to I/O. When a number of processes print a message on
+either standard output or standard error, the messages are
+multiplexed to the users terminal in a non-deterministic manner.
+All other types of I/O (e.g., user input and file access) are
+only guaranteed to work correctly if performed by 
+.I "process zero"\c
+\&. Therefore this example prints 
+.I p 
+strings in an arbitrary order.
+
+.IP 2)
+Consider a Fortran 77 program that prints ``Hello World'' in parallel.
+
+.nf
+      PROGRAM Main
+      INCLUDE 'fbsp.h'
+
+      CALL bspbegin(bspnprocs())
+      WRITE (*,*) 'Hello World from ',bsppid(),' of ',bspnprocs()
+      CALL bspend()
+.fi
+
+.SH "SEE ALSO"
+bsplib(3), bsp_begin(3), bsp_end(3)
+
+.I ``BSPlib: The BSP Programming Library''
+Jonathan M. D. Hill, Bill McColl, Dan C. Stefanescu, Mark W. Goudreau,
+Kevin Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and Rob
+Bisseling. Parallel Computing, to appear 1998. See
+.I http://www.bsp-worldwide.org
+for more details.
+
+.SH NOTES
+.IP i
+There can only be a single 
+.B bsp_begin bsp_end pair within a 
+.B bsplib(3) 
+program.  This excludes the possibility of starting, stopping, and
+then restarting parallel tasks within a program, or any form of nested
+parallelism.
+
+.IP ii
+The process with 
+.I bsp_pid()==0 
+is a continuation of the thread of control that initiated
+.B bsp_begin(3)\c
+\&. This has the effect that all the values of the local and global
+variables prior to 
+.B bsp_begin
+are available to that process.
+
+.IP iii
+After bsp_begin, the environment from process zero is not inherited by
+any of the other processes, i.e., those with 
+.I bsp_pid()
+greater than zero. If any of them require part of zero's state, then
+the data must be transferred from process zero.
+
+.IP iv
+.B bsp_begin 
+has to be the first statement of the procedure which contains the
+statement. Similarly,
+.B bsp_end
+has to be the last statement in the same procedure.
+
+.IP v
+.B bsp_begin(bsp_nprocs())
+can be used to request the number of processes as there are processors
+on a parallel machine. 
+
+
+
+.SH BUGS
+Problems and bug reports should be mailed to 
+.I bsplib-bugs@comlab.ox.ac.uk
+
+.SH AUTHORS
+The Oxford BSP Toolset implementation of BSPlib was written by
+Jonathan.Hill@comlab.ox.ac.uk
+.br
+.B http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+

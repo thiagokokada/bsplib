@@ -1,0 +1,129 @@
+After some time writing Tcl/Tk code, I felt I needed a way to better organize my
+code, and why not use an object oriented approach. As we use Tcl quite
+extensively in our software products, we decided to use both the strict Tcl
+implementation with no extension and a modified wish compiler with embedded
+crypting to deliver Tcl applications in a binary form to our customers.
+
+The reason we do not use extensions is to better track and follow the Tcl/Tk
+versions easily (this may or may not be right, but this is not the point).
+
+This object extension is based on 3 operators, new and delete that handle all
+object members allocation and deallocation, as well as calling the constructor
+and destructor functions, and a virtual operator.
+
+Object members (data) are held in a global array bearing the class name and
+indexed with a unique integer id that new{} keeps track of.
+
+A simple parallel with C++ will make it easier to understand. First without
+virtual functions:
+
+### C++ ###
+
+    className::className(someType parameter)
+    {
+        someMember = parameter;
+    }
+    className::~className(void)
+    {
+        ...
+    }
+    someType className::doSomething(someType parameter)
+    {
+        ...
+    }
+
+    className *someObject = new className(someValue);
+    someType a = someObject->doSomething(someValue);
+    someType b = someObject->someMember;
+    delete someObject;
+
+### Tcl ###
+
+    proc className::className {this parameter} {
+        # new{} keeps track of object ids and passes a unique one to the
+        # constructor
+        global className
+        set className($this,someMember) $parameter
+    }
+    proc className::~className {this} {
+        # delete calls this procedure then take care of deallocating className
+        # array members for this id
+        ...
+    }
+    proc className::doSomething {this parameter} {
+        ...
+    }
+
+    set someObject [new className $someValue]
+    # calls className::className{}
+    set a [className::doSomething $someObject $someValue]
+    set b $className($someObject,someMember)
+    delete className $someObject
+    # calls className::~className{} then frees members data
+
+###########
+
+Now, with virtual functions:
+
+### C++ ###
+
+    class baseClassName {
+    public:
+        virtual void doSomething(someType);
+        baseClassName(void);
+        virtual ~baseClassName(void);
+    };
+    class derivedClassName: public baseClassName {
+    public:
+        void doSomething(someType);
+        derivedClassName(void);
+        ~derivedClassName(void);
+    };
+
+    derivedClassName *someObject = new derivedClassName();
+    someObject->doSomething(someValue);      // derived function actually called
+    delete someObject;                        // derived destructor called first
+
+### Tcl ###
+
+    virtual proc baseClassName::baseClassName {this} {
+        # sub-class is remembered so that virtual procedures may be used
+        # ...
+    }
+    virtual proc baseClassName::~baseClassName {this}
+    # pure virtual (no body): derived class destructor is called
+    virtual proc baseClassName::doSomething {this parameter} {
+        # derived class procedure with the same name may be called
+        # any code that follows is not executed if this procedure is
+        # overloaded in derived class
+        # ...
+    }
+
+    proc derivedClassName::derivedClassName {this} {
+        baseClassName::baseClassName $this
+        # nothing particular to do about virtualization here unless there is
+        # another level of derivation
+        # ...
+    }
+    proc derivedClassName::~derivedClassName {this} {
+        # cleanup at derived level here...
+        # base class destructor must not be called here
+    }
+    proc derivedClassName::doSomething {this parameter} {
+        # code that follows is executed when base class procedure is called
+        # ...
+    }
+
+    set someObject [new derivedClassName]
+    # access object as a base object but derived class procedure actually called
+    baseClassName::doSomething $someObject $someValue
+    # delete object as a base class object but derived destructor called first
+    delete baseClassName $someObject
+
+###########
+
+
+Yes, I know, the member access syntax is not very pretty, but it does the job
+nicely and simply once you are used to it. A good working knowledge of C++
+obviously helps a lot. In any case, you don't have to use it much in order to
+utilize this little pie implementation.

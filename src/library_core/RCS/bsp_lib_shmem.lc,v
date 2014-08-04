@@ -1,0 +1,4154 @@
+head	1.9;
+access;
+symbols;
+locks
+	jonh:1.9; strict;
+comment	@% @;
+
+
+1.9
+date	96.06.13.10.17.26;	author jonh;	state Exp;
+branches;
+next	1.8;
+
+1.8
+date	96.02.13.13.43.32;	author jonh;	state Exp;
+branches;
+next	1.7;
+
+1.7
+date	96.01.25.16.56.52;	author jonh;	state Exp;
+branches;
+next	1.6;
+
+1.6
+date	95.11.24.11.35.37;	author jonh;	state Exp;
+branches;
+next	1.5;
+
+1.5
+date	95.11.10.12.10.18;	author jonh;	state Exp;
+branches;
+next	1.4;
+
+1.4
+date	95.10.16.08.22.37;	author jonh;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	95.08.31.16.32.32;	author jonh;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	95.08.30.10.53.13;	author jonh;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	95.08.22.10.38.14;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.9
+log
+@Preliminary BSPlib proposal
+@
+text
+@%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996 University of Oxford                     %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsp_lib_shmem.lc,v 1.8 1996/02/13 13:43:32 jonh Exp jonh $
+% $Log: bsp_lib_shmem.lc,v $
+% Revision 1.8  1996/02/13  13:43:32  jonh
+% Making puts_to_me a two dimensional array to eliminate the use of
+% locks when accessing it.
+%
+% Revision 1.7  1996/01/25  16:56:52  jonh
+% changing _BSPinfo *_shmem to _BSPinfo _shmem
+%
+% Revision 1.6  1995/11/24  11:35:37  jonh
+% Adding Sys V shared memory..
+%
+% Revision 1.5  1995/11/10  12:10:18  jonh
+% Added counter barrier
+%
+% Revision 1.4  1995/10/16  08:22:37  jonh
+% Adding double buffering
+%
+% Revision 1.3  1995/08/31  16:32:32  jonh
+% *** empty log message ***
+%
+% Revision 1.2  1995/08/30  10:53:13  jonh
+% I think there is a deadlock problem
+%
+% Revision 1.1  1995/08/22  10:38:14  jonh
+% Initial revision
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+\chapter{An implementation of BSPlib for shared memory multiprocessors}
+\label{sect:bsplib:shmem}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{CPP options within this file}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Includes and defines}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#include "bsp_lib.h"
+#include "bsp_profile.h"
+\end{code}
+
+Foward declarations of local procedures
+\begin{code}
+static void bufferGets();
+static void bufferBSMP();
+static void copyFilledBufferToDestination(int);
+static void copySourceToBuffer(_BSPcomm_thunk*,int,int);
+static void dumpFifoCommTable();
+static void randomiseOutputFifo(int,int);
+static void bsp_quick_put(int,int,const void*,int,int,int,int);
+char *shmem_calloc(int,int,shared_memory_handle);
+char *shmem_malloc(int,shared_memory_handle);
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Shared global variables}
+\label{sect:bsplib:shmemglobals}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+The structure \texttt{\_BSPinfo} holds all the pointers to data in shared
+memory. Shared memory is preallocated, and then malloc and calloc
+routines defined here are used to allocate within the preallocated chunk.
+\begin{code}
+shared_memory_handle shmem_arena;
+char *_the_entire_shared_memory_segment;
+int  _nbytes_of_shared_memory_segment_free;
+
+spinlock_type debug_lock;
+_BSPinfo _shmem;
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Per-process global variables}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+int _bsp_pid=-1;         /* An indivduals process number. */
+                         /* (different on each process)   */
+int _bsp_nprocs=0;       /* Total number of processors.   */
+                         /* (constant on each process)    */
+
+int *_bsp_children=NULL; /* Array of child process ID's.  */
+                         /* Used in the interupt routine. */
+
+int _bsp_instart=0;
+\end{code} 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Per-process global variables used by macros}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+The following variables are local to each process and are used in the
+machine specific macros for the shared memory primitives.
+\begin{code}
+int _shmem_sleep;
+int _shmem_expsleep;
+#ifdef SHMEM_SYSV
+int           _shmemsysv_nextsem=0;
+int           _shmemsysv_maxsem;
+int           *_shmemsysv_semid=NULL;
+struct sembuf _shmemsysv_sop;
+#ifndef SHMEM_SYSV_NO_SEMAPHORE_UNION
+union  semun  _shmemsysv_arg;
+#else
+union semun {
+          int val;
+          struct semid_ds *buf;
+          ushort *array;
+     } _shmemsysv_arg;
+#endif
+#endif
+semaphore_type _shmem_tmp_sema;
+int            _shmem_tmp_int;
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Common code to all versions of the BSP library}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+A file with procedures and macros that are not dependant upon wheather
+we are building a shared or distributed memory version of the library
+is included here. Don't add any functions above this point, as the
+file also includes some data declarations. We include it here, and
+don't provide a seperate object file due to small effiency advantages
+of inlining some macros.
+\begin{code}
+#include "bsp_lib_common.h"
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Starting a BSP process: \texttt{bsp\_init}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\bsplib{} process initialisation. In a shared memory environment this
+routine doesn't actually do anything as the processes are actually
+spawned at \texttt{begin\_bsp}. The Fortran interface is given here
+and not in \texttt{bsp\_lib\_f77.lc} for consitency with the
+distributed memory implementation of the library.
+
+\begin{code}
+  /* Fortran interface here not in bsp_lib_f77.lc */ void BSPINIT(void
+  (*startproc)(void)) { /* This procedure does nothing in a shared
+    memory environment */ }
+
+void bsp_init(void (*startproc)(void),int argc,char **argv) {
+  /* This procedure does nothing in a shared memory environment */
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Starting a BSP process: \texttt{bsp\_begin}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Spawn at most \texttt{maxprocs} processes and initialise the shared
+memory segment. 
+\begin{code}
+/* Fortran interface here not in bsp_lib_f77.lc */
+void BSPBEGIN(int *maxprocs) {
+  bsp_begin(*maxprocs);
+}
+
+void bsp_begin(int maxprocs) {
+  int i, j,fork_pid;
+#ifdef BARRIER_TREE
+  int log2_nprocs;
+#endif
+
+  extern void _bsp_preload_init();
+  extern void kill_all_processors();
+  extern void kill_process();
+
+  /* Procedure defined by the BSP compilation driver bspfront */
+  _bsp_preload_init();      
+
+  /* Make sure forked processes to inherit buffered output */
+  fflush(stdout);
+  fflush(stderr);
+
+  _bsp_pid    =0;
+  if      (_bsp_instart) bsp_abort("{bsp_begin}: already started");
+  else if (maxprocs<0)   bsp_abort("{bsp_begin}: positive number required");
+  else {
+     _bsp_nprocs = (maxprocs==0 || maxprocs>BSP_MAX_PROCS)?
+                     (BSP_MAX_PROCS):
+                     (maxprocs);
+  }
+  checkDefines();
+\end{code}
+
+Create a fixed size shared memory segment.
+\begin{code}
+  _bsp_instart=1;
+  shmem_create_memory_segment(shmem_arena,_bsp_nprocs, 
+             ((2*sizeof(int*))                           +
+              barrier_type_size(_bsp_nprocs)             +
+              (3*spinlock_type_size)                     +
+              (_bsp_nprocs*
+                ((BSP_NBUFFERS*BSP_BUFFER_SIZE*sizeof(char))     +
+                 (3*spinlock_type_size)                          +
+                 (BSP_NBUFFERS*3*sizeof(_BSPcomm_thunk*))                   +
+                 ((BSP_COMM_FIFO_SIZE+BSP_NBUFFERS)*sizeof(_BSPcomm_thunk)) +
+                 (((_bsp_nprocs)+1)*sizeof(int)*2)               +
+                 (sizeof(int*)+sizeof(int))                      +
+                 (2*sizeof(char*))                               +
+                 (2*semaphore_type_size)))));
+\end{code}
+
+Create the shared memory structure that contains all the BSP system info.
+\begin{code}
+  debug_lock = new_spinlock(shmem_arena);
+  if (debug_lock==NULL)  bsp_abort("{newlock} unable to alloc debug lock");
+
+
+  _shmem.proc_lock 
+    =(spinlock_type *)  calloc(_bsp_nprocs,sizeof(spinlock_type));
+  _shmem.proc_buffer_write
+    =(spinlock_type **) calloc(_bsp_nprocs,sizeof(spinlock_type*));
+
+  if (_shmem.proc_lock==NULL ||
+      _shmem.proc_buffer_write==NULL) 
+    bsp_abort("{shmem_calloc}: unable to alloc per process locks");
+
+  for(i=0; i< _bsp_nprocs; i++) {
+    _shmem.proc_buffer_write[i] = calloc(BSP_NBUFFERS,sizeof(spinlock_type));
+    if (_shmem.proc_buffer_write[i] == NULL)
+      bsp_abort("{bsp_calloc} unable to alloc write lock");
+    for(j=0;j<BSP_NBUFFERS;j++) {
+      _shmem.proc_buffer_write[i][j] =new_spinlock(shmem_arena);
+      if (_shmem.proc_buffer_write[i][j]==NULL)
+        bsp_abort("{new_spinlock} unable to allocate lock");
+    }
+    _shmem.proc_lock[i]          =new_spinlock(shmem_arena);
+    if (_shmem.proc_lock[i]==NULL)
+      bsp_abort("{shmem_malloc}: unable to alloc write lock for process %d",i);
+  }
+
+  _shmem.proc_buffer_wait
+    =(blocking_buffer_type**) calloc(_bsp_nprocs,
+                                     sizeof(blocking_buffer_type*));
+  if (_shmem.proc_buffer_wait==NULL)
+    bsp_abort("{calloc} unable to alloc space for blocking type");
+
+  for(i=0;i<_bsp_nprocs;i++) {
+    _shmem.proc_buffer_wait[i]
+      =(blocking_buffer_type*) shmem_calloc(BSP_NBUFFERS,
+                                            sizeof(blocking_buffer_type),
+                                            shmem_arena);
+    if (_shmem.proc_buffer_wait[i]==NULL) 
+      bsp_abort("{shmem_calloc}:unable to alloc space blocking type");
+
+    for(j=0; j< BSP_NBUFFERS;j++) 
+      new_blocking_buffer(_shmem.proc_buffer_wait[i][j],shmem_arena);
+  } 
+
+#ifdef BARRIER_HARDWARE
+  _shmem.sync = new_barrier(shmem_arena);
+  if (_shmem.sync==NULL)  bsp_abort("{new_barrier} unable to alloc barrier");
+  init_barrier(_shmem.sync);
+#endif
+ 
+#ifdef BARRIER_TREE
+  log2_nprocs=0;
+  for(i=1; i<_bsp_nprocs; i=2*i) log2_nprocs++;
+  _shmem.proc_sync
+    =(semaphore_type**) calloc(_bsp_nprocs,sizeof(semaphore_type*));
+  if (_shmem.proc_sync==NULL) 
+    bsp_abort("{calloc}: unable to alloc outer barrier semaphore");
+ 
+  if (_bsp_nprocs>1) {
+    for(i=0; i< _bsp_nprocs; i++) {
+      _shmem.proc_sync[i] 
+        = (semaphore_type*) calloc(log2_nprocs,semaphore_type_size);
+      if (_shmem.proc_sync[i]==NULL)
+        bsp_abort("{calloc}: unable to alloc a inner barrier semaphore; "
+               "nprocs=%d",_bsp_nprocs);
+      for(j=0; j< log2_nprocs; j++) {
+        _shmem.proc_sync[i][j] = new_sema(shmem_arena,0); 
+        if (_shmem.proc_sync[i][j]==NULL )
+          bsp_abort("{new_sema}:unable to alloc a barrier semaphore %d,%d,%d",
+                 i,j,log2_nprocs);
+      }
+    } 
+  }
+#endif
+
+#if defined(BARRIER_BUSYWAIT_COUNTER) || defined(BARRIER_NONBUSYWAIT_COUNTER)
+  _shmem.sync_updownA = (volatile int*) shmem_malloc(sizeof(int),shmem_arena);
+  _shmem.sync_updownB = (volatile int*) shmem_malloc(sizeof(int),shmem_arena);
+  if (_shmem.sync_updownA==NULL || _shmem.sync_updownB==NULL)
+    bsp_abort("{shmem_malloc} failed to alloc updown syncs");
+
+  *(_shmem.sync_updownA) = 0;
+  *(_shmem.sync_updownB) = 0;
+  _shmem.sync_lock    = new_spinlock(shmem_arena);
+  if (_shmem.sync_lock==NULL)  bsp_abort("{newlock} unable to alloc lock");
+#endif
+
+#ifdef BARRIER_NONBUSYWAIT_COUNTER
+  _shmem.sync_semaA   = new_sema(shmem_arena,0); 
+  _shmem.sync_semaB   = new_sema(shmem_arena,0); 
+  if (_shmem.sync_semaA==NULL || _shmem.sync_semaB==NULL)
+    bsp_abort("{newsema} unable to allocate semaphore");
+#endif
+
+#ifdef BARRIER_BUSYWAIT_VECTOR_COUNTER
+  _shmem.sync_vector_updownA 
+     = (volatile int*) shmem_calloc(_bsp_nprocs,sizeof(int),shmem_arena);
+  _shmem.sync_vector_updownB
+     = (volatile int*) shmem_calloc(_bsp_nprocs,sizeof(int),shmem_arena);
+
+  if (_shmem.sync_vector_updownA ==NULL || 
+      _shmem.sync_vector_updownB ==NULL)
+    bsp_abort("{shmem_calloc} unable to allocate vector barriers");
+
+  for(i=0;i<_bsp_nprocs;i++) {
+    _shmem.sync_vector_updownA[i]=-1;
+    _shmem.sync_vector_updownB[i]=-1;
+  }
+#endif
+
+  _shmem.proc_buffer_info
+    = (_BSPcomm_thunk***) calloc(_bsp_nprocs,sizeof(_BSPcomm_thunk**));
+
+  _shmem.proc_quick_info
+    = (_BSPcomm_thunk**) calloc(_bsp_nprocs,sizeof(_BSPcomm_thunk*));
+
+  _shmem.proc_comm_fifo
+    = (_BSPcomm_thunk**) calloc(_bsp_nprocs,sizeof(_BSPcomm_thunk*));
+  if (_shmem.proc_buffer_info ==NULL ||
+      _shmem.proc_quick_info  ==NULL ||
+      _shmem.proc_comm_fifo   ==NULL) 
+    bsp_abort("{calloc} unable to alloc infos");
+
+  for(i=0; i< _bsp_nprocs; i++) {
+    _shmem.proc_comm_fifo[i]
+      =(_BSPcomm_thunk*)shmem_calloc(BSP_COMM_FIFO_SIZE,
+                                     sizeof(_BSPcomm_thunk),
+                                     shmem_arena);
+
+    _shmem.proc_buffer_info[i]
+      =(_BSPcomm_thunk**) shmem_calloc(BSP_NBUFFERS,sizeof(_BSPcomm_thunk*),
+                                       shmem_arena);
+
+    _shmem.proc_quick_info[i]
+      =(_BSPcomm_thunk*) shmem_calloc(BSP_NBUFFERS,sizeof(_BSPcomm_thunk),
+                                       shmem_arena);
+
+    if (_shmem.proc_comm_fifo[i]  ==NULL ||
+        _shmem.proc_buffer_info[i]==NULL ||
+        _shmem.proc_quick_info[i] ==NULL)
+      bsp_abort("{shmem_calloc}: unable to alloc a per process comm fifo");
+  }
+
+  _shmem.proc_comm_next
+    = (int *) shmem_calloc(_bsp_nprocs,sizeof(int),shmem_arena);
+  if (_shmem.proc_comm_next==NULL)
+      bsp_abort("{shmem_calloc}: unable to alloc a per process comm next");
+
+  for(i=0; i< _bsp_nprocs; i++) _shmem.proc_comm_next[i]=0;
+
+  _shmem.puts_to_me
+    = (int **) shmem_calloc(_bsp_nprocs,sizeof(int*),shmem_arena);
+  if (_shmem.puts_to_me==NULL)
+      bsp_abort("{shmem_calloc}: unable to alloc ptr puts to me");
+  for(i=0; i< _bsp_nprocs; i++) {
+    _shmem.puts_to_me[i] 
+      = (int*) shmem_calloc(_bsp_nprocs,sizeof(int*),shmem_arena);
+    if (_shmem.puts_to_me[i]==NULL)
+      bsp_abort("{shmem_calloc}: unable to alloc puts to me");
+    for(j=0;j<_bsp_nprocs;j++) _shmem.puts_to_me[i][j]=0;
+  }
+ 
+
+  _shmem.proc_buffer 
+    = (char ***) calloc(_bsp_nprocs,sizeof(char**));
+  if (_shmem.proc_buffer==NULL) 
+    bsp_abort("{shmem_malloc}: unable to alloc the per process buffer table");
+
+  for(i=0; i< _bsp_nprocs; i++) {
+    _shmem.proc_buffer[i]
+      =(char**) shmem_calloc(BSP_NBUFFERS,sizeof(char*),shmem_arena);
+    if (_shmem.proc_buffer[i]==NULL)
+      bsp_abort("{shmem_calloc} unable to allocate buffers");
+    
+    for(j=0;j<BSP_NBUFFERS;j++) {
+      _shmem.proc_buffer[i][j]
+        =(char *) shmem_malloc(BSP_BUFFER_SIZE,shmem_arena);
+
+      if (_shmem.proc_buffer[i][j]==NULL) 
+        bsp_abort("{shmem_malloc}: unable to alloc %d bytes for " 
+                  "processor %d's buffer",BSP_BUFFER_SIZE,i);
+    }
+  }
+  _shmem.constantI= (int*) shmem_calloc(_bsp_nprocs,sizeof(int),shmem_arena);
+  if (_shmem.constantI==NULL)
+    bsp_abort("{shmem_calloc} unable to allocate cobstantI buffer");
+
+  _shmem.bsmp_sizes
+    =(int*) shmem_calloc(_bsp_nprocs*_bsp_nprocs,sizeof(int),shmem_arena);
+  if (_shmem.bsmp_sizes==NULL)
+    bsp_abort("{shmem_calloc} unable to bsmp sizes buffer");
+  for(i=0;i<(_bsp_nprocs*_bsp_nprocs);i++)
+    _shmem.bsmp_sizes[i]=0;
+\end{code}
+
+Squirrel away the address of the BSP info table in a special shared
+memory address so that other processes know exactly where it is.
+\begin{code}
+  shmem_put_segment(shmem_arena);
+\end{code}
+
+Set signal handlers and process scheduling.
+\begin{code}
+  signal(SIGHUP,  kill_process);
+  signal(SIGTERM, kill_all_processors);
+  signal(SIGINT,  kill_all_processors);
+  signal(SIGQUIT, kill_all_processors);
+  signal(SIGABRT, kill_all_processors);
+  signal(SIGFPE,  kill_all_processors);
+  signal(SIGSYS,  kill_all_processors); 
+  signal(SIGSEGV, kill_all_processors); 
+  signal(SIGBUS,  kill_all_processors); 
+\end{code}
+
+
+Fork off \texttt{nproc} processors. Make sure that each of them
+picks-up the address of the shared memory segment.
+\begin{code}
+  _bsp_pid =0;
+  _bsp_children=calloc(_bsp_nprocs-1,sizeof(int));
+  if (_bsp_children==NULL)
+    bsp_abort("{bsp_start} unable to malloc children array");
+  for (i=1; i< _bsp_nprocs; i++) {
+    fork_pid = fork();
+    if      (fork_pid < 0) bsp_abort("{fork}: unable to spawn process");
+    else if (fork_pid ==0) {
+      /* Yippee I'm a child process. Make sure that only the parent */
+      /* continues through the loop.                                */
+      _bsp_pid = i;
+      break;
+    } else
+      _bsp_children[i-1]=fork_pid;
+  }
+  shmem_get_segment(shmem_arena);
+
+#ifdef STATISTICS
+  if (BSP_DO_STAT) createStatisticsLog();
+#endif
+#ifdef PROFILE
+  createProfileLog();
+#endif
+  initProcessGlobals();
+  bspcombputs_init();
+  barrier_sync();
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Finishing a BSP process: \texttt{bsp\_end}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+void bsp_end() {
+  barrier_sync();
+#ifdef STATISTICS
+  if (BSP_DO_STAT) closeStatisticsLog();
+#endif
+#ifdef PROFILE
+  closeProfileLog();
+#endif
+  if (_bsp_pid > 0) exit(0);
+  /* Only process zero should get here */ 
+  shmem_closedown_shared_memory(shmem_arena);
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\texttt{bsp\_sync}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_sync_cpp(int lineno,const char* filename) {
+  int i,next_put, last_put,next_put_pid,try_buff_no, stalled, at_least_one;
+  int puts_to_other,  puts_to_me;
+  int randomised_to_go;
+  _BSPcomm_thunk *to_send;
+
+
+#ifdef PROFILE
+  bspprof_sstep_start();
+#endif
+#ifdef STATISTICS
+  _bspstat.super_steps++;
+#endif
+#ifndef TURBO
+  _bsp_lineno   = lineno;
+  _bsp_filename = (char*)filename;
+#endif
+#ifdef SANITY_CHECK
+  if (!bsp_constantI(bsp_register_total()))
+    bsp_error_reg_inconsitent();
+#endif
+  bspcombputs_flush();
+\end{code}
+
+\begin{code}
+  /* Need to perform a synchronise to ensure that all communication */
+  /* thunks written by other processors as a result of a get have   */
+  /* all been written.                                              */
+  barrier_sync(); 
+#ifdef PROFILE
+  bspprof_sstep_fix();
+#endif
+#ifdef DEBUG
+  dumpFifoCommTable();
+#endif
+  bufferGets();
+  bufferBSMP();
+\end{code}
+
+
+Perform all puts on the thunks kept in the FIFO. For outgoing
+thunks, we attempt to send the one at the front of the FIFO, but if
+the processor which it is being sent to is busy, we try sending one
+from the back of the FIFO. This evens out communication bottlenecks,
+and trys to put off the problem of busy software waits if the sending
+to buffer is being used (we cann't sleep on the lock because we may
+get a deadlock---\ToDo{more info please}.
+\begin{code}
+  puts_to_other    = _shmem.proc_comm_next[_bsp_pid];
+  randomised_to_go = puts_to_other%2; 
+  last_put         = puts_to_other-1;
+  next_put         = 0;
+  puts_to_me       = 0;
+  for(i=0;i<_bsp_nprocs;i++)
+    puts_to_me += _shmem.puts_to_me[i][_bsp_pid];
+\end{code}
+
+First we deal with the scenario where things are going in and out of a
+processor. We cann't wait on locks when sending things out because to
+avoid deadlock we need to wait on both the incoming and outgoing lock
+at the same time. Thats the reason for the busy waiting that goes on.
+\begin{code}
+  try_buff_no = _bsp_pid % BSP_NBUFFERS;
+  while ((puts_to_me>0) || (puts_to_other>0)) {
+#ifdef DEBUG
+    bsp_debug("{bsp_sync}: %d to come in, %d to go out",
+              puts_to_me,puts_to_other);
+#endif
+
+    /* First service the buffers---quick stores may have occured */
+#ifdef STATISTICS
+    at_least_one = 0;
+#endif
+    if (puts_to_me>0) {
+      for(i=0;i<BSP_NBUFFERS;i++) {
+        if (goodchance_blocking_bufferfull(
+              _shmem.proc_buffer_wait[_bsp_pid][i],
+              _shmem.proc_buffer_write[_bsp_pid][i])) {
+         /* Someone is writing into my first buffer. Wait until they */
+         /* have finished writing by sleeping on the semaphore */
+         blockuntil_bufferfull(_shmem.proc_buffer_wait[_bsp_pid][i]);
+         copyFilledBufferToDestination(i);
+         unset_spinlock(_shmem.proc_buffer_write[_bsp_pid][i]);
+         puts_to_me--;
+#ifdef STATISTICS
+         at_least_one = 1;
+#endif
+       }
+     }
+#ifdef STATISTICS
+     if (!at_least_one) _bspstat.read_waits++;
+#endif
+    }
+
+    /* Fill as many buffers until the first stall */
+
+    stalled      = 0;
+    at_least_one = 0;
+    while ((puts_to_other > 0) && (!stalled)) {
+      /* My buffer is empty and I have something to send. Send the */
+      /* information to the processor whoose info is at the start of */
+      /* the FIFO.   */
+      to_send      =&_shmem.proc_comm_fifo[_bsp_pid][next_put];
+      next_put_pid =COMM_GET_PID(to_send->comm_pid);
+      if (conshortset_spinlock(
+             _shmem.proc_buffer_write[next_put_pid][try_buff_no])){
+        copySourceToBuffer(to_send,next_put_pid,try_buff_no);
+        /* Wake-up any process waiting on this semaphore */
+        unblock_bufferfull(_shmem.proc_buffer_wait[next_put_pid][try_buff_no]);
+        puts_to_other--;
+        next_put++;
+        at_least_one =1;
+      } else {
+        stalled = 1;
+        if (!at_least_one) {
+#ifdef STATISTICS
+          _bspstat.write_waits++; 
+#endif
+          if (randomised_to_go > 0) {
+            randomised_to_go--;
+            randomiseOutputFifo(next_put,last_put); 
+          } else {
+            short_snooze();
+          }
+        }
+      }
+      try_buff_no++;if (try_buff_no==BSP_NBUFFERS) try_buff_no=0;
+    }
+  }
+\end{code}
+
+
+Now comes the final tidy up of the super-step.
+\begin{code}
+#ifdef DEBUG
+  bsp_debug("{sstep_end}:Finished communication");
+#endif
+  _shmem.proc_comm_next[_bsp_pid]=0;
+
+  /* I'm not quite sure if I need this barrier. I can do without the */
+  /* following barrier if I know that there are no getes in the    */
+  /* next super-step. Maybe programs could be special cased          */
+  /* the processes run on after communication,                       */
+  barrier_sync();
+  for(i=0;i<_bsp_nprocs;i++) _shmem.puts_to_me[_bsp_pid][i] =0;
+  bspcombputs_finalise();
+  deallocateFreeList();
+  
+#ifdef PROFILE
+  bspprof_sstep_end();
+#endif
+}
+\end{code}
+
+%%%%%%%%%%%%
+\subsection{\texttt{bsp\_sync}: copying filled buffer}
+%%%%%%%%%%%%
+\begin{code}
+static void copyFilledBufferToDestination(int i) {
+  _BSPcomm_thunk *info = _shmem.proc_buffer_info[_bsp_pid][i];
+
+#ifdef DEBUG
+  bsp_debug("{sstep_end}:Buffer is full. Perform copy to memory");
+#endif
+  if (COMM_IS_PUTLIKE(info->comm_pid)) {
+#ifdef SANITY_CHECK
+    if (bsp_register_nbytes(info->addr_global) - info->offset < info->nbytes)
+      bsp_error_reg_small(info->addr_global,info->nbytes,info->offset);
+#endif
+    MEMCPY((bsp_register_global_to_local(info->addr_global) + info->offset),
+           _shmem.proc_buffer[_bsp_pid][i],
+           info->nbytes);
+  } else {
+      MEMCPY(info->addr_real,
+             _shmem.proc_buffer[_bsp_pid][i],
+             info->nbytes);
+  } 
+#ifdef STATISTICS
+  _bspstat.packet_puts_dst++;
+  _bspstat.packet_puts_dstnbytes += info->nbytes;
+#endif
+}
+\end{code}
+
+%%%%%%%%%%%%
+\subsection{\texttt{bsp\_sync}: fill up a buffer}
+%%%%%%%%%%%%
+\begin{code}
+static void copySourceToBuffer(_BSPcomm_thunk *to_send,int put_pid,
+                               int i) { 
+  if (COMM_IS_PUTLIKE(to_send->comm_pid)) {
+    MEMCPY(_shmem.proc_buffer[put_pid][i],
+           (char *) to_send->addr_real,
+           to_send->nbytes);
+  } else {
+#ifdef DEBUG
+    bsp_debug("\n\tMoving get-like thunk into buffer %d of process %d\n"
+              "\tAddress local to process %d is 0x%x\n",
+              i,put_pid,put_pid,to_send->addr_real);
+#endif
+             
+    MEMCPY(_shmem.proc_buffer[put_pid][i],
+           bsp_register_global_to_local(to_send->addr_global)+to_send->offset,
+           to_send->nbytes);
+  }
+  _shmem.proc_buffer_info[put_pid][i] = to_send;
+#ifdef STATISTICS
+  _bspstat.packet_puts_src++;
+  _bspstat.packet_puts_srcnbytes += to_send->nbytes;
+#endif
+}
+\end{code}
+
+
+%%%%%%%%%%%%
+\subsection{\texttt{bsp\_sync}: randomise fifo}
+%%%%%%%%%%%%
+\begin{code}
+static void randomiseOutputFifo(int next_put,int last_put) {
+  int random_element;
+  _BSPcomm_thunk random_temp;
+
+  if (next_put != last_put) {
+    random_element = next_put + 1 + (RAND() % (last_put-next_put));
+
+#ifdef DEBUG
+    bsp_debug("Gap is (%d,%d), randomising element %d",
+              next_put,last_put,random_element);
+#endif
+
+    random_temp = _shmem.proc_comm_fifo[_bsp_pid][next_put];
+
+    _shmem.proc_comm_fifo[_bsp_pid][next_put]
+      = _shmem.proc_comm_fifo[_bsp_pid][random_element];
+
+    _shmem.proc_comm_fifo[_bsp_pid][random_element] = random_temp;
+ }
+}
+
+static void dumpFifoCommTable() {
+#ifdef DEBUG
+  int i;
+  bsp_debug_start("bsp_sync");
+  bsp_debug_block("Super-step on pid %d: fifo size=%d",
+                  _bsp_pid,_shmem.proc_comm_next[_bsp_pid]);
+  bsp_debug_block("%5s | %8s |%8s |%8s | %6s",
+                  "Type","With pid","Source","Dest.","Nbytes");
+  bsp_debug_block("---------------------------------------------------");
+  for(i=0;i<_shmem.proc_comm_next[_bsp_pid];i++) 
+    if (COMM_IS_PUTLIKE(_shmem.proc_comm_fifo[_bsp_pid][i].comm_pid))
+       bsp_debug_block("%5s | %8d |%8x |%2d[%4d] |%6d",
+                 "put",
+                 COMM_GET_PID(_shmem.proc_comm_fifo[_bsp_pid][i].comm_pid),
+                 _shmem.proc_comm_fifo[_bsp_pid][i].addr_real,
+                 _shmem.proc_comm_fifo[_bsp_pid][i].addr_global,
+                 _shmem.proc_comm_fifo[_bsp_pid][i].offset,
+                 _shmem.proc_comm_fifo[_bsp_pid][i].nbytes);
+    else
+       bsp_debug_block("%5s | %8d |%2d[%4d] |%8x |%6d",
+                 "get",
+                 COMM_GET_PID(_shmem.proc_comm_fifo[_bsp_pid][i].comm_pid),
+                  _shmem.proc_comm_fifo[_bsp_pid][i].addr_global,
+                  _shmem.proc_comm_fifo[_bsp_pid][i].offset,
+                  _shmem.proc_comm_fifo[_bsp_pid][i].addr_real,
+                  _shmem.proc_comm_fifo[_bsp_pid][i].nbytes);
+   bsp_debug_end("bsp_sync");
+#endif
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Buffer gets}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+static void bufferGets() {
+  int i;
+  _BSPcomm_thunk *comm_thunk;
+  BSPfreelist  *cons;
+
+  for(i=0;i<_shmem.proc_comm_next[_bsp_pid];i++) {
+    comm_thunk = &_shmem.proc_comm_fifo[_bsp_pid][i];
+    if (COMM_IS_GET(comm_thunk->comm_pid)) {
+      cons = malloc(sizeof(BSPfreelist));
+      if (cons==NULL) 
+        bsp_abort("{bsp_get} failed to allocate storage for free list");
+      cons->head = malloc(comm_thunk->nbytes);
+      if (cons->head==NULL) 
+        bsp_abort("{bsp_get} failed to malloc %d bytes",comm_thunk->nbytes);
+      cons->tail=_bsp_free_list;
+      _bsp_free_list = cons;
+#ifdef DEBUG
+      bsp_debug("{bufferGet} %d bytes at offset %d from hash(%d)=0x%x",
+                comm_thunk->nbytes,comm_thunk->offset,
+                comm_thunk->addr_global,
+                bsp_register_global_to_local(comm_thunk->addr_global));
+#endif
+      MEMCPY(cons->head,
+             bsp_register_global_to_local(comm_thunk->addr_global) + 
+               comm_thunk->offset,
+             comm_thunk->nbytes);
+\end{code}
+
+We rewrite the comm thunk with the newly allocated data structure. A
+pre-registered area called \texttt{\_bsp\_buffget\_reference} is used
+as a point of reference against which the allocated data is referenced
+with respect to.
+\begin{code}
+      comm_thunk->addr_global
+        =bsp_register_local_to_global(&_bsp_buffget_reference);
+      comm_thunk->offset = (char*)cons->head - &_bsp_buffget_reference;
+    }
+  }
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Buffer BSMP}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+static void bufferBSMP() {
+  int i;
+
+  for(i=0;i<_bsp_nprocs;i++) {
+    _bsmp.incoming_messages_size[i]=
+      _shmem.bsmp_sizes[(i*_bsp_nprocs) + _bsp_pid];
+    _shmem.bsmp_sizes[(i*_bsp_nprocs) + _bsp_pid] = 0;
+#ifdef DEBUG
+    bsp_debug("{bsp_send} receiving %d bytes from %d's queue",
+              _bsmp.incoming_messages_size[i],i);
+#endif
+  }
+  bsmp_flush();
+} 
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\texttt{bsp\_get}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+This routine in used by \texttt{bsp\_get} and \texttt{bsp\_hpget}. 
+\begin{code}
+void _bsp_get(int type_and_pid, const void *src, int offset,
+              void *dst, int nbytes) {
+  int             pid,src_addr,togo_nbytes,chunk_nbytes,chunk_offset;
+  void           *chunk_dst;
+  char           *src_plus_offset;
+  _BSPcomm_thunk *comm_thunk;
+
+  pid = COMM_GET_PID(type_and_pid);
+#ifdef SANITY_CHECK
+  if (pid < 0 || pid >= _bsp_nprocs) 
+    bsp_abort("{bsp_get}: processor %d is trying to get "
+              "from no-existant processor %d.",_bsp_pid,pid);
+#endif
+
+  togo_nbytes  = nbytes;
+  chunk_dst    = dst;
+  chunk_offset = offset;
+  src_addr     = bsp_register_local_to_global(src);
+
+
+  if (nbytes <=0) {
+    /* do nothing */
+  } else if (pid == _bsp_pid) {
+    src_plus_offset = (char*)src + offset;
+    if (src_plus_offset != (char*)dst) 
+      MEMCPY((char *)dst,src_plus_offset,nbytes); 
+
+  } else {
+#ifdef STATISTICS
+  if (_bspstat.buffer_high_water_mark < nbytes)
+    _bspstat.buffer_high_water_mark = nbytes;      
+#endif
+    while (togo_nbytes>0) {
+      if (togo_nbytes > BSP_BUFFER_SIZE) {
+        togo_nbytes -= BSP_BUFFER_SIZE;
+        chunk_nbytes = BSP_BUFFER_SIZE;
+      } else {
+        chunk_nbytes = togo_nbytes;
+        togo_nbytes  = 0;
+      }
+       
+      set_spinlock(_shmem.proc_lock[pid]);
+      comm_thunk=&_shmem.proc_comm_fifo[pid][_shmem.proc_comm_next[pid]];
+      comm_thunk->comm_pid   = COMM_IS_GET(type_and_pid)?
+                                 (COMM_SET_GET(_bsp_pid)):
+                                 (COMM_SET_HPGET(_bsp_pid));
+      comm_thunk->addr_global = src_addr;
+      comm_thunk->offset     = chunk_offset;
+      comm_thunk->addr_real  = chunk_dst;
+      comm_thunk->nbytes     = chunk_nbytes;
+      _shmem.proc_comm_next[pid]++;
+      unset_spinlock(_shmem.proc_lock[pid]);
+ 
+      if (_shmem.proc_comm_next[pid] >= BSP_COMM_FIFO_SIZE)
+        bsp_abort("{bsp_get} internal buffer overflow. \n"
+                  "[On %d buffer has %d elements]\n"
+                  "Recompile with -bspfifo %d",pid,BSP_COMM_FIFO_SIZE,
+                  10*BSP_COMM_FIFO_SIZE);
+      
+      _shmem.puts_to_me[_bsp_pid][_bsp_pid]++;
+    
+      chunk_offset += chunk_nbytes;
+      chunk_dst     = (char *)chunk_dst + chunk_nbytes;
+    }
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{The real code for \texttt{bsp\_hpput}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+This is where we really do the put. 
+\begin{code}
+void _bsp_put(int type_and_pid, const void *src, 
+              int dst_addr, int offset, int nbytes) {
+  int             pid,i,found,togo_nbytes,chunk_nbytes,chunk_offset;
+  void           *chunk_src;
+  _BSPcomm_thunk *comm_thunk;
+
+  togo_nbytes  = nbytes;
+  chunk_src    = (void*) src;
+  chunk_offset = offset;
+  pid          = COMM_GET_PID(type_and_pid);
+  found        = 0;
+
+  if (COMM_IS_SEND(type_and_pid)) 
+    _shmem.bsmp_sizes[(_bsp_pid*_bsp_nprocs) + pid] += nbytes;
+
+  if (nbytes<BSP_BUFFER_SIZE) {
+    for(i=0;i<BSP_NBUFFERS;i++) {
+      if (conshortset_spinlock(_shmem.proc_buffer_write[pid][i])) {
+        bsp_quick_put(type_and_pid,pid,src,dst_addr,offset,nbytes,i);
+        found =1;
+        break;
+      }
+    }
+  }
+  if (!found) {
+#ifdef STATISTICS
+    if (_bspstat.buffer_high_water_mark < nbytes)
+      _bspstat.buffer_high_water_mark = nbytes;      
+#endif
+    while (togo_nbytes>0) {
+      if (togo_nbytes > BSP_BUFFER_SIZE) {
+         togo_nbytes -= BSP_BUFFER_SIZE;
+         chunk_nbytes = BSP_BUFFER_SIZE;
+      } else {
+         chunk_nbytes = togo_nbytes;
+         togo_nbytes  = 0;
+       
+      }
+      set_spinlock(_shmem.proc_lock[_bsp_pid]);
+      comm_thunk=&_shmem.proc_comm_fifo[_bsp_pid]
+                                        [_shmem.proc_comm_next[_bsp_pid]];
+      comm_thunk->comm_pid   = type_and_pid;
+      comm_thunk->addr_global= dst_addr;
+      comm_thunk->offset     = chunk_offset;
+      comm_thunk->addr_real  = chunk_src;
+      comm_thunk->nbytes     = chunk_nbytes;
+      _shmem.proc_comm_next[_bsp_pid] ++;
+      unset_spinlock(_shmem.proc_lock[_bsp_pid]);
+ 
+      if (_shmem.proc_comm_next[_bsp_pid] >= BSP_COMM_FIFO_SIZE)
+        bsp_abort("{bsp_put} internal buffer overflow. \n"
+                  "Recompile with -bspfifo %d",
+                  10*BSP_COMM_FIFO_SIZE);
+      _shmem.puts_to_me[_bsp_pid][pid]++;
+
+      chunk_offset += chunk_nbytes;
+      chunk_src     = ((char *)chunk_src) + chunk_nbytes;
+    }
+  }
+}
+\end{code}
+
+A quick put does half of a put by putting the putd data into the
+other processors incoming buffer so that it can be picked up straight
+away by the end of super-step exchange of communication thunks. It
+also has a quick peek at its own buffer and does the communication
+straight away if anything is waiting around. This means that
+communication may happen during the super-step and not at the end....
+\begin{code}
+static void bsp_quick_put(int type_and_pid,int pid,const void *src,
+                           int dst_addr,int offset,int nbytes,int i) {
+  _BSPcomm_thunk *comm_thunk;
+
+  _shmem.puts_to_me[_bsp_pid][pid]++;
+  comm_thunk = &_shmem.proc_quick_info[pid][i];
+  _shmem.proc_buffer_info[pid][i] = comm_thunk;
+  comm_thunk->comm_pid   = type_and_pid;
+  comm_thunk->addr_global= dst_addr;
+  comm_thunk->offset     = offset;
+  comm_thunk->addr_real  = (void*) src;
+  comm_thunk->nbytes     = nbytes;
+  MEMCPY(_shmem.proc_buffer[pid][i],(char*) src,nbytes);
+  unblock_bufferfull(_shmem.proc_buffer_wait[pid][i]);
+#ifdef STATISTICS
+  _bspstat.packet_puts_src++;
+  _bspstat.packet_puts_srcnbytes += nbytes;
+  if (_bspstat.buffer_high_water_mark < nbytes)
+    _bspstat.buffer_high_water_mark = nbytes;      
+#endif 
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\texttt{\_bsp\_dissemination\_barrier}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+#ifdef BARRIER_TREE
+void _bsp_dissemination_barrier() {
+  int i,j,right;
+
+  j=0;
+  for(i=1; i < _bsp_nprocs; i=2*i) {
+    right = (_bsp_pid+i)%_bsp_nprocs;
+    Vsema(_shmem.proc_sync[_bsp_pid][j]);
+    Psema(_shmem.proc_sync[right][j]);
+#ifdef DEBUG
+    bsp_debug("{barrier%d} i=%d process %d  right=%d",j,i,_bsp_pid,right);
+#endif
+    j++;
+  }
+}
+#endif
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\texttt{\_bsp\_counter\_barrier}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef BARRIER_NONBUSYWAIT_COUNTER
+void _bsp_nonbusywait_counter_barrier() {
+  static   int _bsp_sync_phase=0;
+  int i;
+
+  switch (_bsp_sync_phase) {
+  case 0:
+     set_spinlock(_shmem.sync_lock);
+     (*(_shmem.sync_updownA))++;
+     if (*(_shmem.sync_updownA)==_bsp_nprocs){
+       unset_spinlock(_shmem.sync_lock);
+       for(i=1;i<_bsp_nprocs;i++) Vsema(_shmem.sync_semaA);
+     } else {
+       unset_spinlock(_shmem.sync_lock);
+       Psema(_shmem.sync_semaA);
+     }
+     _bsp_sync_phase++;
+     break;
+
+  case 1:
+     set_spinlock(_shmem.sync_lock);
+     (*(_shmem.sync_updownB))++;
+     if (*(_shmem.sync_updownB)==_bsp_nprocs){
+       unset_spinlock(_shmem.sync_lock);
+       for(i=1;i<_bsp_nprocs;i++) Vsema(_shmem.sync_semaB);
+     } else {
+       unset_spinlock(_shmem.sync_lock);
+       Psema(_shmem.sync_semaB);
+     }     
+     _bsp_sync_phase++;
+     break;
+
+  case 2:
+     set_spinlock(_shmem.sync_lock);
+     (*(_shmem.sync_updownA))--;
+     if (!*(_shmem.sync_updownA)){
+       unset_spinlock(_shmem.sync_lock);
+       for(i=1;i<_bsp_nprocs;i++) Vsema(_shmem.sync_semaA);
+     } else {
+       unset_spinlock(_shmem.sync_lock);
+       Psema(_shmem.sync_semaA);
+     }
+     _bsp_sync_phase++;
+     break;
+
+  case 3:
+     set_spinlock(_shmem.sync_lock);
+     (*(_shmem.sync_updownB))--;
+     if (!*(_shmem.sync_updownB)){
+       unset_spinlock(_shmem.sync_lock);
+       for(i=1;i<_bsp_nprocs;i++) Vsema(_shmem.sync_semaB);
+     } else {
+       unset_spinlock(_shmem.sync_lock);
+       Psema(_shmem.sync_semaB);
+     }
+     _bsp_sync_phase=0;
+     break;
+
+  default:
+     bsp_abort("{_bsp_counter_barrier} fallen off end");
+  }
+}
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\texttt{\_bsp\_counter\_barrier}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+#ifdef BARRIER_BUSYWAIT_VECTOR_COUNTER
+void _bsp_busywait_vector_counter_barrier() {
+  static int _bsp_sync_phase=0;
+  register int i;
+  volatile int *ptr;
+
+  reset_short_snooze();
+  if ((++_bsp_sync_phase)&1) {
+    _shmem.sync_vector_updownB[_bsp_pid]=_bsp_sync_phase;
+     for(i=0;i<_bsp_nprocs;i++) {
+       if (i!=_bsp_pid) {
+         ptr   = &_shmem.sync_vector_updownB[i];
+         while((*ptr)!=_bsp_sync_phase) {short_snooze();}
+       }
+     }
+  } else {
+     _shmem.sync_vector_updownA[_bsp_pid]=_bsp_sync_phase;
+     for(i=0;i<_bsp_nprocs;i++) {
+       if (i!=_bsp_pid) {
+         ptr   = &_shmem.sync_vector_updownA[i];
+         while((*ptr)!=_bsp_sync_phase) {short_snooze();}
+       }
+     }
+  }
+}
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Shared memory allocation routines}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+char *shmem_malloc(int size,shared_memory_handle handle) {
+  char *result=NULL;
+  int nbytes;
+
+  if (size > _nbytes_of_shared_memory_segment_free)
+    bsp_debug("{shmem_malloc} unable to allocate %d bytes (%d left)",
+              size,_nbytes_of_shared_memory_segment_free);
+  else {
+    result = _the_entire_shared_memory_segment;
+    nbytes = size;
+    /* allign to cache line */
+    if (size % CACHE_LINE_SIZE)
+      nbytes +=  (CACHE_LINE_SIZE-(size % CACHE_LINE_SIZE)); 
+   _the_entire_shared_memory_segment     += nbytes;
+    _nbytes_of_shared_memory_segment_free -= nbytes;
+  }
+  return(result);
+}
+\end{code}
+
+\begin{code}
+char *shmem_calloc(int nelem,int size,shared_memory_handle handle) {
+  char *result=NULL;
+  int  nbytes;
+
+  if ((nelem*size) > _nbytes_of_shared_memory_segment_free)
+    bsp_debug("{shmem_calloc} unable to allocate %dx%d bytes (%d left)",
+              nelem,size,_nbytes_of_shared_memory_segment_free);
+  else {
+    result = _the_entire_shared_memory_segment;
+    nbytes = size*nelem;
+    /* allign to cache line */
+    if (size % CACHE_LINE_SIZE)
+      nbytes += CACHE_LINE_SIZE-(nbytes % CACHE_LINE_SIZE);  
+    _the_entire_shared_memory_segment     += nbytes;
+    _nbytes_of_shared_memory_segment_free -= nbytes;
+  }
+  return(result);
+}
+\end{code}
+
+
+@
+
+
+1.8
+log
+@Making stores_to_me a two dimensional array to eliminate the use of
+locks when accessing it.
+@
+text
+@d17 1
+a17 1
+% $Id: bsp_lib_shmem.lc,v 1.7 1996/01/25 16:56:52 jonh Exp jonh $
+d19 4
+d45 3
+a47 2
+\chapter{A BSP library using IRIX IPC} 
+\label{sect:bspirix}
+d50 1
+a50 1
+\section{Notes:}
+d59 1
+d61 9
+a69 9
+
+void copyFilledBufferAToDestination();
+void copyFilledBufferBToDestination();
+void copySourceToBufferA(_BSPcomm_thunk*,int);
+void copySourceToBufferB(_BSPcomm_thunk*,int);
+void dumpFifoCommTable();
+void randomiseOutputFifo(int,int);
+void bsp_quick_storeA(int,void*,int,int,int);
+void bsp_quick_storeB(int,void*,int,int,int);
+a71 1
+extern int errno;
+d73 1
+d76 1
+a76 1
+\label{sect:bspirix:shmemglobals}
+d78 3
+a80 2
+Global shared memory is allocated, and I provide a malloc and calloc
+routine for the allocated segment.
+a86 1
+spinlock_type print_lock;
+d90 22
+a111 1
+The following variables are used internally by the macros.
+d118 1
+a118 1
+int           _shmemsysv_semid;
+d130 2
+a131 3
+#ifdef SHMEM_SGI
+semaphore_type _shmemsgi_tmp_sema;
+#endif
+d134 9
+d144 1
+a144 4
+#ifdef TUNE_PERFORMANCE
+int BSP_SNOOZE_TILL_SLEEP=128;
+int BSP_SNOOZE_MIN       =16;
+#endif
+d146 1
+d148 1
+a148 1
+\section{Per-process global variables}
+d150 5
+d157 3
+a159 4
+int _bsp_pid=-1;      /* An indivduals process number. */
+                      /* (different on each process)   */
+int _bsp_nprocs;      /* Total number of processors.   */
+                      /* (constant on each process)    */
+d161 3
+a163 29
+int *_bsp_children;   /* Array of child process ID's.  */
+                      /* Used in the interupt routine. */
+
+char *_bsp_scratch_buffer; /* General scratch buffer used by anyone */
+
+int _bsp_instart=0;
+int _bsp_sstep_lineno;
+int _bsp_insstep=0;
+int _bsp_sstepno;
+
+static void *_bsp_addr_table[BSP_ADDR_TABLE_SIZE];
+static int _bsp_addr_table_limit;
+static int _bsp_addr_table_miller;
+static char _bsp_miller_reference;  /* Only used for compat with */
+                                    /* Richard Millers library   */
+
+\end{code} 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Common code to all versions of the BSP library}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+The following is included here, and not linked into the library. The
+reason for this is efficiency, as some data-structures are static, and
+wouldnt otherwise be visable in the respective files. The efficiency
+of static arrays (e.g., the address table) is far better than
+dynamically allocated arrays on some pipelined architecures because
+the compiler can often speculatively prefetch information. 
+\begin{code}
+#include "bsp_lib_common.h"
+a165 1
+
+d167 1
+a167 1
+\section{Starting a BSP process: \texttt{bsp\_start}}
+d170 2
+d173 4
+a176 2
+void bsp_start(int maxprocs, int *nprocs, int *mypid) {
+  int i, fork_pid;
+d178 2
+d181 1
+a181 1
+  int j, log2_nprocs;
+a183 1
+  char *env_nprocs;
+d187 1
+d191 1
+a191 1
+  /* Dont want forked processes to inherit buffered output */
+d194 4
+a197 3
+  checkDefines();
+  if      (_bsp_instart) bsp_error("{bsp_start}: already started");
+  else if (maxprocs<0)   bsp_error("{bsp_start}: positive number required");
+d199 3
+a201 12
+    env_nprocs = getenv("BSP_PROCS");
+    if (env_nprocs!=NULL) {
+      *nprocs = atoi(env_nprocs);
+      if (*nprocs<=0) 
+         *nprocs = BSP_MAX_PROCS;
+      else if (*nprocs>BSP_MAXMAX_PROCS)
+           *nprocs = BSP_MAXMAX_PROCS;
+    } else {
+      *nprocs = (maxprocs==0 || maxprocs>BSP_MAX_PROCS)?
+                  (BSP_MAX_PROCS):
+                  (maxprocs);
+    }
+d203 1
+a203 3
+  _bsp_instart=1;
+  *mypid   =0;
+  _bsp_nprocs = *nprocs;
+d208 1
+d213 9
+a221 8
+              (*nprocs*((2*BSP_BUFFER_SIZE*sizeof(char)) +
+                        (3*spinlock_type_size)           +
+                        (3*sizeof(_BSPcomm_thunk*))      +
+                        (sizeof(_BSPcomm_thunk)*
+                         (BSP_COMM_FIFO_SIZE)+4)         +
+                        (2*sizeof(int))                  +
+                        (2*sizeof(char*))                +
+                        (2*semaphore_type_size)))));
+d224 1
+a224 1
+Create the shared memory table that contains all the BSP system info.
+d227 21
+a247 18
+  if (debug_lock==NULL)  bsp_error("{newlock} unable to alloc debug lock");
+  print_lock = new_spinlock(shmem_arena);
+  if (print_lock==NULL)  bsp_error("{newlock} unable to alloc print lock");
+
+  _shmem.proc_buffer_writeA
+    =(spinlock_type *) calloc(*nprocs,sizeof(spinlock_type));
+  _shmem.proc_buffer_writeB
+    =(spinlock_type *) calloc(*nprocs,sizeof(spinlock_type));
+  _shmem.proc_lock
+    =(spinlock_type *) calloc(*nprocs,sizeof(spinlock_type));
+  if (_shmem.proc_buffer_writeA==NULL || 
+      _shmem.proc_buffer_writeB==NULL || 
+      _shmem.proc_lock==NULL) 
+    bsp_error("{shmem_malloc}: unable to alloc per process locks");
+
+  for(i=0; i< *nprocs; i++) {
+    _shmem.proc_buffer_writeA[i] =new_spinlock(shmem_arena);
+    _shmem.proc_buffer_writeB[i] =new_spinlock(shmem_arena);
+d249 2
+a250 4
+    if (_shmem.proc_buffer_writeA[i]==NULL ||
+        _shmem.proc_buffer_writeB[i]==NULL ||
+        _shmem.proc_lock[i]==NULL)
+      bsp_error("{shmem_malloc}: unable to alloc write lock for process %d",i);
+d253 16
+a268 16
+  _shmem.proc_buffer_waitA
+    =(semaphore_type*) calloc(*nprocs,sizeof(semaphore_type));
+  _shmem.proc_buffer_waitB
+    =(semaphore_type*) calloc(*nprocs,sizeof(semaphore_type));
+  if (_shmem.proc_buffer_waitA==NULL ||
+      _shmem.proc_buffer_waitB==NULL) 
+    bsp_error("{calloc}:unable to alloc space for wait semaphores");
+
+  for(i=0; i< *nprocs; i++) {
+    _shmem.proc_buffer_waitA[i]
+      =new_sema(shmem_arena,0); /*Wait or sync semaphore */
+    _shmem.proc_buffer_waitB[i]
+      =new_sema(shmem_arena,0); /*Wait or sync semaphore */
+    if (_shmem.proc_buffer_waitA[i]==NULL || 
+        _shmem.proc_buffer_waitB[i]==NULL)
+      bsp_error("{new_sema}:unable to alloc wait semaphore for %d",i);
+d273 1
+a273 1
+  if (_shmem.sync==NULL)  bsp_error("{new_barrier} unable to alloc barrier");
+d279 1
+a279 1
+  for(i=1; i<*nprocs; i=2*i) log2_nprocs++;
+d281 1
+a281 1
+    =(semaphore_type**) calloc(*nprocs,sizeof(semaphore_type*));
+d283 1
+a283 1
+    bsp_error("{calloc}: unable to alloc outer barrier semaphore");
+d285 2
+a286 2
+  if (*nprocs>1) {
+    for(i=0; i< *nprocs; i++) {
+d290 2
+a291 2
+        bsp_error("{calloc}: unable to alloc a inner barrier semaphore; "
+               "nprocs=%d",*nprocs);
+d295 1
+a295 1
+          bsp_error("{new_sema}:unable to alloc a barrier semaphore %d,%d,%d",
+d306 1
+a306 1
+    bsp_error("{shmem_malloc} failed to alloc updown syncs");
+d311 1
+a311 1
+  if (_shmem.sync_lock==NULL)  bsp_error("{newlock} unable to alloc lock");
+d318 1
+a318 1
+    bsp_error("{newsema} unable to allocate semaphore");
+d323 1
+a323 1
+     = (volatile int*) shmem_calloc(*nprocs,sizeof(int),shmem_arena);
+d325 1
+a325 1
+     = (volatile int*) shmem_calloc(*nprocs,sizeof(int),shmem_arena);
+d329 1
+a329 1
+    bsp_error("{shmem_calloc} unable to allocate vector barriers");
+d331 1
+a331 1
+  for(i=0;i<*nprocs;i++) {
+d337 2
+a338 11
+  _shmem.proc_buffer_infoA
+    = (_BSPcomm_thunk**) shmem_calloc(*nprocs,sizeof(_BSPcomm_thunk*),
+                                      shmem_arena);
+
+  _shmem.proc_buffer_infoB
+    = (_BSPcomm_thunk**) shmem_calloc(*nprocs,sizeof(_BSPcomm_thunk*),
+                                      shmem_arena);
+
+  _shmem.proc_quick_infoA
+    = (_BSPcomm_thunk*) shmem_calloc(*nprocs,sizeof(_BSPcomm_thunk),
+                                     shmem_arena);
+d340 2
+a341 3
+  _shmem.proc_quick_infoB
+    = (_BSPcomm_thunk*) shmem_calloc(*nprocs,sizeof(_BSPcomm_thunk),
+                                     shmem_arena);
+d344 3
+a346 6
+    = (_BSPcomm_thunk**) shmem_calloc(*nprocs,sizeof(_BSPcomm_thunk*),
+                                      shmem_arena);
+  if (_shmem.proc_buffer_infoA==NULL ||
+      _shmem.proc_buffer_infoB==NULL ||
+      _shmem.proc_quick_infoA ==NULL ||
+      _shmem.proc_quick_infoB ==NULL ||
+d348 1
+a348 1
+    bsp_error("{shmem_calloc} unable to alloc infos");
+d350 1
+a350 1
+  for(i=0; i< *nprocs; i++) {
+d352 2
+a353 1
+      =(_BSPcomm_thunk*)shmem_calloc(BSP_COMM_FIFO_SIZE,sizeof(_BSPcomm_thunk),
+d355 13
+a367 2
+    if (_shmem.proc_comm_fifo[i]==NULL)
+      bsp_error("{shmem_calloc}: unable to alloc a per process comm fifo");
+d371 1
+a371 1
+    = (int *) shmem_calloc(*nprocs,sizeof(int),shmem_arena);
+d373 3
+a375 2
+      bsp_error("{shmem_calloc}: unable to alloc a per process comm next");
+  for(i=0; i< *nprocs; i++) _shmem.proc_comm_next[i]=0;
+d377 11
+a387 5
+  _shmem.stores_to_me
+    = (int *) shmem_calloc(*nprocs,sizeof(int),shmem_arena);
+  if (_shmem.stores_to_me==NULL)
+      bsp_error("{shmem_calloc}: unable to alloc stores to me");
+  for(i=0; i< *nprocs; i++) _shmem.stores_to_me[i]=0;
+d389 20
+a408 17
+  /* Table has to be max size so that bsp_newprocs works without */
+  /* reallocing */
+  _shmem.proc_bufferA 
+    = (char **) shmem_calloc(*nprocs,sizeof(char*),shmem_arena);
+  _shmem.proc_bufferB 
+    = (char **) shmem_calloc(*nprocs,sizeof(char*),shmem_arena);
+  if (_shmem.proc_bufferA==NULL || _shmem.proc_bufferB==NULL) 
+    bsp_error("{shmem_malloc}: unable to alloc the per process buffer table");
+
+  for(i=0; i< *nprocs; i++) {
+    _shmem.proc_bufferA[i]
+      =(char *) shmem_malloc(BSP_BUFFER_SIZE,shmem_arena);
+    _shmem.proc_bufferB[i]
+      =(char *) shmem_malloc(BSP_BUFFER_SIZE,shmem_arena);
+    if (_shmem.proc_bufferA[i]==NULL || _shmem.proc_bufferB[i]==NULL) 
+      bsp_error("{shmem_malloc}: unable to alloc %d bytes for " 
+                "processor %d's buffer",BSP_BUFFER_SIZE,i);
+d410 10
+d436 3
+a438 3
+  signal(SIGSYS,  kill_all_processors);
+ /* signal(SIGSEGV, kill_all_processors); 
+  signal(SIGBUS,  kill_all_processors); */
+d446 1
+a446 1
+  _bsp_children=calloc(*nprocs-1,sizeof(int));
+d448 2
+a449 2
+    bsp_error("{bsp_start} unable to malloc chilren array");
+  for (i=1; i< *nprocs; i++) {
+d451 1
+a451 1
+    if      (fork_pid < 0) bsp_error("{fork}: unable to spawn process");
+a454 1
+      *mypid   = i;
+d469 2
+a470 2
+  bspcombstores_init();
+  if (BSP_OPT_FSTORE_INTERFERENCE) deallocateFreeList();
+d476 1
+a476 1
+\section{Finishing a BSP process: \texttt{bsp\_finish}}
+d480 1
+a480 1
+void bsp_finish() {
+a493 1
+
+d495 1
+a495 1
+\section{\texttt{bsp\_sstep}}
+d498 3
+a500 29
+void _bsp_sstep(int sstepno,char* filename, int lineno) {
+#ifdef STATISTICS
+  _bspstat.super_steps++;
+#endif
+#ifdef PROFILE
+  bspprof_sstep_start(sstepno,lineno,filename);
+#endif
+#ifdef SANITY_CHECK
+  if (_bsp_insstep) 
+    bsp_error("{bsp_sstep} \"%s\" line %d, nested super-steps\n\t" 
+                " super-step %d is nested within super-step %d",     
+                filename,lineno,sstepno,_bsp_sstepno);
+  _bsp_insstep      = 1;
+#endif
+#if defined(SANITY_CHECK) || defined(PROFILE)
+  _bsp_sstepno      = sstepno;
+  _bsp_sstep_lineno = lineno;
+#endif
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\texttt{bsp\_sstep\_end}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void _bsp_sstep_end(int stepno,char* filename,int lineno) {
+  int next_store_front, next_store_back;
+  int stores_to_other,  stores_to_me;
+  int pid_to_front, pid_to_back;
+a504 1
+  bspcombstores_flush();
+d506 8
+a513 1
+  bspprof_sstep_commcomp();
+d516 2
+a517 7
+  if      (!_bsp_insstep) 
+    bsp_error("{bsp_sstep_end} \"%s\" line %d, not started a super-step",
+              filename,lineno);
+  if (_bsp_sstepno != stepno) 
+    bsp_error("{bsp_sstep_end} \"%s\" line %d, super steps do not match\n\t"
+              "opening is numbered %d, whilst closing is numbered %d",
+              filename,lineno,_bsp_sstepno,stepno);
+d519 1
+d524 1
+a524 1
+  /* thunks written by other processors as a result of a fetch have */
+d528 1
+a528 1
+  bspprof_sstep_wait();
+d531 1
+a531 1
+  dumpFifoCommTable(stepno);
+d533 2
+d538 1
+a538 1
+Perform all stores on the thunks kept in the FIFO. For outgoing
+d546 7
+a552 5
+  stores_to_other  = _shmem.proc_comm_next[_bsp_pid];
+  next_store_back  = stores_to_other -1;
+  randomised_to_go = stores_to_other; 
+  stores_to_me     = _shmem.stores_to_me[_bsp_pid];
+  next_store_front = 0;
+d560 2
+a561 1
+  while (stores_to_me > 0) {
+d563 26
+a588 2
+    bsp_debug("{bsp_sstep_end}: %d to come in, %d to go out",
+              stores_to_me,stores_to_other);
+d590 7
+a596 16
+    if (test_spinlock(_shmem.proc_buffer_writeA[_bsp_pid])) {
+      /* Someone is writing into my first buffer. Wait until they */
+      /* have finished writing by sleeping on the semaphore */
+      Psema(_shmem.proc_buffer_waitA[_bsp_pid]);
+      copyFilledBufferAToDestination();
+      unset_spinlock(_shmem.proc_buffer_writeA[_bsp_pid]);
+      stores_to_me--;
+    } 
+    else if (test_spinlock(_shmem.proc_buffer_writeB[_bsp_pid])) {
+      /* Someone is writing into my second buffer. */
+      Psema(_shmem.proc_buffer_waitB[_bsp_pid]);
+      copyFilledBufferBToDestination();
+      unset_spinlock(_shmem.proc_buffer_writeB[_bsp_pid]);
+      stores_to_me--; 
+    } 
+    else if (stores_to_other > 0) {
+d600 5
+a604 4
+      to_send    =&_shmem.proc_comm_fifo[_bsp_pid][next_store_front];
+      pid_to_front =COMM_GET_PID(to_send->comm_pid);
+      if (conshortset_spinlock(_shmem.proc_buffer_writeA[pid_to_front])) {
+        copySourceToBufferA(to_send,pid_to_front);
+d606 4
+a609 10
+        Vsema(_shmem.proc_buffer_waitA[pid_to_front]);
+        stores_to_other--;
+        next_store_front++;
+      } else if (conshortset_spinlock(
+                    _shmem.proc_buffer_writeB[pid_to_front])) {
+        copySourceToBufferB(to_send,pid_to_front);
+        /* Wake-up any process waiting on this semaphore */
+        Vsema(_shmem.proc_buffer_waitB[pid_to_front]);
+        stores_to_other--;
+        next_store_front++;
+d611 5
+a615 29
+        /* Damn... the processor at the front at the FIFO is */
+        /* busy...lets try the one at the back :-)           */
+        to_send     = &_shmem.proc_comm_fifo[_bsp_pid][next_store_back];
+        pid_to_back = COMM_GET_PID(to_send->comm_pid);
+        if ((pid_to_front != pid_to_back) &&
+            conshortset_spinlock(_shmem.proc_buffer_writeA[pid_to_back])) {
+          copySourceToBufferA(to_send,pid_to_back);
+          /* Wake-up any process waiting on this semaphore */
+          Vsema(_shmem.proc_buffer_waitA[pid_to_back]);          
+          stores_to_other--;
+          next_store_back--;
+#ifndef PROFILE
+        /* Try not to use the double buffering scheme when profiling.  */
+        /* It undermines BSP cost modeling by a positive factor of two */
+        /* in extreme cases                                            */
+        } else if ((pid_to_front != pid_to_back) &&
+            conlongset_spinlock(_shmem.proc_buffer_writeB[pid_to_back])) {
+          copySourceToBufferB(to_send,pid_to_back);
+          /* Wake-up any process waiting on this semaphore */
+          Vsema(_shmem.proc_buffer_waitB[pid_to_back]);          
+          stores_to_other--;
+          next_store_back--;
+#endif
+        } else {
+          /* Someone else is writing to both front and back processes  */
+          /* We cannt wait on the lock because we may get deadlock of  */
+          /* the form {0->1, 0->2} + {2->1, 1->2}. We therefore        */
+          /* randomise the queue a little (adaptive routing), and try  */
+          /* the whole thing again                                     */
+d617 2
+a618 2
+             randomised_to_go--;
+             randomiseOutputFifo(next_store_front,next_store_back); 
+d620 1
+a620 5
+             release_processor();
+#ifdef STATISTICS
+            _bspstat.write_waits++; 
+          
+#endif
+d623 2
+a624 7
+      } 
+    } else {
+      /* Sent all messages out, and nothing has come in */
+      release_processor();
+#ifdef STATISTICS
+      _bspstat.read_waits++;
+#endif
+a628 19
+Now the easier cases when all messages have come in, but some still
+need to be sent out.
+a process.
+\begin{code}
+  while (stores_to_other > 0) {
+    to_send      = &_shmem.proc_comm_fifo[_bsp_pid][next_store_front];
+    pid_to_front = COMM_GET_PID(to_send->comm_pid);
+    if (conshortset_spinlock(_shmem.proc_buffer_writeB[pid_to_front])) { 
+      copySourceToBufferB(to_send,pid_to_front);
+      Vsema(_shmem.proc_buffer_waitB[pid_to_front]); 
+    } else {
+      set_spinlock(_shmem.proc_buffer_writeA[pid_to_front]);
+      copySourceToBufferA(to_send,pid_to_front);
+      Vsema(_shmem.proc_buffer_waitA[pid_to_front]);
+    }
+    stores_to_other--;
+    next_store_front++;
+  }
+\end{code}
+a634 1
+  _shmem.stores_to_me[_bsp_pid]  =0;
+a635 3
+#ifdef SANITY_CHECK
+  _bsp_insstep =0;
+#endif
+d638 1
+a638 1
+  /* following barrier if I know that there are no fetches in the    */
+a640 5
+#ifdef PROFILE
+  bspprof_sstep_comm();
+  /* Use the line number from the start of the super-step */
+  bspprof_sstep_inout_comm(stepno,_bsp_sstep_lineno,filename);
+#endif
+d642 4
+a645 1
+  bspcombstores_finalise();
+d653 1
+a653 1
+\subsection{\texttt{bsp\_sstep\_end}: copying filled buffer}
+d656 3
+a658 2
+void copyFilledBufferAToDestination() {
+_BSPcomm_thunk *info = _shmem.proc_buffer_infoA[_bsp_pid];
+d662 7
+a668 3
+  if (COMM_IS_STORE(info->comm_pid)) {
+    memcpy(((char *) _bsp_addr_table[info->addr_table] + info->offset),
+           _shmem.proc_bufferA[_bsp_pid],
+d671 3
+a673 3
+    memcpy((char *)info->addr_real,
+           (char *)_shmem.proc_bufferA[_bsp_pid],
+           info->nbytes);
+d676 2
+a677 22
+  _bspstat.packet_stores_dst++;
+  _bspstat.packet_stores_dstnbytes += info->nbytes;
+#endif
+}
+
+void copyFilledBufferBToDestination() {
+_BSPcomm_thunk *info = _shmem.proc_buffer_infoB[_bsp_pid];
+#ifdef DEBUG
+  bsp_debug("{sstep_end}:Buffer is full. Perform copy to memory");
+#endif
+  if (COMM_IS_STORE(info->comm_pid)) {
+    memcpy(((char *) _bsp_addr_table[info->addr_table] + info->offset),
+           _shmem.proc_bufferB[_bsp_pid],
+           info->nbytes);
+  } else {
+    memcpy((char *)info->addr_real,
+           (char *)_shmem.proc_bufferB[_bsp_pid],
+           info->nbytes);
+  }
+#ifdef STATISTICS
+  _bspstat.packet_stores_dst++;
+  _bspstat.packet_stores_dstnbytes += info->nbytes;
+d683 1
+a683 1
+\subsection{\texttt{bsp\_sstep\_end}: fill up a buffer}
+d686 4
+a689 6
+void copySourceToBufferA(_BSPcomm_thunk *to_send,int store_pid) { 
+#ifdef DEBUG
+  bsp_debug("{sstep_end}[Post lock] My buffer empty. Sending to %d",store_pid);
+#endif
+  if (COMM_IS_STORE(to_send->comm_pid)) {
+    memcpy(_shmem.proc_bufferA[store_pid],
+a692 12
+    memcpy((char *)_shmem.proc_bufferA[store_pid],
+           (char *)_bsp_addr_table[to_send->addr_table] + to_send->offset,
+           to_send->nbytes);
+  }
+  _shmem.proc_buffer_infoA[store_pid] = to_send;
+#ifdef STATISTICS
+  _bspstat.packet_stores_src++;
+  _bspstat.packet_stores_srcnbytes += to_send->nbytes;
+#endif
+}
+
+void copySourceToBufferB(_BSPcomm_thunk *to_send,int store_pid) { 
+d694 7
+a700 9
+  bsp_debug("{sstep_end}[Post lock] My buffer empty. Sending to %d",store_pid);
+#endif
+  if (COMM_IS_STORE(to_send->comm_pid)) {
+    memcpy(_shmem.proc_bufferB[store_pid],
+           (char *) to_send->addr_real,
+           to_send->nbytes);
+  } else {
+    memcpy((char *)_shmem.proc_bufferB[store_pid],
+           (char *)_bsp_addr_table[to_send->addr_table] + to_send->offset,
+d703 1
+a703 1
+  _shmem.proc_buffer_infoB[store_pid] = to_send;
+d705 2
+a706 2
+  _bspstat.packet_stores_src++;
+  _bspstat.packet_stores_srcnbytes += to_send->nbytes;
+d713 1
+a713 1
+\subsection{\texttt{bsp\_sstep\_end}: randomise fifo}
+d716 2
+a717 2
+void randomiseOutputFifo(int next_store_front,int next_store_back) {
+  int random_element, random_with,random;
+d720 2
+a721 12
+  if ((next_store_back - next_store_front -1) > 0) {
+    if (next_store_front+2 == next_store_back) {
+      /* If the gap between front and back is only two, then pick the */
+      /* middle element as the random element */
+      random_element = next_store_front+1;  
+      random         = rand();
+    } else {
+      /* If the gap >2, then pick any element in the gap */
+      random = rand();
+      random_element = next_store_front+1+
+                      (random % (next_store_back - next_store_front -1));
+    }
+a722 3
+    /* Decide if the exchange is with the front or back element */
+    if (random%2==0) random_with = next_store_front;
+    else             random_with = next_store_back;
+d724 11
+a734 14
+    bsp_debug("Gap is (%d,%d), randomising %d with %d",
+              next_store_front,next_store_back,
+              random_element,random_with);
+#endif
+    memcpy(&random_temp,
+           &_shmem.proc_comm_fifo[_bsp_pid][random_element],
+           sizeof(_BSPcomm_thunk));
+    memcpy(&_shmem.proc_comm_fifo[_bsp_pid][random_element],
+           &_shmem.proc_comm_fifo[_bsp_pid][random_with],
+           sizeof(_BSPcomm_thunk));
+    memcpy(&_shmem.proc_comm_fifo[_bsp_pid][random_with],
+           &random_temp,
+           sizeof(_BSPcomm_thunk));
+  } 
+d737 1
+a737 1
+void dumpFifoCommTable(int stepno) {
+d740 3
+a742 4
+  bsp_debug_start("bsp_sstep_end");
+  bsp_debug_block("Super-step %d on pid %d: fifo size=%d: (%d stores to me)",
+                  stepno,_bsp_pid,_shmem.proc_comm_next[_bsp_pid],
+                  _shmem.stores_to_me[_bsp_pid]);
+d747 1
+a747 1
+    if (COMM_IS_STORE(_shmem.proc_comm_fifo[_bsp_pid][i].comm_pid))
+d749 1
+a749 1
+                 "store",
+d752 1
+a752 1
+                 _shmem.proc_comm_fifo[_bsp_pid][i].addr_table,
+d757 1
+a757 1
+                 "fetch",
+d759 1
+a759 1
+                  _shmem.proc_comm_fifo[_bsp_pid][i].addr_table,
+d763 1
+a763 1
+   bsp_debug_end("bsp_sstep_end");
+d768 45
+d815 1
+a815 1
+\section{\texttt{bsp\_fetch}}
+d818 26
+a843 6
+void bsp_addr_fetch(int pid, int src_addr, int offset, void *dst, int nbytes){
+  int             togo_nbytes  = nbytes;
+  int             chunk_nbytes;
+  void           *chunk_dst    = dst;
+  char           *src;
+  int             chunk_offset = offset;
+d846 1
+a846 1
+  
+d849 1
+a849 1
+    bsp_error("{bsp_fetch}: processor %d is trying to fetch "
+d853 13
+a865 3
+  if (pid == _bsp_pid) {
+    src = ((char*)_bsp_addr_table[src_addr] + offset);
+    if (dst!=src) memcpy((char *)dst,src,nbytes); 
+d882 4
+a885 2
+      comm_thunk->comm_pid   = COMM_SET_FETCH(_bsp_pid);
+      comm_thunk->addr_table = src_addr;
+d893 1
+a893 1
+        bsp_error("{bsp_fetch} internal buffer overflow. \n"
+d897 2
+a898 3
+      set_spinlock(_shmem.proc_lock[_bsp_pid]);
+      _shmem.stores_to_me[_bsp_pid]++;
+      unset_spinlock(_shmem.proc_lock[_bsp_pid]);
+d908 1
+a908 1
+\section{The real code for \texttt{bsp\_store}}
+d910 1
+a910 1
+This is where we really do the store. 
+d912 4
+a915 5
+void _bsp_addr_store(int pid, void *src, int dst_addr, int offset, int nbytes) {
+  int             togo_nbytes  = nbytes;
+  int             chunk_nbytes;
+  void           *chunk_src    = src;
+  int             chunk_offset = offset;
+d918 19
+a936 11
+ 
+#ifndef PROFILE
+  if (nbytes < BSP_BUFFER_SIZE && 
+             conshortset_spinlock(_shmem.proc_buffer_writeA[pid])) {
+    bsp_quick_storeA(pid,src,dst_addr,offset,nbytes);
+
+  } else if (nbytes < BSP_BUFFER_SIZE && 
+             conshortset_spinlock(_shmem.proc_buffer_writeB[pid])) {
+    bsp_quick_storeB(pid,src,dst_addr,offset,nbytes);
+  } else {
+#endif
+d953 2
+a954 2
+      comm_thunk->comm_pid   = COMM_SET_STORE(pid);
+      comm_thunk->addr_table = dst_addr;
+d962 1
+a962 1
+        bsp_error("{bsp_store} internal buffer overflow. \n"
+d965 1
+a965 3
+      set_spinlock(_shmem.proc_lock[pid]);
+      _shmem.stores_to_me[pid]++;
+      unset_spinlock(_shmem.proc_lock[pid]);
+d969 1
+a969 2
+   }
+#ifndef PROFILE
+a970 1
+#endif
+d974 1
+a974 1
+A quick store does half of a store by putting the stored data into the
+d981 2
+a982 1
+void bsp_quick_storeA(int pid,void *src,int dst_addr,int offset,int nbytes) {
+d985 5
+a989 7
+  set_spinlock(_shmem.proc_lock[pid]);    
+  _shmem.stores_to_me[pid]++;
+  unset_spinlock(_shmem.proc_lock[pid]);
+  comm_thunk = &_shmem.proc_quick_infoA[pid];
+  _shmem.proc_buffer_infoA[pid] = comm_thunk;
+  comm_thunk->comm_pid   = COMM_SET_STORE(pid);
+  comm_thunk->addr_table = dst_addr;
+d991 1
+a991 1
+  comm_thunk->addr_real  = src;
+d993 2
+a994 2
+  memcpy(_shmem.proc_bufferA[pid],(char*) src,nbytes);
+  Vsema(_shmem.proc_buffer_waitA[pid]);
+d996 2
+a997 2
+  _bspstat.packet_stores_src++;
+  _bspstat.packet_stores_srcnbytes += nbytes;
+a1000 59
+  /* If my buffer is full, then deal with it now.....saves */
+  /* waiting to the end of the super-step                  */
+  if (test_spinlock(_shmem.proc_buffer_writeA[_bsp_pid])) {
+    Psema(_shmem.proc_buffer_waitA[_bsp_pid]);
+    comm_thunk = _shmem.proc_buffer_infoA[_bsp_pid];
+    memcpy(((char *)_bsp_addr_table[comm_thunk->addr_table] +
+                    comm_thunk->offset),
+           _shmem.proc_bufferA[_bsp_pid],
+           comm_thunk->nbytes);
+    set_spinlock(_shmem.proc_lock[_bsp_pid]);    
+    _shmem.stores_to_me[_bsp_pid]--;
+    unset_spinlock(_shmem.proc_lock[_bsp_pid]);
+    unset_spinlock(_shmem.proc_buffer_writeA[_bsp_pid]);
+#ifdef STATISTICS
+    _bspstat.packet_stores_dst++;
+    _bspstat.packet_stores_dstnbytes += comm_thunk->nbytes;
+#endif
+  }
+}
+
+void bsp_quick_storeB(int pid,void *src,int dst_addr,int offset,int nbytes) {
+  _BSPcomm_thunk *comm_thunk;
+
+  set_spinlock(_shmem.proc_lock[pid]);    
+  _shmem.stores_to_me[pid]++;
+  unset_spinlock(_shmem.proc_lock[pid]);
+  comm_thunk = &_shmem.proc_quick_infoB[pid];
+  _shmem.proc_buffer_infoB[pid] = comm_thunk;
+  comm_thunk->comm_pid   = COMM_SET_STORE(pid);
+  comm_thunk->addr_table = dst_addr;
+  comm_thunk->offset     = offset;
+  comm_thunk->addr_real  = src;
+  comm_thunk->nbytes     = nbytes;
+  memcpy(_shmem.proc_bufferB[pid],(char*) src,nbytes);
+  Vsema(_shmem.proc_buffer_waitB[pid]);
+#ifdef STATISTICS
+  _bspstat.packet_stores_src++;
+  _bspstat.packet_stores_srcnbytes += nbytes;
+  if (_bspstat.buffer_high_water_mark < nbytes)
+    _bspstat.buffer_high_water_mark = nbytes;      
+#endif
+  /* If my buffer is full, then deal with it now.....saves */
+  /* waiting to the end of the super-step                  */
+  if (test_spinlock(_shmem.proc_buffer_writeB[_bsp_pid])) {
+    Psema(_shmem.proc_buffer_waitB[_bsp_pid]);
+    comm_thunk = _shmem.proc_buffer_infoB[_bsp_pid];
+    memcpy(((char *)_bsp_addr_table[comm_thunk->addr_table] +
+                    comm_thunk->offset),
+           _shmem.proc_bufferB[_bsp_pid],
+           comm_thunk->nbytes);
+    set_spinlock(_shmem.proc_lock[_bsp_pid]);    
+    _shmem.stores_to_me[_bsp_pid]--;
+    unset_spinlock(_shmem.proc_lock[_bsp_pid]);
+    unset_spinlock(_shmem.proc_buffer_writeB[_bsp_pid]);
+#ifdef STATISTICS
+    _bspstat.packet_stores_dst++;
+    _bspstat.packet_stores_dstnbytes += comm_thunk->nbytes;
+#endif
+  }
+d1005 1
+a1005 1
+\section{\texttt{_bsp\_dissemination\_barrier}}
+a1026 8
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\texttt{_bsp\_counter\_barrier}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef BARRIER_BUSYWAIT_COUNTER
+void _bsp_busywait_counter_barrier() {
+  static   int _bsp_sync_phase=0;
+  register int nprocs = _bsp_nprocs;
+a1027 40
+  reset_short_snooze();
+  switch (_bsp_sync_phase) {
+  case 0:
+     set_spinlock(_shmem.sync_lock);
+     (*(_shmem.sync_updownA))++;
+     unset_spinlock(_shmem.sync_lock);
+     while ((*(_shmem.sync_updownA)) != nprocs) {short_snooze();}
+     _bsp_sync_phase++;
+     break;
+
+  case 1:
+     set_spinlock(_shmem.sync_lock);
+     (*(_shmem.sync_updownB))++;
+     unset_spinlock(_shmem.sync_lock);
+     while ((*(_shmem.sync_updownB)) != nprocs)  {short_snooze();}
+     _bsp_sync_phase++;
+     break;
+
+  case 2:
+     set_spinlock(_shmem.sync_lock);
+     (*(_shmem.sync_updownA))--;
+     unset_spinlock(_shmem.sync_lock);
+     while (*(_shmem.sync_updownA))  {short_snooze();}
+     _bsp_sync_phase++;
+     break;
+
+  case 3:
+     set_spinlock(_shmem.sync_lock);
+     (*(_shmem.sync_updownB))--;
+     unset_spinlock(_shmem.sync_lock);
+     while (*(_shmem.sync_updownB)) {short_snooze();}
+     _bsp_sync_phase=0;
+     break;
+
+  default:
+     bsp_error("{_bsp_counter_barrier} fallen off end");
+  }
+}
+#endif
+\end{code}
+d1029 1
+a1029 1
+\section{\texttt{_bsp\_counter\_barrier}}
+d1091 1
+a1091 1
+     bsp_error("{_bsp_counter_barrier} fallen off end");
+d1098 1
+a1098 1
+\section{\texttt{_bsp\_counter\_barrier}}
+d1105 1
+a1105 1
+  register int i,check;
+d1111 5
+a1115 4
+     for(i=1;i<_bsp_nprocs;i++) {
+       check = (_bsp_pid+i);if (check>=_bsp_nprocs) check-=_bsp_nprocs;
+       ptr   = &_shmem.sync_vector_updownB[check];
+       while((*ptr)!=_bsp_sync_phase) {short_snooze();}
+d1119 5
+a1123 4
+     for(i=1;i<_bsp_nprocs;i++) {
+       check = (_bsp_pid+i);if (check>=_bsp_nprocs) check-=_bsp_nprocs;
+       ptr   = &_shmem.sync_vector_updownA[check];
+       while((*ptr)!=_bsp_sync_phase) {short_snooze();}
+d1143 1
+d1145 2
+a1146 1
+    nbytes = size + (CACHE_LINE_SIZE-(size % CACHE_LINE_SIZE)); 
+d1166 2
+a1167 1
+    nbytes += CACHE_LINE_SIZE-(nbytes % CACHE_LINE_SIZE);  
+@
+
+
+1.7
+log
+@changing _BSPinfo *_shmem to _BSPinfo _shmem
+@
+text
+@d17 1
+a17 1
+% $Id: bsp_lib_shmem.lc,v 1.6 1995/11/24 11:35:37 jonh Exp jonh $
+d19 3
+d45 4
+d81 1
+a81 1
+_BSPinfo *_shmem;
+d87 1
+d95 6
+d107 7
+a205 1
+              (BSP_BUFFER_SIZE*sizeof(char))             +
+a206 1
+                        (3*sizeof(char*))                +
+d208 1
+a208 1
+                        (2*sizeof(_BSPcomm_thunk*))      +
+d210 3
+a212 1
+                         (BSP_COMM_FIFO_SIZE+2))         +
+a217 8
+  _shmem =(_BSPinfo *) malloc(sizeof(_BSPinfo));
+  if (_shmem==NULL) 
+    bsp_error("{malloc}: unable to alloc shared memory segment");
+
+  _shmem->lock = new_spinlock(shmem_arena);
+  if (_shmem->lock==NULL)  
+    bsp_error("{newlock} unable to alloc global lock");
+
+d223 9
+a231 9
+  _shmem->proc_buffer_writeA
+    =(spinlock_type *)shmem_calloc(*nprocs,sizeof(spinlock_type),shmem_arena);
+  _shmem->proc_buffer_writeB
+    =(spinlock_type *)shmem_calloc(*nprocs,sizeof(spinlock_type),shmem_arena);
+  _shmem->proc_lock
+    =(spinlock_type *)shmem_calloc(*nprocs,sizeof(spinlock_type),shmem_arena);
+  if (_shmem->proc_buffer_writeA==NULL || 
+      _shmem->proc_buffer_writeA==NULL || 
+      _shmem->proc_lock==NULL) 
+d235 6
+a240 6
+    _shmem->proc_buffer_writeA[i] =new_spinlock(shmem_arena);
+    _shmem->proc_buffer_writeB[i] =new_spinlock(shmem_arena);
+    _shmem->proc_lock[i]          =new_spinlock(shmem_arena);
+    if (_shmem->proc_buffer_writeA[i]==NULL ||
+        _shmem->proc_buffer_writeB[i]==NULL ||
+        _shmem->proc_lock[i]==NULL)
+d244 7
+a250 7
+  _shmem->proc_buffer_waitA
+    =(semaphore_type*)shmem_calloc(*nprocs,sizeof(semaphore_type),shmem_arena);
+  _shmem->proc_buffer_waitB
+    =(semaphore_type*)shmem_calloc(*nprocs,sizeof(semaphore_type),shmem_arena);
+  if (_shmem->proc_buffer_waitA==NULL ||
+      _shmem->proc_buffer_waitB==NULL) 
+    bsp_error("{shmem_calloc}:unable to alloc space for wait semaphores");
+d253 1
+a253 1
+    _shmem->proc_buffer_waitA[i]
+d255 1
+a255 1
+    _shmem->proc_buffer_waitB[i]
+d257 2
+a258 2
+    if (_shmem->proc_buffer_waitA[i]==NULL || 
+        _shmem->proc_buffer_waitB[i]==NULL)
+d263 3
+a265 3
+  _shmem->sync = new_barrier(shmem_arena);
+  if (_shmem->sync==NULL)  bsp_error("{new_barrier} unable to alloc barrier");
+  init_barrier(_shmem->sync);
+d271 4
+a274 4
+  _shmem->proc_sync
+    =(usptr_t***) shmem_calloc(*nprocs,sizeof(usptr_t**),shmem_arena);
+  if (_shmem->proc_sync==NULL) 
+    bsp_error("{shmem_calloc}: unable to alloc outer barrier semaphore");
+d278 4
+a281 4
+      _shmem->proc_sync[i] 
+        = (usptr_t**) shmem_calloc(log2_nprocs,sizeof(usptr_t*),shmem_arena);
+      if (_shmem->proc_sync[i]==NULL)
+        bsp_error("{shmem_calloc}: unable to alloc a inner barrier semaphore; "
+d284 2
+a285 2
+        _shmem->proc_sync[i][j] = new_sema(shmem_arena,0); 
+        if (_shmem->proc_sync[i][j]==NULL )
+d294 3
+a296 3
+  _shmem->sync_updownA = (volatile int*) shmem_malloc(sizeof(int),shmem_arena);
+  _shmem->sync_updownB = (volatile int*) shmem_malloc(sizeof(int),shmem_arena);
+  if (_shmem->sync_updownA==NULL || _shmem->sync_updownB==NULL)
+d299 4
+a302 4
+  *(_shmem->sync_updownA) = 0;
+  *(_shmem->sync_updownB) = 0;
+  _shmem->sync_lock    = new_spinlock(shmem_arena);
+  if (_shmem->sync_lock==NULL)  bsp_error("{newlock} unable to alloc lock");
+d306 3
+a308 3
+  _shmem->sync_semaA   = new_sema(shmem_arena,0); 
+  _shmem->sync_semaB   = new_sema(shmem_arena,0); 
+  if (_shmem->sync_semaA==NULL || _shmem->sync_semaB==NULL)
+d313 4
+a316 6
+  _shmem->sync_vector_updownA 
+     = (volatile int*) shmem_calloc(barrier_vector_stride*(*nprocs),
+                                    sizeof(int),shmem_arena);
+  _shmem->sync_vector_updownB
+     = (volatile int*) shmem_calloc(barrier_vector_stride*(*nprocs),
+                                    sizeof(int),shmem_arena);
+d318 2
+a319 2
+  if (_shmem->sync_vector_updownA ==NULL || 
+      _shmem->sync_vector_updownB ==NULL)
+d323 2
+a324 2
+    _shmem->sync_vector_updownA[i* barrier_vector_stride]=0;
+    _shmem->sync_vector_updownB[i* barrier_vector_stride]=0;
+d328 1
+a328 1
+  _shmem->proc_buffer_infoA
+d332 1
+a332 1
+  _shmem->proc_buffer_infoB
+d336 1
+a336 1
+  _shmem->proc_quick_infoA
+d340 1
+a340 1
+  _shmem->proc_quick_infoB
+d344 1
+a344 1
+  _shmem->proc_comm_fifo
+d347 5
+a351 5
+  if (_shmem->proc_buffer_infoA==NULL ||
+      _shmem->proc_buffer_infoB==NULL ||
+      _shmem->proc_quick_infoA ==NULL ||
+      _shmem->proc_quick_infoB ==NULL ||
+      _shmem->proc_comm_fifo   ==NULL) 
+d355 1
+a355 1
+    _shmem->proc_comm_fifo[i]
+d358 1
+a358 1
+    if (_shmem->proc_comm_fifo[i]==NULL)
+d362 1
+a362 1
+  _shmem->proc_comm_next
+d364 1
+a364 1
+  if (_shmem->proc_comm_next==NULL)
+d366 1
+a366 1
+  for(i=0; i< *nprocs; i++) _shmem->proc_comm_next[i]=0;
+d368 1
+a368 1
+  _shmem->stores_to_me
+d370 1
+a370 1
+  if (_shmem->stores_to_me==NULL)
+d372 1
+a372 6
+  for(i=0; i< *nprocs; i++) _shmem->stores_to_me[i]=0;
+
+  _shmem->buffer
+    =(char *) shmem_calloc(BSP_BUFFER_SIZE,1,shmem_arena);
+  if (_shmem->buffer==NULL) 
+    bsp_error("{shmem_malloc}: unable to alloc buffer");
+d376 1
+a376 1
+  _shmem->proc_bufferA 
+d378 1
+a378 1
+  _shmem->proc_bufferB 
+d380 1
+a380 1
+  if (_shmem->proc_bufferA==NULL || _shmem->proc_bufferB==NULL) 
+d384 5
+a388 5
+    _shmem->proc_bufferA[i]
+      =(char *) shmem_calloc(BSP_BUFFER_SIZE,1,shmem_arena);
+    _shmem->proc_bufferB[i]
+      =(char *) shmem_calloc(BSP_BUFFER_SIZE,1,shmem_arena);
+    if (_shmem->proc_bufferA[i]==NULL || _shmem->proc_bufferB[i]==NULL) 
+d397 1
+a397 1
+  shmem_put_segment(shmem_arena,_shmem);
+d433 1
+a433 1
+  shmem_get_segment(shmem_arena,_shmem);
+d442 1
+a442 1
+  if (BSP_OPT_FCOMBINE_STORES)     bspcombstores_init();
+a489 1
+  if (BSP_OPT_FCOMBINE_STORES) bspcombstores_reset();
+d504 2
+a505 1
+  if (BSP_OPT_FCOMBINE_STORES) bspcombstores_flush();
+d522 2
+a523 1
+  /* thunks have been written */
+d542 2
+a543 2
+  stores_to_other  = _shmem->proc_comm_next[_bsp_pid];
+  stores_to_me     = _shmem->stores_to_me[_bsp_pid];
+d545 1
+a546 1
+  next_store_back  = _shmem->proc_comm_next[_bsp_pid] -1;
+d559 1
+a559 1
+    if (test_spinlock(_shmem->proc_buffer_writeA[_bsp_pid])) {
+d562 1
+a562 1
+      Psema(_shmem->proc_buffer_waitA[_bsp_pid]);
+d564 1
+a564 1
+      unset_spinlock(_shmem->proc_buffer_writeA[_bsp_pid]);
+d567 1
+a567 1
+    else if (test_spinlock(_shmem->proc_buffer_writeB[_bsp_pid])) {
+d569 1
+a569 1
+      Psema(_shmem->proc_buffer_waitB[_bsp_pid]);
+d571 1
+a571 1
+      unset_spinlock(_shmem->proc_buffer_writeB[_bsp_pid]);
+d578 1
+a578 1
+      to_send    =&_shmem->proc_comm_fifo[_bsp_pid][next_store_front];
+d580 1
+a580 1
+      if (conshortset_spinlock(_shmem->proc_buffer_writeA[pid_to_front])) {
+d583 1
+a583 1
+        Vsema(_shmem->proc_buffer_waitA[pid_to_front]);
+d587 1
+a587 1
+                    _shmem->proc_buffer_writeB[pid_to_front])) {
+d590 1
+a590 1
+        Vsema(_shmem->proc_buffer_waitB[pid_to_front]);
+d596 1
+a596 1
+        to_send     = &_shmem->proc_comm_fifo[_bsp_pid][next_store_back];
+d599 1
+a599 1
+            conshortset_spinlock(_shmem->proc_buffer_writeA[pid_to_back])) {
+d602 1
+a602 1
+          Vsema(_shmem->proc_buffer_waitA[pid_to_back]);          
+d610 1
+a610 1
+            conlongset_spinlock(_shmem->proc_buffer_writeB[pid_to_back])) {
+d613 1
+a613 1
+          Vsema(_shmem->proc_buffer_waitB[pid_to_back]);          
+d627 1
+a627 1
+             short_snooze();
+d637 1
+a637 1
+      short_snooze();
+d650 1
+a650 1
+    to_send      = &_shmem->proc_comm_fifo[_bsp_pid][next_store_front];
+d652 1
+a652 1
+    if (conshortset_spinlock(_shmem->proc_buffer_writeB[pid_to_front])) { 
+d654 1
+a654 1
+      Vsema(_shmem->proc_buffer_waitB[pid_to_front]); 
+d656 1
+a656 1
+      set_spinlock(_shmem->proc_buffer_writeA[pid_to_front]);
+d658 1
+a658 1
+      Vsema(_shmem->proc_buffer_waitA[pid_to_front]);
+d670 2
+a671 2
+  _shmem->stores_to_me[_bsp_pid]  =0;
+  _shmem->proc_comm_next[_bsp_pid]=0;
+d686 1
+a686 1
+  if (BSP_OPT_FCOMBINE_STORES) bspcombstores_finalise();
+d698 1
+a698 1
+_BSPcomm_thunk *info = _shmem->proc_buffer_infoA[_bsp_pid];
+d704 1
+a704 1
+           _shmem->proc_bufferA[_bsp_pid],
+d708 1
+a708 1
+           (char *)_shmem->proc_bufferA[_bsp_pid],
+d718 1
+a718 1
+_BSPcomm_thunk *info = _shmem->proc_buffer_infoB[_bsp_pid];
+d724 1
+a724 1
+           _shmem->proc_bufferB[_bsp_pid],
+d728 1
+a728 1
+           (char *)_shmem->proc_bufferB[_bsp_pid],
+d747 1
+a747 1
+    memcpy(_shmem->proc_bufferA[store_pid],
+d751 1
+a751 1
+    memcpy((char *)_shmem->proc_bufferA[store_pid],
+d755 1
+a755 1
+  _shmem->proc_buffer_infoA[store_pid] = to_send;
+d767 1
+a767 1
+    memcpy(_shmem->proc_bufferB[store_pid],
+d771 1
+a771 1
+    memcpy((char *)_shmem->proc_bufferB[store_pid],
+d775 1
+a775 1
+  _shmem->proc_buffer_infoB[store_pid] = to_send;
+d814 1
+a814 1
+           &_shmem->proc_comm_fifo[_bsp_pid][random_element],
+d816 2
+a817 2
+    memcpy(&_shmem->proc_comm_fifo[_bsp_pid][random_element],
+           &_shmem->proc_comm_fifo[_bsp_pid][random_with],
+d819 1
+a819 1
+    memcpy(&_shmem->proc_comm_fifo[_bsp_pid][random_with],
+d830 2
+a831 2
+                  stepno,_bsp_pid,_shmem->proc_comm_next[_bsp_pid],
+                  _shmem->stores_to_me[_bsp_pid]);
+d835 2
+a836 2
+  for(i=0;i<_shmem->proc_comm_next[_bsp_pid];i++) 
+    if (COMM_IS_STORE(_shmem->proc_comm_fifo[_bsp_pid][i].comm_pid))
+d839 5
+a843 5
+                 COMM_GET_PID(_shmem->proc_comm_fifo[_bsp_pid][i].comm_pid),
+                 _shmem->proc_comm_fifo[_bsp_pid][i].addr_real,
+                 _shmem->proc_comm_fifo[_bsp_pid][i].addr_table,
+                 _shmem->proc_comm_fifo[_bsp_pid][i].offset,
+                 _shmem->proc_comm_fifo[_bsp_pid][i].nbytes);
+d847 5
+a851 5
+                 COMM_GET_PID(_shmem->proc_comm_fifo[_bsp_pid][i].comm_pid),
+                  _shmem->proc_comm_fifo[_bsp_pid][i].addr_table,
+                  _shmem->proc_comm_fifo[_bsp_pid][i].offset,
+                  _shmem->proc_comm_fifo[_bsp_pid][i].addr_real,
+                  _shmem->proc_comm_fifo[_bsp_pid][i].nbytes);
+d866 1
+d878 2
+a879 4
+    memcpy((char *)dst,((char*)_bsp_addr_table[src_addr] + offset),nbytes); 
+#ifdef PROFILE
+    bspprof_sstep_self_comm(nbytes);
+#endif
+d894 2
+a895 2
+      set_spinlock(_shmem->proc_lock[pid]);
+      comm_thunk=&_shmem->proc_comm_fifo[pid][_shmem->proc_comm_next[pid]];
+d901 2
+a902 2
+      _shmem->proc_comm_next[pid]++;
+      unset_spinlock(_shmem->proc_lock[pid]);
+d904 1
+a904 1
+      if (_shmem->proc_comm_next[pid] >= BSP_COMM_FIFO_SIZE)
+d909 3
+a911 3
+      set_spinlock(_shmem->proc_lock[_bsp_pid]);
+      _shmem->stores_to_me[_bsp_pid]++;
+      unset_spinlock(_shmem->proc_lock[_bsp_pid]);
+d935 1
+a935 1
+             conshortset_spinlock(_shmem->proc_buffer_writeA[pid])) {
+d939 1
+a939 1
+             conshortset_spinlock(_shmem->proc_buffer_writeB[pid])) {
+d956 3
+a958 3
+      set_spinlock(_shmem->proc_lock[_bsp_pid]);
+      comm_thunk=&_shmem->proc_comm_fifo[_bsp_pid]
+                                        [_shmem->proc_comm_next[_bsp_pid]];
+d964 2
+a965 2
+      _shmem->proc_comm_next[_bsp_pid] ++;
+      unset_spinlock(_shmem->proc_lock[_bsp_pid]);
+d967 1
+a967 1
+      if (_shmem->proc_comm_next[_bsp_pid] >= BSP_COMM_FIFO_SIZE)
+d971 3
+a973 3
+      set_spinlock(_shmem->proc_lock[pid]);
+      _shmem->stores_to_me[pid]++;
+      unset_spinlock(_shmem->proc_lock[pid]);
+d994 5
+a998 5
+  set_spinlock(_shmem->proc_lock[pid]);    
+  _shmem->stores_to_me[pid]++;
+  unset_spinlock(_shmem->proc_lock[pid]);
+  comm_thunk = &_shmem->proc_quick_infoA[pid];
+  _shmem->proc_buffer_infoA[pid] = comm_thunk;
+d1004 2
+a1005 2
+  memcpy(_shmem->proc_bufferA[pid],(char*) src,nbytes);
+  Vsema(_shmem->proc_buffer_waitA[pid]);
+d1014 3
+a1016 3
+  if (test_spinlock(_shmem->proc_buffer_writeA[_bsp_pid])) {
+    Psema(_shmem->proc_buffer_waitA[_bsp_pid]);
+    comm_thunk = _shmem->proc_buffer_infoA[_bsp_pid];
+d1019 1
+a1019 1
+           _shmem->proc_bufferA[_bsp_pid],
+d1021 4
+a1024 4
+    set_spinlock(_shmem->proc_lock[_bsp_pid]);    
+    _shmem->stores_to_me[_bsp_pid]--;
+    unset_spinlock(_shmem->proc_lock[_bsp_pid]);
+    unset_spinlock(_shmem->proc_buffer_writeA[_bsp_pid]);
+d1035 5
+a1039 5
+  set_spinlock(_shmem->proc_lock[pid]);    
+  _shmem->stores_to_me[pid]++;
+  unset_spinlock(_shmem->proc_lock[pid]);
+  comm_thunk = &_shmem->proc_quick_infoB[pid];
+  _shmem->proc_buffer_infoB[pid] = comm_thunk;
+d1045 2
+a1046 2
+  memcpy(_shmem->proc_bufferB[pid],(char*) src,nbytes);
+  Vsema(_shmem->proc_buffer_waitB[pid]);
+d1055 3
+a1057 3
+  if (test_spinlock(_shmem->proc_buffer_writeB[_bsp_pid])) {
+    Psema(_shmem->proc_buffer_waitB[_bsp_pid]);
+    comm_thunk = _shmem->proc_buffer_infoB[_bsp_pid];
+d1060 1
+a1060 1
+           _shmem->proc_bufferB[_bsp_pid],
+d1062 4
+a1065 4
+    set_spinlock(_shmem->proc_lock[_bsp_pid]);    
+    _shmem->stores_to_me[_bsp_pid]--;
+    unset_spinlock(_shmem->proc_lock[_bsp_pid]);
+    unset_spinlock(_shmem->proc_buffer_writeB[_bsp_pid]);
+d1086 2
+a1087 2
+    Vsema(_shmem->proc_sync[_bsp_pid][j]);
+    Psema(_shmem->proc_sync[right][j]);
+d1106 1
+d1109 4
+a1112 4
+     set_spinlock(_shmem->sync_lock);
+     (*(_shmem->sync_updownA))++;
+     unset_spinlock(_shmem->sync_lock);
+     while ((*(_shmem->sync_updownA)) != nprocs) {short_snooze();}
+d1117 4
+a1120 4
+     set_spinlock(_shmem->sync_lock);
+     (*(_shmem->sync_updownB))++;
+     unset_spinlock(_shmem->sync_lock);
+     while ((*(_shmem->sync_updownB)) != nprocs)  {short_snooze();}
+d1125 4
+a1128 4
+     set_spinlock(_shmem->sync_lock);
+     (*(_shmem->sync_updownA))--;
+     unset_spinlock(_shmem->sync_lock);
+     while (*(_shmem->sync_updownA))  {short_snooze();}
+d1133 4
+a1136 4
+     set_spinlock(_shmem->sync_lock);
+     (*(_shmem->sync_updownB))--;
+     unset_spinlock(_shmem->sync_lock);
+     while (*(_shmem->sync_updownB)) {short_snooze();}
+d1157 5
+a1161 5
+     set_spinlock(_shmem->sync_lock);
+     _shmem->sync_updownA++;
+     if (_shmem->sync_updownA==_bsp_nprocs){
+       unset_spinlock(_shmem->sync_lock);
+       for(i=1;i<_bsp_nprocs;i++) Vsema(_shmem->sync_semaA);
+d1163 2
+a1164 2
+       unset_spinlock(_shmem->sync_lock);
+       Psema(_shmem->sync_semaA);
+d1170 5
+a1174 5
+     set_spinlock(_shmem->sync_lock);
+     _shmem->sync_updownB++;
+     if (_shmem->sync_updownB==_bsp_nprocs){
+       unset_spinlock(_shmem->sync_lock);
+       for(i=1;i<_bsp_nprocs;i++) Vsema(_shmem->sync_semaB);
+d1176 2
+a1177 2
+       unset_spinlock(_shmem->sync_lock);
+       Psema(_shmem->sync_semaB);
+d1183 5
+a1187 5
+     set_spinlock(_shmem->sync_lock);
+     _shmem->sync_updownA--;
+     if (!_shmem->sync_updownA){
+       unset_spinlock(_shmem->sync_lock);
+       for(i=1;i<_bsp_nprocs;i++) Vsema(_shmem->sync_semaA);
+d1189 2
+a1190 2
+       unset_spinlock(_shmem->sync_lock);
+       Psema(_shmem->sync_semaA);
+d1196 5
+a1200 5
+     set_spinlock(_shmem->sync_lock);
+     _shmem->sync_updownB--;
+     if (!_shmem->sync_updownB){
+       unset_spinlock(_shmem->sync_lock);
+       for(i=1;i<_bsp_nprocs;i++) Vsema(_shmem->sync_semaB);
+d1202 2
+a1203 2
+       unset_spinlock(_shmem->sync_lock);
+       Psema(_shmem->sync_semaB);
+d1218 1
+d1222 2
+a1223 2
+  static   int _bsp_sync_phase=0;
+  int i,check;
+d1226 3
+a1228 3
+  switch (_bsp_sync_phase) {
+  case 0:
+     _shmem->sync_vector_updownA[_bsp_pid* barrier_vector_stride ]=1;
+d1231 2
+a1232 2
+       ptr = &_shmem->sync_vector_updownA[check* barrier_vector_stride];
+       while(!(*ptr)) {short_snooze();}
+d1234 2
+a1235 5
+     _bsp_sync_phase++;
+     break;
+
+  case 1:
+     _shmem->sync_vector_updownB[_bsp_pid* barrier_vector_stride ]=1;
+d1238 2
+a1239 2
+       ptr   = &_shmem->sync_vector_updownB[check* barrier_vector_stride];
+       while(!(*ptr)) {short_snooze();}
+a1240 25
+     _bsp_sync_phase++;
+     break;
+
+  case 2:
+     _shmem->sync_vector_updownA[_bsp_pid*barrier_vector_stride]=0;
+     for(i=1;i<_bsp_nprocs;i++) {
+       check = (_bsp_pid+i);if (check>=_bsp_nprocs) check-=_bsp_nprocs;
+       ptr   = &_shmem->sync_vector_updownA[check*barrier_vector_stride];
+       while(*ptr) {short_snooze();}
+     }
+     _bsp_sync_phase++;
+     break;
+
+  case 3:
+     _shmem->sync_vector_updownB[_bsp_pid*barrier_vector_stride]=0;
+     for(i=1;i<_bsp_nprocs;i++) {
+       check = (_bsp_pid+i);if (check>=_bsp_nprocs) check-=_bsp_nprocs;
+       ptr   = &_shmem->sync_vector_updownB[check*barrier_vector_stride];
+       while(*ptr) {short_snooze();}
+     }
+     _bsp_sync_phase=0;
+     break;
+
+  default:
+     bsp_error("{_bsp_counter_barrier} fallen off end");
+d1255 2
+a1256 1
+    bsp_debug("{shmem_malloc} unable to allocate %d bytes",size);
+d1259 2
+a1260 1
+    nbytes = size + (8-(size % 8)); /* 64 bit aligned */
+d1273 3
+a1275 2
+  if (size > _nbytes_of_shared_memory_segment_free)
+    bsp_debug("{shmem_calloc} unable to allocate %dx%d bytes",nelem,size);
+d1279 2
+a1280 1
+    nbytes += 8-(nbytes % 8);  /* 64 bit aligned */
+@
+
+
+1.6
+log
+@Adding Sys V shared memory..
+@
+text
+@d2 1
+a2 1
+%%      Copyright (C) 1995, University of Oxford                         %%
+d17 1
+a17 1
+% $Id: bsp_lib_shmem.lc,v 1.5 1995/11/10 12:10:18 jonh Exp jonh $
+d19 3
+d31 6
+a36 6
+# Revision 1.2  1995/08/30  10:53:13  jonh
+# I think there is a deadlock problem
+#
+# Revision 1.1  1995/08/22  10:38:14  jonh
+# Initial revision
+#
+a47 7
+#ifdef UNDERSCORE 
+#define BSP_STORE f77_bsp_store_
+#define BSP_FETCH f77_bsp_fetch_
+#else
+#define BSP_STORE f77_bsp_store
+#define BSP_FETCH f77_bsp_fetch
+#endif 
+d57 3
+d65 2
+a66 1
+Global shared memory arena used in the SGI implementation of shared memory.
+d68 3
+a70 1
+usptr_t *sgi_shmem_arena;
+d72 4
+a75 2
+ulock_t debug_lock;
+ulock_t print_lock;
+d77 15
+a91 1
+_BSPinfo *_shmem;
+d98 1
+a98 1
+int _bsp_pid;         /* An indivduals process number. */
+d103 2
+a104 3
+#ifdef BARRIER_COUNTER
+int _bsp_sync_phase;
+#endif
+a109 1
+#ifndef TURBO
+a111 1
+#endif
+d113 3
+a115 3
+void **_bsp_addr_table;
+int _bsp_addr_table_limit;
+int _bsp_addr_table_miller;
+d118 1
+d122 1
+a122 1
+\section{What's my process number}
+d124 6
+d131 1
+a131 7
+int bsp_pid() {
+  return (_bsp_pid);
+}
+
+int bsp_nprocs() {
+  return (_bsp_nprocs);
+}
+a133 52
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Initialise an individual processes global variables}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void initProcessGlobals() {
+#ifdef BARRIER_COUNTER
+   _bsp_sync_phase=0;
+#endif
+   _bsp_addr_table= (void **) calloc(BSP_ADDR_TABLE_SIZE,
+                                     sizeof(void*));
+   if (_bsp_addr_table==NULL)
+      bsp_error("{calloc} unable to alloc per process addr table");
+
+   _bsp_addr_table_miller = BSP_ADDR_TABLE_SIZE-1;
+   _bsp_addr_table_limit  = BSP_ADDR_TABLE_SIZE-2;
+   _bsp_addr_table[_bsp_addr_table_miller]=(char*)&_bsp_miller_reference;
+
+   _bsp_scratch_buffer = malloc(BSP_BUFFER_SIZE);
+   if (_bsp_scratch_buffer==NULL)
+     bsp_error("{bsp_start}: unable to allocate scratch buffer");
+#ifdef STATISTICS
+   initStatistics();
+#endif
+#ifdef PROFILE
+   initProfile();
+#endif
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Check the defines are correct}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Check to see that various restrictions on the conforms are true
+\begin{code}
+void checkDefines() {
+   if (BSP_BUFFER_SIZE % 4 != 0)
+      bottom("{BSP_BUFFER_SIZE} has to be divisable by 4.");
+
+   if (BSP_MAX_PROCS < 0)
+      bottom("{BSP_MAX_PROCS=%d} has to be positive",BSP_BUFFER_SIZE);
+
+   if (BSP_BUFFER_SIZE < (BSP_MAX_PROCS*sizeof(int)))
+      bottom("{BSP_BUFFER_SIZE=%d}: is too small. "
+             "It is required to be at least %d bytes for the\n"
+             "internal workings of the library.\n"
+             "Recompile your code with the -bspbuffer option",
+             BSP_BUFFER_SIZE,(BSP_MAX_PROCS*sizeof(int)));
+   if (BSP_COMM_FIFO_SIZE < 1)
+      bottom("{BSP_COMM_FIFO_SIZE} has to be greater than 1");
+}
+
+\end{code}
+d158 3
+a160 3
+  if      (_bsp_instart) bottom("{bsp_start}: already started");
+  else if (maxprocs<0)   bottom("{bsp_start}: positive number required");
+  else if (maxprocs==0) {
+d162 1
+a162 2
+    if (env_nprocs==NULL) *nprocs = BSP_MAX_PROCS;
+    else {
+d164 9
+a172 3
+      *nprocs = ((*nprocs > BSP_MAX_PROCS)||(*nprocs < 0))?
+                 BSP_MAX_PROCS:*nprocs;
+    }     
+a173 2
+  else if (maxprocs>BSP_MAX_PROCS) *nprocs = BSP_MAX_PROCS;
+  else                             *nprocs = maxprocs;
+a175 1
+  _bsp_pid =0;
+d179 14
+a192 54
+Set various parameters for the IRIX arena:
+\begin{description}
+\item[\texttt{CONF\_ARENATYPE}] 
+        Make sure that other unrelated processes cannot join this arena. 
+
+\item[\texttt{CONF\_INITUSERS}] 
+        Allow upto \texttt{BSP\_MAX\_PROCS} processors to become active.
+
+\item[\texttt{CONF\_STHREADIOOFF}]
+        Turn off the single-threading of any stio routines. If I am
+        going to require single theading, then I will perform locking
+        myself.
+\item[\texttt{CONF\_INITSIZE}]
+        Set the size of the shared memory segment to be equal to the
+        size of the global variables defined in
+        \S\ref{sect:bspirix:shmemglobals}.
+
+\item[\texttt{CONF\_LOCKTYPE}]
+        Decide if we are going to perform debugging on locks. For the
+        time being we are just going for the fastest possible locking
+        mechanism.
+\end{description}
+\begin{code}
+  /* Let the arena grow to 20 times its natural size */
+  usconfig(CONF_INITSIZE,
+           2*(sizeof(int)        +
+              sizeof(barrier_t)  +
+              (2*sizeof(ulock_t))+
+              ((*nprocs+1)*2*BSP_BUFFER_SIZE*sizeof(char)) +
+              (*nprocs*((sizeof(char*))           +
+                        (4*sizeof(ulock_t*))      +
+                        (2*sizeof(_BSPcomm_thunk*)) +
+                        (sizeof(ulock_t))         +
+                        ((*nprocs)*2*sizeof(usptr_t*)) +
+                        (sizeof(_BSPcomm_thunk)*(BSP_COMM_FIFO_SIZE+1))+
+                        (2*sizeof(int))))));
+
+  usconfig(CONF_INITUSERS, BSP_MAX_PROCS);
+  usconfig(CONF_ARENATYPE, US_SHAREDONLY);
+  usconfig(CONF_LOCKTYPE,US_NODEBUG); 
+#ifndef DEBUG
+  usconfig(CONF_STHREADIOON);
+  usconfig(CONF_STHREADMISCON); 
+#else
+  usconfig(CONF_STHREADIOOFF);
+  usconfig(CONF_STHREADMISCOFF); 
+#endif
+\end{code}
+
+Allocate a shared memory arena.
+\begin{code}
+  sgi_shmem_arena = usinit("/tmp/BSParena");
+  if (sgi_shmem_arena==NULL) 
+    bottom("{usinit} unable to alloc arena");
+d197 1
+a197 1
+  _shmem =(_BSPinfo *) usmalloc(sizeof(_BSPinfo),sgi_shmem_arena);
+d199 1
+a199 29
+    bottom("{usmalloc}: unable to alloc shared memory segment");
+
+  _shmem->buffer
+    =(char *) uscalloc(BSP_BUFFER_SIZE,1,sgi_shmem_arena);
+  if (_shmem->buffer==NULL) 
+    bottom("{usmalloc}: unable to alloc buffer");
+ 
+  /* Table has to be max size so that bsp_newprocs works without */
+  /* reallocing */
+  _shmem->proc_bufferA 
+    = (char **) uscalloc(*nprocs,sizeof(char*),sgi_shmem_arena);
+  _shmem->proc_bufferB 
+    = (char **) uscalloc(*nprocs,sizeof(char*),sgi_shmem_arena);
+  if (_shmem->proc_bufferA==NULL || _shmem->proc_bufferB==NULL) 
+    bottom("{usmalloc}: unable to alloc the per process buffer table");
+
+  for(i=0; i< *nprocs; i++) {
+    _shmem->proc_bufferA[i]
+      =(char *) uscalloc(BSP_BUFFER_SIZE,1,sgi_shmem_arena);
+    _shmem->proc_bufferB[i]
+      =(char *) uscalloc(BSP_BUFFER_SIZE,1,sgi_shmem_arena);
+    if (_shmem->proc_bufferA[i]==NULL || _shmem->proc_bufferB[i]==NULL) 
+      bottom("{usmalloc}: unable to alloc %d bytes for " 
+                "processor %d's buffer",BSP_BUFFER_SIZE,i);
+  }
+
+ 
+  _shmem->lock = usnewlock(sgi_shmem_arena);
+  if (_shmem->lock==NULL)  bottom("{newlock} unable to alloc lock");
+d201 8
+a208 4
+  debug_lock = usnewlock(sgi_shmem_arena);
+  if (debug_lock==NULL)  bottom("{newlock} unable to alloc lock");
+  print_lock = usnewlock(sgi_shmem_arena);
+  if (print_lock==NULL)  bottom("{newlock} unable to alloc lock");
+d211 1
+a211 1
+    = (ulock_t *) uscalloc(*nprocs,sizeof(ulock_t),sgi_shmem_arena);
+d213 1
+a213 1
+    = (ulock_t *) uscalloc(*nprocs,sizeof(ulock_t),sgi_shmem_arena);
+d215 1
+a215 1
+    = (ulock_t *) uscalloc(*nprocs,sizeof(ulock_t),sgi_shmem_arena);
+d219 1
+a219 1
+    bottom("{usmalloc}: unable to alloc per process locks");
+d222 3
+a224 3
+    _shmem->proc_buffer_writeA[i] =usnewlock(sgi_shmem_arena);
+    _shmem->proc_buffer_writeB[i] =usnewlock(sgi_shmem_arena);
+    _shmem->proc_lock[i]          =usnewlock(sgi_shmem_arena);
+d228 1
+a228 1
+      bottom("{usmalloc}: unable to alloc a per process lock");
+d232 1
+a232 1
+    =(usptr_t**) uscalloc(*nprocs,sizeof(usptr_t*),sgi_shmem_arena);
+d234 1
+a234 1
+    =(usptr_t**) uscalloc(*nprocs,sizeof(usptr_t*),sgi_shmem_arena);
+d237 1
+a237 1
+    bottom("{uscalloc}: unable to alloc per process semaphore");
+d241 1
+a241 1
+      =usnewsema(sgi_shmem_arena,0); /*Wait or sync semaphore */
+d243 1
+a243 1
+      =usnewsema(sgi_shmem_arena,0); /*Wait or sync semaphore */
+d246 1
+a246 1
+      bottom("{usnewsema}: unable to alloc a per process semaphore");
+d250 2
+a251 2
+  _shmem->sync = new_barrier(sgi_shmem_arena);
+  if (_shmem->sync==NULL)  bottom("{new_barrier} unable to alloc barrier");
+d259 1
+a259 1
+    =(usptr_t***) uscalloc(*nprocs,sizeof(usptr_t**),sgi_shmem_arena);
+d261 1
+a261 1
+    bottom("{uscalloc}: unable to alloc outer barrier semaphore");
+d266 1
+a266 1
+        = (usptr_t**) uscalloc(log2_nprocs,sizeof(usptr_t*),sgi_shmem_arena);
+d268 1
+a268 1
+        bottom("{uscalloc}: unable to alloc a inner barrier semaphore; "
+d271 1
+a271 1
+        _shmem->proc_sync[i][j] = usnewsema(sgi_shmem_arena,0); 
+d273 1
+a273 1
+          bottom("{usnewsema}: unable to alloc a barrier semaphore (%d,%d,%d)",
+d280 35
+a314 5
+#ifdef BARRIER_COUNTER
+  _shmem->sync_updownA = 0;
+  _shmem->sync_updownB = 0;
+  _shmem->sync_lock    = usnewlock(sgi_shmem_arena);
+  if (_shmem->sync_lock==NULL)  bottom("{newlock} unable to alloc lock");
+d318 2
+a319 2
+    = (_BSPcomm_thunk*) uscalloc(*nprocs,sizeof(_BSPcomm_thunk),
+                                 sgi_shmem_arena);
+d322 10
+a331 2
+    = (_BSPcomm_thunk*) uscalloc(*nprocs,sizeof(_BSPcomm_thunk),
+                                 sgi_shmem_arena);
+d334 9
+a342 2
+    = (_BSPcomm_thunk**) uscalloc(*nprocs,sizeof(_BSPcomm_thunk*),
+                                  sgi_shmem_arena);
+d345 2
+a346 2
+      =(_BSPcomm_thunk*) uscalloc(BSP_COMM_FIFO_SIZE,sizeof(_BSPcomm_thunk),
+                                  sgi_shmem_arena);
+d348 1
+a348 1
+      bottom("{usmalloc}: unable to alloc a per process comm fifo");
+d352 1
+a352 1
+    = (int *) uscalloc(*nprocs,sizeof(int),sgi_shmem_arena);
+d354 1
+a354 1
+      bottom("{usmalloc}: unable to alloc a per process comm next");
+d358 1
+a358 1
+    = (int *) uscalloc(*nprocs,sizeof(int),sgi_shmem_arena);
+d360 1
+a360 1
+      bottom("{usmalloc}: unable to alloc stores to me");
+d362 24
+d391 1
+a391 1
+  usputinfo(sgi_shmem_arena,_shmem);
+a398 2
+  /* Make sure core-dumping signals are caught. Otherwise */
+  /* A subset of the processes die                        */
+a401 2
+  /* signal(SIGSEGV, kill_all_processors); */
+  /* signal(SIGBUS,  kill_all_processors); */
+d403 3
+a405 4
+  prctl(PR_TERMCHILD);
+  /* If a child calls error, then it kills its parent           */
+  /* because of the above process operation, if the parent dies */
+  /* it will also kill its children---no bloody zombies :-)     */
+a406 3
+  schedctl(NDPRI,NDPHIMAX);
+  schedctl(SCHEDMODE, SGS_GANG);
+\end{code}
+d411 4
+a414 7
+#ifdef STATISTICS
+  if (BSP_DO_STAT) createStatisticsLog();
+#endif
+#ifdef PROFILE
+  createProfileLog();
+#endif
+
+d417 1
+a417 1
+    if      (fork_pid < 0) bottom("{fork}: unable to spawn process");
+d424 2
+a425 1
+    }
+d427 8
+a434 1
+  _shmem = usgetinfo(sgi_shmem_arena);
+d436 2
+a437 1
+  if (BSP_OPT_FCOMBINE_STORES) bspcombstores_init();
+d448 1
+a448 1
+  /* barrier_sync(); */
+d457 1
+d473 1
+a473 1
+#ifndef TURBO
+a477 1
+  _bsp_sstepno      = sstepno;
+d480 2
+d483 1
+d503 1
+a503 1
+#ifndef TURBO
+d517 1
+a517 1
+  barrier_sync();
+d665 2
+a666 2
+#ifndef TURBO
+  _bsp_insstep =0;  
+d691 1
+a691 1
+_BSPcomm_thunk *info = &_shmem->proc_buffer_infoA[_bsp_pid];
+d711 1
+a711 1
+_BSPcomm_thunk *info = &_shmem->proc_buffer_infoB[_bsp_pid];
+d748 1
+a748 1
+  memcpy(&_shmem->proc_buffer_infoA[store_pid],to_send,sizeof(_BSPcomm_thunk));
+d768 1
+a768 1
+  memcpy(&_shmem->proc_buffer_infoB[store_pid],to_send,sizeof(_BSPcomm_thunk));
+a849 29
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\texttt{bsp\_addr}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_addr(int offset, void *addr) {
+#ifdef SANITY_CHECK
+    if (offset >= _bsp_addr_table_limit)
+      bsp_error("{bsp_sstep}: internal table overflow");
+#endif
+
+   _bsp_addr_table[offset] = addr;   
+
+}
+
+char *bsp_addr_get(int i) {
+  return (_bsp_addr_table[i]);
+}
+\end{code}
+
+\begin{code}
+int bsp_addr_new_global(void *addr) {
+  if (_bsp_addr_table_limit<=0)
+    bsp_error("{bsp_addr_get_global} address table underflow");
+  _bsp_addr_table[_bsp_addr_table_limit]=addr;
+  return (_bsp_addr_table_limit--);
+}
+\end{code}
+
+
+a913 15
+Compatibility mode with Richards library:
+\begin{code}
+void bsp_fetch(int pid, char *src, void *dst, int nbytes) {
+  bsp_addr_fetch(pid,_bsp_addr_table_miller,
+                 src-(char*)&_bsp_miller_reference,
+                 dst,nbytes);
+}
+
+void BSP_FETCH(int *pid, char *src, void *dst, int *nbytes) {
+  bsp_addr_fetch(*pid,_bsp_addr_table_miller,
+                 src-(char*)&_bsp_miller_reference,
+                 dst,*nbytes);
+}
+\end{code}
+
+d915 1
+a915 1
+\section{\texttt{bsp\_store}}
+d917 1
+a917 3
+This is the new store. It is called as \texttt{bsp\_store} in the
+source program, but mangled into this name by bspcpp.
+
+d919 1
+a919 1
+void bsp_addr_store(int pid, void *src, int dst_addr, int offset, int nbytes) {
+a925 14
+#ifdef SANITY_CHECK
+  if (pid < 0 || pid >= _bsp_nprocs) 
+    bsp_error("{bsp_store}: processor %d is trying to store "
+              "to no-existant processor %d.",_bsp_pid,pid);
+#endif
+
+  if (pid == _bsp_pid) {
+    memcpy(((char *)_bsp_addr_table[dst_addr] + offset),(char *)src,nbytes); 
+#ifdef PROFILE
+    bspprof_sstep_self_comm(nbytes);
+#endif
+
+  } else if (BSP_OPT_FCOMBINE_STORES && bspcombstores_applicable(pid,nbytes)){
+    bspcombstores_store(pid,src,dst_addr,offset,nbytes);
+d928 1
+a928 3
+  /* The quick store optimisation can undermine cost modeling for some */
+  /* simple examples */
+  } else if (nbytes < BSP_BUFFER_SIZE && 
+d935 1
+a936 1
+  } else {
+d972 1
+d974 1
+a974 17
+}
+\end{code}
+
+Compatibility mode with Richards library:
+\begin{code}
+/* C interface */
+void bsp_store(int pid, void *src, char *dst, int nbytes) {
+  bsp_addr_store(pid,src,_bsp_addr_table_miller,
+                 dst - (char*)&_bsp_miller_reference,
+                 nbytes);
+}
+
+/* F77 interface */
+void BSP_STORE(int *pid, void *src, char *dst, int *nbytes) {
+  bsp_addr_store(*pid,src,_bsp_addr_table_miller,
+                 dst - (char*)&_bsp_miller_reference,
+                 *nbytes);
+d991 2
+a992 1
+  comm_thunk = &_shmem->proc_buffer_infoA[pid];
+d1003 2
+d1010 1
+a1010 1
+    comm_thunk = &_shmem->proc_buffer_infoA[_bsp_pid];
+a1028 1
+  Vsema(_shmem->proc_buffer_waitB[pid]);
+d1032 2
+a1033 1
+  comm_thunk = &_shmem->proc_buffer_infoB[pid];
+d1040 1
+d1044 2
+d1051 1
+a1051 1
+    comm_thunk = &_shmem->proc_buffer_infoB[_bsp_pid];
+d1095 52
+a1146 2
+#ifdef BARRIER_COUNTER
+void _bsp_counter_barrier() {
+d1152 7
+a1158 2
+     unset_spinlock(_shmem->sync_lock);
+     while (_shmem->sync_updownA != _bsp_nprocs) short_snooze();
+d1165 7
+a1171 2
+     unset_spinlock(_shmem->sync_lock);
+     while (_shmem->sync_updownB != _bsp_nprocs) short_snooze();
+d1178 7
+a1184 2
+     unset_spinlock(_shmem->sync_lock);
+     while (_shmem->sync_updownA) short_snooze();
+d1191 65
+a1255 2
+     unset_spinlock(_shmem->sync_lock);
+     while (_shmem->sync_updownB) short_snooze();
+d1265 40
+@
+
+
+1.5
+log
+@Added counter barrier
+@
+text
+@d17 1
+a17 1
+% $Id: bsp_lib_shmem.lc,v 1.4 1995/10/16 08:22:37 jonh Exp jonh $
+d19 3
+d45 8
+d127 1
+a127 1
+		                     sizeof(void*));
+d216 1
+a216 1
+	Make sure that other unrelated processes cannot join this arena. 
+d219 1
+a219 1
+	Allow upto \texttt{BSP\_MAX\_PROCS} processors to become active.
+d222 1
+a222 1
+	Turn off the single-threading of any stio routines. If I am
+d226 1
+a226 1
+	Set the size of the shared memory segment to be equal to the
+d231 1
+a231 1
+	Decide if we are going to perform debugging on locks. For the
+d246 3
+a248 3
+		        ((*nprocs)*2*sizeof(usptr_t*)) +
+		        (sizeof(_BSPcomm_thunk)*(BSP_COMM_FIFO_SIZE+1))+
+		        (2*sizeof(int))))));
+d387 1
+a387 1
+				 sgi_shmem_arena);
+d391 1
+a391 1
+				 sgi_shmem_arena);
+d395 1
+a395 1
+				  sgi_shmem_arena);
+d399 1
+a399 1
+				  sgi_shmem_arena);
+d479 1
+a479 1
+  barrier_sync();
+d537 1
+a537 1
+	      "opening is numbered %d, whilst closing is numbered %d",
+d564 2
+a565 1
+  randomised_to_go = stores_to_other;
+d575 1
+a575 1
+  while (_shmem->stores_to_me[_bsp_pid] > 0) {
+d578 1
+a578 1
+              _shmem->stores_to_me[_bsp_pid],stores_to_other);
+d586 1
+d593 1
+a593 1
+ 
+d603 2
+a606 2
+        /* Wake-up any process waiting on this semaphore */
+        Vsema(_shmem->proc_buffer_waitA[pid_to_front]);
+d610 2
+a613 2
+        /* Wake-up any process waiting on this semaphore */
+        Vsema(_shmem->proc_buffer_waitB[pid_to_front]);
+d628 2
+a629 2
+	/* It undermines BSP cost modeling by a positive factor of two */
+	/* in extreme cases                                            */
+d638 1
+a638 1
+	} else {
+d644 2
+a645 1
+          if (randomised_to_go-- > 0)
+d647 1
+a647 1
+          else {
+d691 1
+a731 1
+  _shmem->stores_to_me[_bsp_pid]--;
+a751 1
+  _shmem->stores_to_me[_bsp_pid]--;
+d851 1
+a851 1
+	          stepno,_bsp_pid,_shmem->proc_comm_next[_bsp_pid],
+d859 2
+a860 2
+	         "store",
+	         COMM_GET_PID(_shmem->proc_comm_fifo[_bsp_pid][i].comm_pid),
+d867 2
+a868 2
+	         "fetch",
+		 COMM_GET_PID(_shmem->proc_comm_fifo[_bsp_pid][i].comm_pid),
+a954 1
+#ifndef TURBO
+a959 1
+#endif
+d978 6
+a1050 1
+#ifndef TURBO
+a1054 1
+#endif
+d1068 1
+d1073 7
+@
+
+
+1.4
+log
+@Adding double buffering
+@
+text
+@d17 1
+a17 1
+% $Id: bsp_lib_shmem.lc,v 1.3 1995/08/31 16:32:32 jonh Exp jonh $
+d19 3
+d42 4
+a45 2
+void copyFilledBufferToDestination();
+void copySourceToBuffer(_BSPcomm_thunk*,int);
+d48 2
+a49 1
+void bsp_quick_store(int,void*,int,int,int);
+d74 4
+d101 4
+d112 3
+d167 2
+a168 1
+#ifndef TURBO
+d171 1
+d229 2
+a230 2
+              (sizeof(ulock_t))  +
+              ((*nprocs+1)*BSP_BUFFER_SIZE*sizeof(char)) +
+d232 2
+a233 2
+                        (2*sizeof(ulock_t*))      +
+                        (sizeof(_BSPcomm_thunk*)) +
+d235 1
+a235 1
+		        ((*nprocs)*sizeof(usptr_t*)) +
+d271 1
+a271 1
+  _shmem->proc_buffer 
+d273 3
+a275 1
+  if (_shmem->proc_buffer ==NULL) 
+d279 3
+a281 1
+    _shmem->proc_buffer[i]
+d283 1
+a283 1
+    if (_shmem->proc_buffer[i]==NULL) 
+d288 1
+a288 4
+  _shmem->sync = new_barrier(sgi_shmem_arena);
+  if (_shmem->sync==NULL)  bottom("{new_barrier} unable to alloc barrier");
+  init_barrier(_shmem->sync);
+  
+d297 3
+a299 1
+  _shmem->proc_buffer_write
+d303 3
+a305 1
+  if (_shmem->proc_buffer_write==NULL || _shmem->proc_lock==NULL) 
+d309 6
+a314 3
+    _shmem->proc_buffer_write[i] =usnewlock(sgi_shmem_arena);
+    _shmem->proc_lock[i]         =usnewlock(sgi_shmem_arena);
+    if (_shmem->proc_buffer_write[i]==NULL||_shmem->proc_lock[i]==NULL)
+d318 1
+a318 1
+  _shmem->proc_buffer_wait
+d320 4
+a323 1
+  if (_shmem->proc_buffer_wait==NULL) 
+d327 3
+a329 1
+    _shmem->proc_buffer_wait[i]
+d331 2
+a332 1
+    if (_shmem->proc_buffer_wait[i]==NULL)
+d336 7
+a342 1
+#ifndef TURBO
+d367 12
+a378 1
+  _shmem->proc_buffer_info
+a507 1
+
+d510 3
+a512 5
+  int next_store_front;
+  int next_store_back;
+  int stores_to_other;
+  int pid_copy_to;
+  int got_lock;
+d563 1
+a563 2
+  while ((_shmem->stores_to_me[_bsp_pid] > 0) &&
+         (stores_to_other > 0)) {
+d568 2
+a569 2
+    if (test_spinlock(_shmem->proc_buffer_write[_bsp_pid])) {
+      /* Someone is writing into my buffer. Wait until they */
+d571 9
+a579 3
+      Psema(_shmem->proc_buffer_wait[_bsp_pid]);
+      copyFilledBufferToDestination();
+      unset_spinlock(_shmem->proc_buffer_write[_bsp_pid]);
+d582 4
+a585 3
+    else if (next_store_front==next_store_back) {
+      /* Special case the situation where there is only one */
+      /* thing going out */
+d587 3
+a589 14
+      pid_copy_to=COMM_GET_PID(to_send->comm_pid);
+      while (!test_spinlock(_shmem->proc_buffer_write[_bsp_pid]) &&
+             !(got_lock=conshortset_spinlock(
+                          _shmem->proc_buffer_write[pid_copy_to]))) {
+#ifndef TURBO
+        short_snooze();
+#endif
+#ifdef STATISTICS
+        _bspstat.write_waits++;
+#endif
+      }
+      if (got_lock) {
+        /* I can send something out */
+        copySourceToBuffer(to_send,pid_copy_to);
+d593 4
+a596 17
+        Vsema(_shmem->proc_buffer_wait[pid_copy_to]);
+      } else {
+        /* Something came in */
+        Psema(_shmem->proc_buffer_wait[_bsp_pid]);
+        copyFilledBufferToDestination();
+        unset_spinlock(_shmem->proc_buffer_write[_bsp_pid]);  
+      }
+    } 
+    else {
+      /* My buffer is empty and I have something to send. Send the */
+      /* information to the processor whoose info is at the start of */
+      /* the FIFO.   */
+      to_send    =&_shmem->proc_comm_fifo[_bsp_pid][next_store_front];
+      pid_copy_to=COMM_GET_PID(to_send->comm_pid);
+      got_lock   =conshortset_spinlock(_shmem->proc_buffer_write[pid_copy_to]);
+      if (got_lock) {
+        copySourceToBuffer(to_send,pid_copy_to);
+d600 1
+a600 1
+        Vsema(_shmem->proc_buffer_wait[pid_copy_to]);
+d605 6
+a610 4
+        pid_copy_to = COMM_GET_PID(to_send->comm_pid);
+        got_lock=conshortset_spinlock(_shmem->proc_buffer_write[pid_copy_to]);
+        if (got_lock) {
+          copySourceToBuffer(to_send,pid_copy_to);
+d613 7
+d621 4
+a624 1
+          Vsema(_shmem->proc_buffer_wait[pid_copy_to]);
+d633 2
+d636 2
+a637 1
+          _bspstat.write_waits++;
+d639 1
+d641 8
+a648 2
+      }
+    } 
+d652 3
+a654 2
+Now comes the easier cases, when a processor is either just sending
+information out.
+d657 10
+a666 4
+    to_send     = &_shmem->proc_comm_fifo[_bsp_pid][next_store_front];
+    pid_copy_to = COMM_GET_PID(to_send->comm_pid);
+    set_spinlock(_shmem->proc_buffer_write[pid_copy_to]);
+    copySourceToBuffer(to_send,pid_copy_to);
+a668 14
+    /* Wake-up any process waiting on this semaphore */
+    Vsema(_shmem->proc_buffer_wait[pid_copy_to]);
+  }
+\end{code}
+
+, or it is just receiving information:
+\begin{code}
+  while (_shmem->stores_to_me[_bsp_pid] > 0) {
+#ifdef STATISTICS
+      _bspstat.read_waits++;
+#endif
+      Psema(_shmem->proc_buffer_wait[_bsp_pid]);
+      copyFilledBufferToDestination();
+      unset_spinlock(_shmem->proc_buffer_write[_bsp_pid]);
+d699 3
+d703 2
+a704 1
+void copyFilledBufferToDestination() {
+d708 4
+a711 6
+  if (COMM_IS_STORE(_shmem->proc_buffer_info[_bsp_pid].comm_pid)) {
+    memcpy(((char *) _bsp_addr_table[
+                       _shmem->proc_buffer_info[_bsp_pid].addr_table] + 
+                    _shmem->proc_buffer_info[_bsp_pid].offset),
+           _shmem->proc_buffer[_bsp_pid],
+           _shmem->proc_buffer_info[_bsp_pid].nbytes);
+d713 24
+a736 3
+    memcpy((char *)_shmem->proc_buffer_info[_bsp_pid].addr_real,
+           (char *)_shmem->proc_buffer[_bsp_pid],
+           _shmem->proc_buffer_info[_bsp_pid].nbytes);
+d741 1
+a741 2
+  _bspstat.packet_stores_dstnbytes += 
+  _shmem->proc_buffer_info[_bsp_pid].nbytes;
+d744 1
+d746 5
+a750 1
+void copySourceToBuffer(_BSPcomm_thunk *to_send,int store_pid) { 
+d755 1
+a755 1
+    memcpy(_shmem->proc_buffer[store_pid],
+d759 1
+a759 1
+    memcpy((char *)_shmem->proc_buffer[store_pid],
+d763 1
+a763 1
+  memcpy(&_shmem->proc_buffer_info[store_pid],to_send,sizeof(_BSPcomm_thunk));
+d770 26
+d946 1
+a946 1
+                  "Recompile with -bspfifo=%d",pid,BSP_COMM_FIFO_SIZE,
+d998 3
+d1002 2
+a1003 2
+             !test_spinlock(_shmem->proc_buffer_write[pid])) {
+    bsp_quick_store(pid,src,dst_addr,offset,nbytes);
+d1005 4
+d1037 1
+a1037 1
+                  "Recompile with -bspfifo=%d",
+d1062 4
+a1065 1
+away by the end of super-step exchange of communication thunks.
+d1067 1
+a1067 1
+void bsp_quick_store(int pid,void *src,int dst_addr,int offset,int nbytes) {
+d1070 49
+a1118 15
+  if (!conshortset_spinlock(_shmem->proc_buffer_write[pid])) {
+    /* Damn someone got in before me */
+    bsp_addr_store(pid,src,dst_addr,offset,nbytes);
+  } else {
+    Vsema(_shmem->proc_buffer_wait[pid]);
+    set_spinlock(_shmem->proc_lock[pid]);    
+    _shmem->stores_to_me[pid]++;
+    unset_spinlock(_shmem->proc_lock[pid]);
+    comm_thunk = &_shmem->proc_buffer_info[pid];
+    comm_thunk->comm_pid   = COMM_SET_STORE(pid);
+    comm_thunk->addr_table = dst_addr;
+    comm_thunk->offset     = offset;
+    comm_thunk->addr_real  = src;
+    comm_thunk->nbytes     = nbytes;
+    memcpy(_shmem->proc_buffer[pid],(char*) src,nbytes);
+d1123 17
+d1149 1
+a1149 8
+#ifdef TURBO
+void _bsp_dissemination_barrier() {
+  bsp_error("{_bsp_dissemination_barrier} should be using hardware barriers");
+}
+\end{code}
+
+\begin{code}
+#else
+d1162 47
+@
+
+
+1.3
+log
+@*** empty log message ***
+@
+text
+@d17 1
+a17 1
+% $Id: bsp_lib_shmem.lc,v 1.2 1995/08/30 10:53:13 jonh Exp jonh $
+d19 3
+d42 2
+d68 5
+d75 1
+a75 1
+int _bsp_instart=0;
+d79 1
+d85 9
+d103 10
+a112 2
+   _bsp_addr_table_limit   = BSP_ADDR_TABLE_SIZE-1;
+   _bsp_addr_table[_bsp_addr_table_limit] = (char*)&_bsp_miller_reference;
+d149 5
+a153 1
+  int i, j, fork_pid, log2_nprocs;
+d166 9
+a174 1
+  else if (maxprocs==0)            *nprocs = BSP_MAX_PROCS;
+d212 2
+a213 2
+              (*nprocs*((sizeof(char*))     +
+                        (sizeof(ulock_t*))  +
+d215 1
+a215 1
+                        (sizeof(ulock_t))  +
+a264 1
+#ifdef TURBO
+a267 1
+#endif
+d279 3
+a281 1
+  if (_shmem->proc_buffer_write ==NULL) 
+d285 3
+a287 3
+    _shmem->proc_buffer_write[i]
+      =usnewlock(sgi_shmem_arena);
+    if (_shmem->proc_buffer_write[i]==NULL)
+d352 1
+a352 1
+      bottom("{usmalloc}: unable to alloc a per process comm next");
+d362 22
+d387 3
+d407 1
+a407 19
+
+  schedctl(SCHEDMODE, SGS_GANG);
+  schedctl(NDPRI,NDPHIMAX);
+
+  signal(SIGHUP,  kill_process);
+  signal(SIGTERM, kill_all_processors);
+  signal(SIGINT,  kill_all_processors);
+  /* Make sure core-dumping signals are caught. Otherwise */
+  /* A subset of the processes die                        */
+  signal(SIGQUIT, kill_all_processors);
+  signal(SIGABRT, kill_all_processors);
+  signal(SIGFPE,  kill_all_processors);
+  signal(SIGSEGV, kill_all_processors);
+  signal(SIGBUS,  kill_all_processors);
+  signal(SIGSYS,  kill_all_processors);
+  prctl(PR_TERMCHILD);
+  /* If a child calls error, then it kills its parent           */
+  /* because of the above process operation, if the parent dies */
+  /* it will also kill its children---no bloody zombies :-)     */
+d419 3
+a421 1
+
+d436 3
+d440 1
+a440 1
+  _bspprof.super_steps++;
+d442 1
+d447 5
+a451 4
+  else {
+    _bsp_sstepno = sstepno;
+    _bsp_insstep = 1;
+  }
+d466 1
+d469 5
+d477 1
+a477 1
+  else if (_bsp_sstepno != stepno) 
+d481 10
+a490 4
+  else {
+    /* Need to perform a synchronise to ensure that all communication */
+    /* thunks have been written */
+    barrier_sync();
+d492 1
+a492 1
+    dumpFifoCommTable(stepno);
+d496 1
+d505 13
+a517 5
+    stores_to_other  = _shmem->proc_comm_next[_bsp_pid];
+    next_store_front = 0;
+    next_store_back  = _shmem->proc_comm_next[_bsp_pid] -1;
+    while ((_shmem->stores_to_me[_bsp_pid] > 0) ||
+           (stores_to_other > 0)) {
+d519 21
+a539 2
+      bsp_debug("{bsp_sstep_end}: %d to come in, %d to go out",
+                _shmem->stores_to_me[_bsp_pid],stores_to_other);
+d541 2
+a542 6
+      if (test_spinlock(_shmem->proc_buffer_write[_bsp_pid])) {
+        /* Someone is writing into my buffer. Wait until they */
+        /* have finished writing by sleeping on the semaphore */
+#ifdef PROFILE
+        if (testsema(_shmem->proc_buffer_wait[_bsp_pid])==0)
+          _bspprof.write_waits++;
+d544 10
+d556 20
+a575 7
+        unset_spinlock(_shmem->proc_buffer_write[_bsp_pid]);
+      } 
+      else if (stores_to_other > 0) {
+        /* My buffer is empty and I have something to send. Send the */
+	/* information to the processor whoose info is at the start of */
+	/* the FIFO.   */
+        to_send     = &_shmem->proc_comm_fifo[_bsp_pid][next_store_front];
+d577 1
+a577 1
+        got_lock    = conset_spinlock(_shmem->proc_buffer_write[pid_copy_to]);
+d581 1
+a581 1
+          next_store_front++;
+a584 12
+          /* Damn... the processor at the front at the FIFO is */
+	  /* busy...lets try the one at the back :-)           */
+          to_send     = &_shmem->proc_comm_fifo[_bsp_pid][next_store_back];
+          pid_copy_to = COMM_GET_PID(to_send->comm_pid);
+          got_lock = conset_spinlock(_shmem->proc_buffer_write[pid_copy_to]);
+          if (got_lock) {
+            copySourceToBuffer(to_send,pid_copy_to);
+            stores_to_other--;
+            next_store_back--;
+            /* Wake-up any process waiting on this semaphore */
+            Vsema(_shmem->proc_buffer_wait[pid_copy_to]);
+	  } else {
+d587 7
+a593 5
+          /* the form {0->1, 0->2} + {2->1, 1->2}. We wait until       */
+          /* either the buffer I want to write to is free, or someone  */
+          /* writes into me.                                           */
+#ifndef TURBO
+            short_snooze();
+d595 26
+a620 2
+#ifdef PROFILE
+            _bspprof.write_waits++;
+d622 8
+a629 8
+            /* Go back up to the top of the loop and deal with the     */
+	    /* message that has come in, or the one that should go out */
+          }
+        }
+      } else {
+        /* I have nothing else to send, but I am waiting for someone */
+	/* to put something into my buffer. Wait until the buffer is */
+        /* full and then copy it into the destination                */
+d631 5
+a635 1
+        bsp_debug("{sstep_end}:Nothing to send, so someone fill my buffer");
+d637 5
+d643 3
+a645 1
+        _bspprof.empty_waits++;
+d647 4
+a650 7
+        Psema(_shmem->proc_buffer_wait[_bsp_pid]);
+        copyFilledBufferToDestination();
+        unset_spinlock(_shmem->proc_buffer_write[_bsp_pid]);
+      }
+    }
+#ifdef DEBUG
+    bsp_debug("{sstep_end}:Finished communication");
+a651 9
+    _shmem->proc_comm_next[_bsp_pid]=0;
+    _bsp_insstep        =0;  
+
+    /* I'm not quite sure if I need this barrier. I can do without the */
+    /* following barrier if I know that there are no fetches in the    */
+    /* next super-step. Maybe programs could be special cased          */
+    /* the processes run on after communication,                       */
+    barrier_sync();
+  }
+d672 3
+a674 3
+#ifdef PROFILE
+  _bspprof.packet_stores_dst++;
+  _bspprof.packet_stores_dstnbytes += 
+d692 4
+a695 9
+
+  _shmem->proc_buffer_info[store_pid].comm_pid  = to_send->comm_pid;
+  _shmem->proc_buffer_info[store_pid].addr_real = to_send->addr_real;
+  _shmem->proc_buffer_info[store_pid].addr_table=to_send->addr_table;
+  _shmem->proc_buffer_info[store_pid].offset    = to_send->offset;
+  _shmem->proc_buffer_info[store_pid].nbytes    = to_send->nbytes;
+#ifdef PROFILE
+  _bspprof.packet_stores_src++;
+  _bspprof.packet_stores_srcnbytes += to_send->nbytes;
+d699 36
+d781 13
+d797 1
+d802 1
+a802 1
+void _bsp_fetch(int pid, int src_addr, int offset, void *dst, int nbytes) {
+d811 3
+a813 3
+    if (pid < 0 || pid >= _bsp_nprocs) 
+      bsp_error("{bsp_fetch}: processor %d is trying to fetch "
+                "from no-existant processor %d.",_bsp_pid,pid);
+d818 3
+d822 3
+a824 3
+#ifdef PROFILE
+  if (_bspprof.buffer_high_water_mark < nbytes)
+    _bspprof.buffer_high_water_mark = nbytes;      
+d835 1
+a835 1
+      set_spinlock(_shmem->proc_buffer_write[pid]);
+d843 1
+a843 1
+      unset_spinlock(_shmem->proc_buffer_write[pid]);
+d845 1
+d848 2
+a849 1
+                  "Recompile with -bspfifo=%d",
+d851 2
+a852 1
+      set_spinlock(_shmem->proc_buffer_write[_bsp_pid]);
+d854 1
+a854 1
+      unset_spinlock(_shmem->proc_buffer_write[_bsp_pid]);
+d866 3
+a868 3
+  _bsp_fetch(pid,_bsp_addr_table_limit,
+             src-(char*)&_bsp_miller_reference,
+             dst,nbytes);
+d875 3
+d879 1
+a879 1
+void _bsp_store(int pid, void *src, int dst_addr, int offset, int nbytes) {
+d887 3
+a889 3
+    if (pid < 0 || pid >= _bsp_nprocs) 
+      bsp_error("{bsp_store}: processor %d is trying to store "
+                "to no-existant processor %d.",_bsp_pid,pid);
+d894 11
+d906 3
+a908 3
+#ifdef PROFILE
+  if (_bspprof.buffer_high_water_mark < nbytes)
+    _bspprof.buffer_high_water_mark = nbytes;      
+d919 1
+a919 1
+      set_spinlock(_shmem->proc_buffer_write[_bsp_pid]);
+d928 1
+a928 1
+      unset_spinlock(_shmem->proc_buffer_write[_bsp_pid]);
+d930 1
+d932 1
+a932 1
+        bsp_error("{bsp_fetch} internal buffer overflow. \n"
+d935 2
+a936 1
+      set_spinlock(_shmem->proc_buffer_write[pid]);
+d938 1
+a938 1
+      unset_spinlock(_shmem->proc_buffer_write[pid]);
+d950 33
+a982 3
+  _bsp_store(pid,src,_bsp_addr_table_limit,
+             dst - (char*)&_bsp_miller_reference,
+             nbytes);
+@
+
+
+1.2
+log
+@I think there is a deadlock problem
+@
+text
+@d1 17
+a17 1
+% $Id: bsp_lib_shmem.lc,v 1.1 1995/08/22 10:38:14 jonh Exp jonh $
+d19 3
+d37 1
+a37 1
+int copySourceToBuffer(int);
+d270 16
+a285 14
+
+  for(i=0; i< *nprocs; i++) {
+    _shmem->proc_sync[i] 
+      = (usptr_t**) uscalloc(log2_nprocs,sizeof(usptr_t*),sgi_shmem_arena);
+    if (_shmem->proc_sync[i]==NULL)
+      bottom("{uscalloc}: unable to alloc a inner barrier semaphore; "
+             "nprocs=%d",*nprocs);
+    for(j=0; j< log2_nprocs; j++) {
+      _shmem->proc_sync[i][j] = usnewsema(sgi_shmem_arena,0); 
+      if (_shmem->proc_sync[i][j]==NULL )
+        bottom("{usnewsema}: unable to alloc a barrier semaphore (%d,%d,%d)",
+               i,j,log2_nprocs);
+    }
+  } 
+d407 2
+a408 1
+  int next_store;
+d411 2
+a427 1
+#define DEBUG
+d430 11
+a440 4
+Perform all stores on the thunks kept in the FIFO.
+\begin{code}
+    stores_to_other = _shmem->proc_comm_next[_bsp_pid];
+    next_store      =0;
+d447 3
+a449 1
+      if (ustestlock(_shmem->proc_buffer_write[_bsp_pid])) {
+a453 2
+        /* Someone is writing into my buffer. Wait until they */
+        /* have finished writing by sleeping on the semaphore */
+d460 39
+a498 8
+	/* information to the processor where the store is required. */
+        set_spinlock(_shmem->proc_buffer_write[store_pid]);
+
+        pid_copy_to = copySourceToBuffer(next_store);
+        stores_to_other--;
+        next_store++;
+        /* Wake-up any process waiting on this semaphore */
+        Vsema(_shmem->proc_buffer_wait[pid_copy_to]);
+d553 1
+a553 6
+int copySourceToBuffer(int next_store) {
+  _BSPcomm_thunk *to_send;
+  int store_pid;
+
+  to_send   = &_shmem->proc_comm_fifo[_bsp_pid][next_store];
+  store_pid = COMM_GET_PID(to_send->comm_pid);
+a575 1
+  return(store_pid);
+a577 1
+#undef DEBUG
+d789 1
+a790 1
+}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 5
+a5 2
+% $Id$
+% $Log$
+d14 1
+a14 1
+#include "bsp_lib_shmem.h"
+d50 2
+a51 2
+
+int _bsp_errno;
+a58 1
+   
+d65 1
+d256 2
+a257 1
+      bottom("{uscalloc}: unable to alloc a inner barrier semaphore");
+d404 1
+d413 4
+d431 2
+d457 2
+a464 1
+  _bsp_insstep=0;   
+d499 1
+a499 2
+  bsp_debug("{sstep_end}:My buffer is empty and "
+            "I have something to send to %d",store_pid);
+a500 1
+  set_spinlock(_shmem->proc_buffer_write[store_pid]);
+d523 2
+d563 1
+a563 1
+    if (offset > _bsp_addr_table_limit)
+d632 9
+d700 9
+d714 1
+a715 1
+#ifdef TURBO
+d717 4
+d722 1
+d725 2
+a726 1
+  for((i=1,j=0); i < _bsp_nprocs; (i=2*i,j++)) {
+d728 2
+d731 1
+a731 1
+    bsp_debug("{barrier%d} i=%d process %d  right=%d",ctr,i,_bsp_pid,right);
+d733 1
+a733 2
+    Vsema(_shmem->proc_sync[_bsp_pid][j]);
+    Psema(_shmem->proc_sync[right][j]);
+@

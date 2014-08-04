@@ -1,0 +1,55 @@
+.TH "bsp_bcast" 3 "1.4 25/9/98" "Oxford BSP Toolset" "BSPlib level1"
+.SH NAME
+bsp_bcast \- broadcast data from one process
+
+
+.SH C SYNOPSIS
+.nf
+.B #include \&"bsp_level1.h\&"
+.PP
+.BI "void bsp_bcast(int " bcast_pid ",void *" src \c
+.BI ",void *" dst ",int " nbytes ");"
+.fi
+.SH FORTRAN SYNOPSIS
+.nf
+.BI "SUBROUTINE bspbcast(" bcast_pid , src\c
+.BI , dst , nbytes )
+.BI "  INTEGER, intent(IN)  :: " bcast_pid, nbytes
+.BI "  <TYPE>,  intent(IN)  :: " src
+.BI "  <TYPE>,  intent(OUT) :: " dst
+.fi
+
+.SH DESCRIPTION
+A collective broadcast in which the data
+.I src
+of size
+.I nbytes
+on processor
+.I bcast_pid
+is copied into the
+.I registered (see 
+.B bsp_push_reg(3)\c
+\&) data-structure
+.I dst
+on all processors.
+.PP
+If your program is linked using the 
+.I -stat
+option to 
+.B bspfront(1)\c
+\&, then the BSP cost formula for the broadcast is echoed to the file
+.I STAT.bsp\c
+\&.
+
+.SH "SEE ALSO"
+bsplib_level1(3), bsp_fold(3)
+
+.SH BUGS
+Problems and bug reports should be mailed to 
+.I bsplib-bugs@comlab.ox.ac.uk
+
+.SH AUTHORS
+Jonathan.Hill@comlab.ox.ac.uk
+.br
+.B http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+

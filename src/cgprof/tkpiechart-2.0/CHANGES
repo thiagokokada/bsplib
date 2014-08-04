@@ -1,0 +1,28 @@
+*** version 2.0 ***
+For Tcl 7.4 and Tk 4.0, also works with Tcl 7.5 and Tk 4.1 a2 (on Windows!).
+Pie only composed of canvas items and displayed in a canvas, so printing is easy.
+Pie has a canvas tag so it can be moved easily using normal canvas functionality.
+Use of new canvasLabel and canvasLabelsArray classes for pie labelling.
+Use of switched options in constructors and configuration functions.
+One step further in object orientation with virtual functions.
+Added optional label placers, such as value next to the corresponding slice.
+Removed slice highlighting (may be reintroduced later if there is demand).
+Use degrees instead or radians in slice code to simplify and improve performance.
+Slices are no longer sized by passing a percent value but a unit share value (between 0 and 1).
+The slice label can be updated with an optional user defined value.
+Added a crunched file that can be sourced as is.
+New simplified and more efficient delete and new implementations, virtual operators added.
+
+*** version 1.2 ***
+For Tcl 7.4 and Tk 4.0 b4.
+New pie man page.
+New slice color list pie constructor parameter.
+
+*** version 1.1 ***
+For Tcl 7.4 and Tk 4.0.
+New simplified and more efficient delete and new implementations.
+Simplified pie and slice code to improve performance.
+New oop man page.
+
+*** version 1.0 ***
+For Tcl 7.3 and Tk 3.6.

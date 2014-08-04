@@ -1,0 +1,204 @@
+\begin{theindex}
+
+  \item \texttt{ABORT\_EXIT}, 8--10, 13, \litprimaryindex{13}, 17, 26, 
+		31, 39, 65
+  \item \texttt{ABORT\_MSG}, 8--10, \litprimaryindex{10}, 13, 
+		\litprimaryindex{13}, 39, 40, 65
+  \item \texttt{ABORT\_MSG\_OK}, 8--10, \litprimaryindex{13}, 39, 65
+
+  \indexspace
+
+  \item \texttt{bsphost\_t\_cost}, \litprimaryindex{147}, 148, 151, 152
+  \item \texttt{BSPTCP\_BACKLOG}, \litprimaryindex{6}, 88, 101, 124
+  \item \texttt{bsptcp\_block\_recv}, 11, \litprimaryindex{30}, 31, 32
+  \item \texttt{BSPTCP\_BUFF\_LEN}, \litprimaryindex{6}, 8--10, 17, 41, 
+		65, 67, 81, 88, 97, 98, 101, 115, 119
+  \item \texttt{BSPTCP\_COMPONENT}, 8--10, \litprimaryindex{13}, 39, 65, 
+		118, 119, 123, 124
+  \item \texttt{bsptcp\_env}, 11, \litprimaryindex{14}, 16
+  \item \texttt{BSPTCP\_HOST\_NAME\_MAX}, \litprimaryindex{6}
+  \item \texttt{BSPTCP\_INFTY\_LOAD}, \litprimaryindex{6}, 45, 136, 
+		145, 146
+  \item \texttt{bsptcp\_init}, 11, \litprimaryindex{16}, 24
+  \item \texttt{BSPTCP\_LINGER\_INT}, \litprimaryindex{6}, 19, 22, 46, 
+		48, 92, 106, 115, 134, 143
+  \item \texttt{BSPTCP\_LOAD\_CHILDREN}, \litprimaryindex{6}, 123, 125, 
+		132, 136, 138, 140, 141
+  \item \texttt{BSPTCP\_LOAD\_CONNECTS}, \litprimaryindex{6}, 131
+  \item \texttt{BSPTCP\_LOAD\_MFLOP}, \litprimaryindex{6}, 131, 135, 
+		138
+  \item \texttt{BSPTCP\_LOADPORT}, \litprimaryindex{6}, 143
+  \item \texttt{BSPTCP\_LPORT}, \litprimaryindex{6}, 15, 88, 101, 116, 
+		119
+  \item \texttt{BSPTCP\_MASTER\_PATH}, 6, \litprimaryindex{6}, 17
+  \item \texttt{BSPTCP\_MAX\_ATTEMPTS}, \litprimaryindex{6}, 48, 50
+  \item \texttt{BSPTCP\_MAX\_BACKOFF}, \litprimaryindex{6}, 33
+  \item \texttt{BSPTCP\_MAX\_RETRIES}, \litprimaryindex{6}, 82--85
+  \item \texttt{BSPTCP\_MAX\_SESSIONS}, \litprimaryindex{6}, 101, 105, 
+		113, 114
+  \item \texttt{BSPTCP\_MAX\_TYPE}, \litprimaryindex{7}, 58
+  \item \texttt{BSPTCP\_MAXAGE\_LOAD}, \litprimaryindex{6}, 133
+  \item \texttt{BSPTCP\_MAXTIMEOUT\_LOAD}, \litprimaryindex{6}, 131, 
+		133
+  \item \texttt{bsptcp\_messg\_exit}, 11, 35, \litprimaryindex{35}, 36
+  \item \texttt{bsptcp\_messg\_stopall}, 11, 31, 35, 
+		\litprimaryindex{35}
+  \item \texttt{BSPTCP\_MIN\_TYPE}, \litprimaryindex{7}, 58
+  \item \texttt{BSPTCP\_MINTIMEOUT\_LOAD}, \litprimaryindex{6}, 131, 
+		133
+  \item \texttt{BSPTCP\_MSG\_ABORT}, \litprimaryindex{7}, 13, 39, 54, 
+		58, 65, 74, 76
+  \item \texttt{BSPTCP\_MSG\_ACK}, \litprimaryindex{7}, 47--49, 67, 92, 
+		108
+  \item \texttt{BSPTCP\_MSG\_CDATA}, \litprimaryindex{7}, 21, 46--49, 
+		51, 52, 56, 60, 75, 94, 116
+  \item \texttt{BSPTCP\_MSG\_ENVSET}, \litprimaryindex{7}, 17, 50, 51, 
+		67, 68
+  \item \texttt{BSPTCP\_MSG\_EXIT}, \litprimaryindex{7}, 25, 31, 36, 
+		56, 57, 61, 63, 76, 77, 79, 91, 92, 95, 99, 108, 121, 
+		128, 135
+  \item \texttt{BSPTCP\_MSG\_LD\_DATA}, \litprimaryindex{7}, 135, 
+		138, 139, 144
+  \item \texttt{BSPTCP\_MSG\_LD\_ENQ}, \litprimaryindex{7}, 44, 126, 
+		135
+  \item \texttt{BSPTCP\_MSG\_LD\_INFTY}, \litprimaryindex{7}, 133, 
+		136, 137
+  \item \texttt{BSPTCP\_MSG\_LD\_RLD}, \litprimaryindex{7}, 127, 136
+  \item \texttt{BSPTCP\_MSG\_LD\_UPD}, \litprimaryindex{7}, 133, 137, 
+		144
+  \item \texttt{BSPTCP\_MSG\_MASTERPID}, 7, \litprimaryindex{7}, 46, 93, 
+		106
+  \item \texttt{BSPTCP\_MSG\_PASSWD}, \litprimaryindex{7}
+  \item \texttt{BSPTCP\_MSG\_SIGNAL}, \litprimaryindex{7}, 35, 55, 56, 
+		59, 61, 63, 75--79, 92, 108, 121
+  \item \texttt{BSPTCP\_MSG\_STDERR}, \litprimaryindex{7}, 47, 49, 60, 
+		65, 73, 74, 76, 77, 94, 107, 110--112
+  \item \texttt{BSPTCP\_MSG\_STDOUT}, 7, \litprimaryindex{7}, 60, 74
+  \item \texttt{bsptcp\_nonblock\_send}, 11, 28, \litprimaryindex{28}, 
+		30
+  \item \texttt{bsptcp\_okto\_send}, 11, 27, \litprimaryindex{27}, 28
+  \item \texttt{bsptcp\_probe}, 11, \litprimaryindex{32}, 35
+  \item \texttt{bsptcp\_rand}, 11, 29, \litprimaryindex{37}
+  \item \texttt{bsptcp\_recv}, 25, \litprimaryindex{25}, 26, 27, 31
+  \item \texttt{bsptcp\_set\_buffer\_size}, 11, \litprimaryindex{14}
+  \item \texttt{BSPTCP\_SLAVE\_PATH}, 6, \litprimaryindex{6}, 112
+  \item \texttt{bsptcp\_srand}, 11, 24, \litprimaryindex{37}
+  \item \texttt{BSPTCP\_STR\_LEN}, \litprimaryindex{6}, 8--10, 14, 16, 
+		41, 42, 44, 66, 67, 81, 88, 101, 102, 115, 119, 
+		124, 125, 127, 133, 135--137, 139, 143--147, 149, 150, 
+		152
+  \item \texttt{BSPTCP\_TIMEOUT\_ENQ}, \litprimaryindex{6}, 135
+  \item \texttt{BSPTCP\_TIMEOUT\_HIGH}, \litprimaryindex{6}, 25, 31--33, 
+		53, 72
+  \item \texttt{BSPTCP\_TIMEOUT\_LOW}, \litprimaryindex{6}, 22, 26, 
+		82--84
+  \item \texttt{bsptcp\_usecsleep}, 11, 29, \litprimaryindex{36}
+  \item \texttt{bsptcp\_wait\_sends}, 11, 32, \litprimaryindex{32}
+  \item \texttt{BSPTCPDEFS\_H}, 5, \litprimaryindex{5}, 8
+
+  \indexspace
+
+  \item \texttt{CLOCKS\_PER\_SEC}, 142, \litprimaryindex{142}, 154
+
+  \indexspace
+
+  \item \texttt{ERROREXIT}, 115, \litprimaryindex{115}, 116, 117
+  \item \texttt{exitchain}, 88, 91, 92, 97, \litprimaryindex{97}
+
+  \indexspace
+
+  \item \texttt{getMflopRating}, 130, 131, 135, 138, 142, 
+		\litprimaryindex{153}
+  \item \texttt{GUARDEQ}, \litprimaryindex{8}, 18, 19, 30, 35, 40, 43, 
+		63, 66, 69, 76, 79
+  \item \texttt{GUARDNN}, \litprimaryindex{10}, 17--19, 21, 22, 25--27, 
+		31--33, 35, 36, 40, 43, 46, 48, 51, 53, 66, 70--72
+  \item \texttt{GUARDNZ}, \litprimaryindex{9}, 22, 25, 26, 28, 30--32, 
+		58, 123, 125, 127, 136, 147, 152
+  \item \texttt{GUARDNZP}, \litprimaryindex{11}, 14, 18, 24, 26, 29, 
+		43, 44, 51, 70, 71, 118, 123
+  \item \texttt{GUARDZ}, \litprimaryindex{9}, 11, 15--27, 33, 42--44, 
+		46, 48, 68--71
+
+  \indexspace
+
+  \item \texttt{INIT\_RANDOM}, 125, \litprimaryindex{142}
+  \item \texttt{IP\_HEADER\_SIZE}, \litprimaryindex{6}, 14, 28
+
+  \indexspace
+
+  \item \texttt{load\_average}, 130, 131, 135, 138, 142, 
+		\litprimaryindex{145}
+  \item \texttt{load\_average\_info}, 132, 135, 137, 138, 142, 152, 
+		\litprimaryindex{152}
+  \item \texttt{lookup\_remote\_load\_recv}, 45, 127, 137, 139, 142, 
+		\litprimaryindex{144}
+
+  \indexspace
+
+  \item \texttt{MAC\_HEADER\_SIZE}, \litprimaryindex{6}, 14, 28
+  \item \texttt{main}, 41, 66, 88, 97, 101, 113, 119, 124, 132
+  \item \texttt{MALLOC}, \litprimaryindex{142}, 144, 149--152
+  \item \texttt{MATRIX\_SIZE}, 153, \litprimaryindex{153}, 154, 155
+  \item \texttt{MSG\_WAITALL}, 5, \litprimaryindex{5}, 25, 26, 45, 47, 
+		49, 50, 58--61, 67, 68, 74, 75, 92, 93, 95, 96, 
+		106, 107, 109, 127, 134, 136, 145
+
+  \indexspace
+
+  \item \texttt{open\_connection\_load\_daemon}, 44, 126, 127, 133, 
+		136--138, 142, \litprimaryindex{143}
+
+  \indexspace
+
+  \item \texttt{portregister}, 101, 105, \litprimaryindex{115}, 117
+  \item \texttt{ppr\_load\_averages}, 127, 139, 142, 
+		\litprimaryindex{150}
+  \item \texttt{pr\_load\_averages}, 127, 142, \litprimaryindex{150}
+
+  \indexspace
+
+  \item \texttt{RAND\_ADD}, 37, \litprimaryindex{37}
+  \item \texttt{RAND\_MASK}, 37, \litprimaryindex{37}
+  \item \texttt{RAND\_MULT}, 37, \litprimaryindex{37}
+  \item \texttt{RANDOM}, 131, 133, \litprimaryindex{142}, 147
+  \item \texttt{random\_host\_name}, 131, 132, 139, 142, 
+		\litprimaryindex{146}, 147
+  \item \texttt{recvall}, 45, 47, 49, 50, 58--61, 67, 68, 74, 75, 80, 
+		\litprimaryindex{84}, 85, 92, 93, 95, 96, 106, 107, 
+		109, 127, 134, 136, 145
+
+  \indexspace
+
+  \item \texttt{sendall}, 39, 45, 46, 48, 49, 51, 52, 55--57, 59--61, 
+		65, 67, 73, 74, 76--78, 80, \litprimaryindex{82}, 83, 
+		94, 98, 107, 108, 110--112, 116, 117, 121, 126--128, 
+		133, 135, 137, 139
+  \item \texttt{setenv}, 15--18, 51, 68, 70, \litprimaryindex{81}, 
+		110, 111
+  \item \texttt{shutdaemon}, 88, 95, 97, \litprimaryindex{98}, 99
+  \item \texttt{slaveadd}, 101, 108, 112, \litprimaryindex{113}, 123, 
+		132, 136, 138, 140
+  \item \texttt{slavedel}, 101, 114, \litprimaryindex{114}, 123, 132, 
+		140, 141
+  \item \texttt{slavekill}, 101, 108, \litprimaryindex{113}, 123, 130, 
+		135, 140
+  \item \texttt{slavereap}, 101, 104, \litprimaryindex{114}, 123, 130, 
+		140
+  \item \texttt{sort\_host\_list}, 47, 50, \litprimaryindex{147}, 
+		149, 150
+
+  \indexspace
+
+  \item \texttt{TCP\_HEADER\_SIZE}, \litprimaryindex{6}, 14, 28
+  \item \texttt{time\_oldest\_load\_average}, 133, 142, 
+		\litprimaryindex{146}
+
+  \indexspace
+
+  \item \texttt{update\_load\_average}, 130, 131, 135, 136, 138, 142, 
+		\litprimaryindex{148}
+  \item \texttt{update\_load\_averages}, 45, 138, 139, 142, 
+		\litprimaryindex{149}
+
+\end{theindex}

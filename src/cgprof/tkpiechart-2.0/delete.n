@@ -1,0 +1,15 @@
+' $Id: delete.n,v 1.5 1995/10/11 10:39:28 jfontain Exp $
+.TH delete tcl
+.BS
+.SH NAME
+delete \- Delete objects
+.SH SYNOPSIS
+\fBdelete \fIclassName objectId ?objectId ...?\fR
+.SH DESCRIPTION
+The \fBdelete\fR command takes care of one or more objects destruction and member data deallocation. The class destructor, which must exists, is called with each object identifier as parameter, as in:
+.PP
+\fBclassName::~className\fR \fIobjectId\fR
+.PP
+All member data pertaining to the objects identified by each \fIobjectId\fR is then deallocated.
+.SH KEYWORDS
+oop, new, delete, object

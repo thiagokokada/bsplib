@@ -1,0 +1,66 @@
+
+
+
+bsp_nprocs(3)           BSPlib FUNCTIONS            bsp_nprocs(3)
+
+
+
+NAME
+     bsp_nprocs - determine the total number of BSP processes.
+
+
+C SYNOPSIS
+     #include "bsp.h"
+
+     int bsp_nprocs();
+
+FORTRAN SYNOPSIS
+     INCLUDE 'fbsp.h'
+
+     INTEGER FUNCTION bspnprocs()
+
+
+DESCRIPTION
+     If the function bsp_nprocs is  called  before  bsp_begin(3),
+     then  it  returns  the  total processors which are available
+     online. If it is called after bsp_begin(3) it returns _n, the
+     actual number of processes allocated to the program, where _1
+     <= _n <= _m_a_x_p_r_o_c_s, and _m_a_x_p_r_o_c_s is the  number  of  processes
+     requested in bsp_begin(3).
+
+
+SEE ALSO
+     bsplib(3), bsp_begin(3), bsp_pid(3)
+
+     ``_B_S_P_l_i_b: _T_h_e _B_S_P _P_r_o_g_r_a_m_m_i_n_g _L_i_b_r_a_r_y'' Jonathan M. D. Hill,
+     Bill  McColl,  Dan  C.  Stefanescu,  Mark W. Goudreau, Kevin
+     Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and
+     Rob  Bisseling.  Parallel  Computing,  to  appear  1998. See
+     _h_t_t_p://_w_w_w._b_s_p-_w_o_r_l_d_w_i_d_e._o_r_g for more details.
+
+
+BUGS
+     Problems  and  bug  reports  should  be  mailed  to  _b_s_p_l_i_b-
+     _b_u_g_s@_c_o_m_l_a_b._o_x._a_c._u_k
+
+
+AUTHORS
+     The Oxford BSP Toolset implementation of BSPlib was  written
+     by Jonathan.Hill@comlab.ox.ac.uk
+     http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+
+
+
+
+
+
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    1
+
+
+

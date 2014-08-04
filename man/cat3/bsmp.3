@@ -1,0 +1,132 @@
+
+
+
+bsmp(3)                 BSPlib FUNCTIONS                  bsmp(3)
+
+
+
+NAME
+     Bulk synchronous message passing
+
+
+DESCRIPTION
+     Direct Remote Memory Access ( drma(3)) is a convenient style
+     of  programming for BSP computations which can be statically
+     analysed in a straightforward way.  It  is  less  convenient
+     for  computations  where  the volumes of data being communi-
+     cated in supersteps are irregular and  data  dependent,  and
+     where the computation to be performed in a superstep depends
+     on the quantity and form of data received at  the  start  of
+     that  superstep.  A more appropriate style of programming in
+     such cases is bulk synchronous message passing (BSMP).
+
+
+     In BSMP, a non-blocking  send  operation  is  provided  that
+     delivers  messages  to  a  system buffer associated with the
+     destination process.  The message is guaranteed to be in the
+     destination buffer at the beginning of the subsequent super-
+     step, and can be accessed by the  destination  process  only
+     during  that superstep.  If the message is not accessed dur-
+     ing that superstep it is removed from the buffer.  In  keep-
+     ing  with  BSP  superstep  semantics, the messages sent to a
+     process during a superstep have no implied ordering  at  the
+     receiving  end; a destination buffer may therefore be viewed
+     as a queue, where the  incoming  messages  are  enqueued  in
+     arbitrary  order  and  are  dequeued (accessed) in that same
+     order.  Note that although messages are typically identified
+     with  tags,  bsplib(3) provides no tag-matching facility for
+     the out-of-order access of specific incoming messages.
+
+     In bsplib(3), bulk synchronous message passing is  based  on
+     the  idea of two-part messages, a fixed-length part carrying
+     tagging information that will help the receiver to interpret
+     the  message, and a variable-length part containing the main
+     data payload.  We will call the fixed-length portion the _t_a_g
+     and  the variable-length portion the _p_a_y_l_o_a_d.  The length of
+     the tag is required to be fixed during any particular super-
+     step,  but  can vary between supersteps.  The buffering mode
+     of the BSMP operations is _b_u_f_f_e_r_e_d  _o_n _s_o_u_r_c_e,  _b_u_f_f_e_r_e_d  _o_n
+     _d_e_s_t_i_n_a_t_i_o_n .  We note that this buffering classification is
+     a semantic description; it does not necessarily describe the
+     underlying implementation.
+
+
+SEE ALSO
+     bsp_set_tagsize(3),       bsp_send(3),       bsp_get_tag(3),
+     bsp_qsize(3), bsp_move(3), bsp_hpmove(3)
+
+     ``_B_S_P_l_i_b: _T_h_e _B_S_P _P_r_o_g_r_a_m_m_i_n_g _L_i_b_r_a_r_y'' Jonathan M. D. Hill,
+     Bill  McColl,  Dan  C.  Stefanescu,  Mark W. Goudreau, Kevin
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    1
+
+
+
+
+
+
+bsmp(3)                 BSPlib FUNCTIONS                  bsmp(3)
+
+
+
+     Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and
+     Rob  Bisseling.  Parallel  Computing,  to  appear  1998. See
+     _h_t_t_p://_w_w_w._b_s_p-_w_o_r_l_d_w_i_d_e._o_r_g for more details.
+
+
+BUGS
+     Problems  and  bug  reports  should  be  mailed  to  _b_s_p_l_i_b-
+     _b_u_g_s@_c_o_m_l_a_b._o_x._a_c._u_k
+
+
+AUTHORS
+     The Oxford BSP Toolset implementation of BSPlib was  written
+     by Jonathan.Hill@comlab.ox.ac.uk
+     http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    2
+
+
+

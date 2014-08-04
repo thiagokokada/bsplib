@@ -1,0 +1,11 @@
+Add the following to your .emacs
+
+(autoload 'literate-mode "literate-mode")
+(setq literate-mode nil)
+(setq auto-mode-alist (cons (cons "\\.lit" 'literate-mode) auto-mode-alist))
+(setq auto-mode-alist (cons (cons "\\.lcc" 'literate-mode) auto-mode-alist))
+(setq auto-mode-alist (cons (cons "\\.lc" 'literate-mode) auto-mode-alist))
+(setq auto-mode-alist (cons (cons "\\.lh" 'literate-mode) auto-mode-alist))
+(defvar literate-mode-hook nil)
+;(setq literate-mode-hook (cons 'hide-all-sections (cons 'turn-on-auto-fill literate-mode-hook)))
+

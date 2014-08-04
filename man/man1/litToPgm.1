@@ -1,0 +1,21 @@
+.TH "litToPgm" 1 "1.4 25/9/98" "Oxford BSP Toolset"
+.SH NAME
+litToPgm \- Convert a literate file into a program.
+
+.SH SYNOPSIS
+.BI "litToPgm " "input-file"
+
+.SH DESCRIPTION
+A literate style of programming adopts an inverse approach to
+comments. Everything in a literate file is considered to be a
+comment, unless it is specified as program code. 
+.B litToPgm 
+converts a literate laTeX document into a form suitable for input into a
+C or Fortran compiler. Code is identified by the special latex
+enviroment \\begin{code} \\end{code}.
+
+.SH "SEE ALSO"
+litToTex(1)
+
+
+

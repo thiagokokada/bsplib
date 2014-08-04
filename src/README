@@ -1,0 +1,9 @@
+library_core:		Core BSPlib
+library_level1:		Level-1 collective communications
+library_tcpip:		TCP/IP support below BSPlib
+library_udpip:		UDP/IP support below BSPlib
+library_kernel:		3Com 3C905B-TX Linux kernel below UDP/IP
+library_now:		NOW daemons and load manager
+library_cpr:		Checkpointing/process migration
+cgprof:			Call-graph profiler
+tests:			Regression test suit

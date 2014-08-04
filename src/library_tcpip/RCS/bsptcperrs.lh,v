@@ -1,0 +1,141 @@
+head	1.1;
+access;
+symbols;
+locks
+	jonh:1.1; strict;
+comment	@# @;
+
+
+1.1
+date	97.07.11.10.28.20;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@% $Id$
+% $Log$
+
+\begin{code}
+  /*
+   * Functions to guard the results of library calls.
+   * Macros ABORT_MSG, ABORT_MSG_OK and ABORT_EXIT must be defined. 
+   * ABORT_MSG_OK should evaluate to nonzero when the preferred method
+   * of aborting execution should be used. This preferred method should
+   * be defined by the macro ABORT_EXIT and the method of sending the 
+   * abort message should be defined by ABORT_MSG.
+   */
+
+int GUARDEQ(int fn, int val, char *name) 
+   { 
+   int err;
+   char msgbuf[200];
+
+   err = errno;
+   if (fn != val) 
+      if (ABORT_MSG_OK)
+         { 
+         sprintf(msgbuf,"%s: error in %s call ",BSPTCP_COMPONENT,name); 
+         ABORT_MSG(msgbuf);
+         sprintf(msgbuf,"(expected %d, received %d, errno = %d).\n",
+            val,fn,err);
+         ABORT_MSG(msgbuf);
+         ABORT_EXIT(1);
+         }
+      else
+         { 
+         fprintf(stderr,"%s: error in %s call ",BSPTCP_COMPONENT,name); 
+         fprintf(stderr," (expected %d, received %d, errno = %d).\n",
+            val,fn,err); 
+         exit(1); 
+         } 
+   return fn;
+   }
+
+int GUARDZ(int fn, char *name) 
+   { 
+   int err;
+   char msgbuf[200];
+
+   err = errno;
+   if (fn) 
+      if (ABORT_MSG_OK)
+         { 
+         sprintf(msgbuf,"%s: error in %s call ",BSPTCP_COMPONENT,name); 
+         ABORT_MSG(msgbuf);
+         sprintf(msgbuf,"(result = %d, errno = %d).\n",fn,err); 
+         ABORT_MSG(msgbuf);
+         ABORT_EXIT(2);
+         }
+      else
+         { 
+         fprintf(stderr,"%s: error in %s call ",BSPTCP_COMPONENT,name); 
+         fprintf(stderr,"(result = %d, errno = %d).\n",fn,err);
+         exit(2); 
+         } 
+   return fn; 
+   }
+
+int GUARDNZ(int fn, char *name) 
+   { 
+   int err;
+   char msgbuf[200];
+
+   err = errno;
+   if (!fn) 
+      if (ABORT_MSG_OK)
+         { 
+         sprintf(msgbuf,"%s: error in %s call ",BSPTCP_COMPONENT,name); 
+         ABORT_MSG(msgbuf);
+         sprintf(msgbuf,"(result = %d, errno = %d).\n",fn,err); 
+         ABORT_MSG(msgbuf);
+         ABORT_EXIT(2);
+         }
+      else
+         { 
+         fprintf(stderr,"%s: error in %s call ",BSPTCP_COMPONENT,name); 
+         fprintf(stderr,"(result = %d, errno = %d).\n",fn,err);
+         exit(2); 
+         } 
+   return fn; 
+   }
+
+int GUARDNN(int fn, char *name) 
+   { 
+   int err;
+   char msgbuf[200];
+
+   err = errno;
+   if (fn < 0) 
+      if (ABORT_MSG_OK)
+         { 
+         sprintf(msgbuf,"%s: error in %s call ",BSPTCP_COMPONENT,name); 
+         ABORT_MSG(msgbuf);
+         sprintf(msgbuf,"(result = %d, errno = %d).\n",fn,err); 
+         ABORT_MSG(msgbuf);
+         ABORT_EXIT(3);
+         } 
+      else
+         {
+         fprintf(stderr,"%s: error in %s call ",BSPTCP_COMPONENT,name); 
+         fprintf(stderr,"(result = %d, errno = %d).\n",fn,err); 
+         exit(3);
+         }
+   return fn; 
+   }
+
+void *GUARDNZP(void *fn, char *name)
+   {
+   GUARDZ(fn == NULL,name);
+   return fn;
+   }
+\end{code}
+@

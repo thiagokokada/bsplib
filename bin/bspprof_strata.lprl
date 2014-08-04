@@ -1,0 +1,663 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bspprof_strata.lprl,v 1.1 1995/11/28 15:13:19 jonh Exp jonh $
+% $Log: bspprof_strata.lprl,v $
+# Revision 1.1  1995/11/28  15:13:19  jonh
+# Initial revision
+#
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Produce Strata Graph}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Add hoc values for axis scaling. The number scale tries to ensure that
+the range of ten increments upto the upper bound have values which are
+easy to interpret.
+
+\begin{code}
+sub setupStrataGraph {
+  local($i,$xticks,$yticks,$label,$max_x,$trash,$scale);
+  
+
+  if ($zooming) {
+    $yticks = 10;
+  } elsif ($max_time > 10 && $max_time < 16) {
+    $max_time = int($max_time)+1;
+    $yticks = $max_time; 
+  } else {
+    ($min_time,$max_time, $yticks)  = &axisScale($min_time,$max_time);
+  }
+  @strata_list = grep(&withinTimeZoom($_),@strata_list);
+  $max_x  = &setMaximumBytesCommStrata();
+  $height = int(($graphheight-$strata_ind)/2);
+  $width  = int($graphwidth-((2.5*$cmpoints) + $strata_key_ind));
+  
+  if ($max_x > (15*1024*1024)) {
+    ($trash,$max_x,$xticks) = &axisScale(0,$max_x/(1024*1024));
+    $label = "M";
+    $scale = 1024*1024;
+  } elsif ($max_x > (15*1024)) {
+    ($trash,$max_x,$xticks) = &axisScale(0,$max_x/1024);
+    $label = "K";
+    $scale = 1024;
+  } else {
+    ($trash,$max_x,$xticks) = &axisScale(0,$max_x);
+    $label = "";
+    $scale = 1;
+  }
+  if ($StrataBytes) {
+    $label .= "bytes";
+  } else {
+    $label .= "pkts";
+  }
+  $xticks = $max_x  if ($max_x < $xticks);
+  $max_x  = 1       if ($max_x==0);
+  return ($xticks,$yticks,$label,$scale*$max_x,$scale);
+}
+\end{code}
+
+\begin{code}
+sub createStrataGraph {
+  local($i,$inc,$xticks,$yticks,$label,$max_x,$trash,$scale);
+  
+  ($xticks,$yticks,$label,$max_x,$scale) = &setupStrataGraph();
+  if ($Verbose) {
+    printf STDERR "\nStrata graph:\n\tHeight=%d Width=%d\n",$height,$width;
+    printf STDERR "\tTime = %f -> %f (%d ticks)\n",$min_time,$max_time,$yticks;
+    printf STDERR "\tCommunication = 0 -> %d/%d(%d ticks)\n",
+         	$max_x,$scale,$xticks;
+  }
+  print PSFILE "gsave 2.2 cm 0 translate\n";
+  &drawStrataAxis($height,$width,$min_time,$max_time,$yticks,
+                  $max_x/$scale,$xticks,$label . " in",0);
+  &drawStrata($height,$width,$max_x,0,0);
+  &drawStrataSsteps($height,$width,$max_x,0);
+  print PSFILE "grestore gsave\n 2.2 cm  ", 
+               int((($graphheight-$strata_ind)/2)+$strata_ind), 
+               " translate\n";
+  &drawStrataAxis($height,$width,$min_time,$max_time,$yticks,
+                  $max_x/$scale,$xticks,$label. " out",0);
+  &drawStrata($height,$width,$max_x,1,0);
+  &drawStrataSsteps($height,$width,$max_x,1);
+  printf PSFILE "grestore %d 0 translate\n",$graphwidth - $strata_key_ind;
+  &drawStrataKey();
+  print PSFILE "showpage\n";
+   
+
+}
+\end{code}
+
+\begin{code}
+sub withinTimeZoom {
+  local($stepid,$time_start,$time_end,$data);
+
+  ($stepid,$time_start,$time_end,$data) = split(/\s+\@\@\s+/,$_[0]);
+  $time_start = $time_start/1.0;
+  $time_end   = $time_end/1.0;
+  return(($time_start >= $min_time) && ($time_end <= $max_time));
+}
+
+sub setMaximumBytesCommStrata {
+  local($i,$max,$in,$out);
+  local($stepid,$time_start,$time_end,$data);
+  local(@xs);
+  $max=0; 
+
+  foreach $i (@strata_list) {
+    ($stepid,$time_start,$time_end,$data) = split(/\s+\@\@\s+/,$i); 
+    @xs = split(/\s/,$data);
+    $in=0; $out=0;
+    while($#xs >=0) {
+      $in += shift(@xs); $out+=shift(@xs);       
+    }
+    ($in  > $max) && ($max = $in);
+    ($out > $max) && ($max = $out);
+  }
+  return $max; 
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Ad-hoc scaling routines for strata axis}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+First we normalise the number to the
+\begin{code}
+sub normalise {
+  local($x) = $_[0];
+  local($j);
+
+  $j = 1;
+  if (($x>0.0) && ($x < 1.0)) {
+    while($x < 1.0) {
+      $j = $j / 10.0;
+      $x = $x * 10.0;
+    }
+  } else {
+    while ($x > 10) {
+      $j = $j * 10;
+      $x = $x / 10;
+    } 
+  }
+  return($x,$j);
+}
+
+sub axisScale {
+  local($low,$high) = @_;
+  local($low_man,$low_e,$high_man,$high_e,$ticks);
+  local(%no_ticks) = ("0.0",  10,  "0.5", 15,
+                      "1.0",  10,  "1.5", 15,
+                      "2.0",  10,  "2.5", 5, 
+                      "3.0",  12,  "3.5", 7,
+                      "4.0",   8,  "4.5", 9,
+                      "5.0",  10,  "5.5", 11,
+                      "6.0",  12,  "6.5", 13,
+                      "7.0",  14,  "7.5", 15,
+                      "8.0",   8,  "8.5", 17,
+                      "9.0",   9,  "9.5", 10,
+                      "10.0", 10);
+
+  ($low_man,  $low_e) = &normalise($low);
+  ($high_man, $high_e)= &normalise($high);
+
+  if (($low_man - int($low_man)) <= 0.5) {
+    $low_man = int($low_man);
+  } else {
+    $low_man = int($low_man) + 0.5;
+  }
+  
+  if    (($high_man  - int($high_man))== 0.0) {
+    $high_man = int($high_man);
+  } elsif (($high_man - int($high_man)) <= 0.5) {
+    $high_man = int($high_man) + 0.5;
+  } else {
+    $high_man = int($high_man) + 1.0;
+  }
+  $ticks = sprintf("%.1f",$high_man-$low_man);
+  $ticks = $no_ticks{$ticks};
+  $ticks = 10 if !($ticks > 0.0);
+  return ($low_man*$low_e,$high_man*$high_e,$ticks);
+}
+
+## I inline the postscript here (instead of defining a postscript
+## procedure), so I can get the numbering on the axis correct...
+## i.e., the format of floating point/integer numbers is ok 
+## for different ranges of values.
+
+sub drawStrataAxis {
+  local($height,$width,$min_time,$max_time,
+        $ticks_y,$max_x,$ticks_x,$label_x,$is_theory)=@_;
+  local($i,$str);
+  
+  print PSFILE "%%% Drawing strata axis\n";
+  print PSFILE "0 0 moveto\n",
+               "0 $height rlineto stroke\n",
+               "0 0 moveto $width 0 rlineto stroke\n";
+
+  $ticks_y = 1 if $ticks_y==0;
+  $ticks_x = 1 if $ticks_x==0;
+
+  $inc = $width / $ticks_y;
+  for($i=0;$i<=$ticks_y;$i++) {
+    print PSFILE int($inc*$i)," 0 moveto\n",
+                 "0 -5 rlineto 0 5 rmoveto\n";
+  }
+  $inc = $height/$ticks_x;
+  for($i=0;$i<=$ticks_x;$i++) {
+    print PSFILE "0 ",int($inc*$i), " moveto\n",
+                 "-5 0 rlineto 5 0 rmoveto\n";
+  }
+  
+  $inc = $width / $ticks_y;
+  print PSFILE "/Helvetica findfont 10 scalefont setfont\n";
+  for($i=0;$i<$ticks_y;$i++) {
+    print PSFILE int($i*$inc) , " -15 moveto ";
+    if ($max_time-$min_time > 10.0) {
+     $str = sprintf("%d" , int((($max_time-$min_time)/$ticks_y)*$i)+$min_time);
+    } elsif ($max_time-$min_time > 0.1) {
+     $str = sprintf("%.2f", ((($max_time-$min_time)/ $ticks_y)*$i)+$min_time);
+    } else {
+     $str = sprintf("%.2f",(((($max_time-$min_time)/ $ticks_y)*$i)+$min_time)*
+                           1000.0);
+    }
+    print PSFILE "($str) stringwidth pop 2 div neg 0 rmoveto ($str) show\n";
+  }
+  print PSFILE "0 0 moveto\n",
+                $width-5," -15 rmoveto ";
+  if (!$is_theory) {
+    if ($max_time-$min_time > 0.1) {
+      print PSFILE "(seconds) stringwidth pop 2 div neg 0 ",
+                   "rmoveto (seconds) show\n";  
+    } else {
+      print PSFILE "(milliseconds) stringwidth pop 2 div neg 0 ",
+                   "rmoveto (milliseconds) show\n";  
+    }
+  }
+  else {
+      print PSFILE "(Mflops) stringwidth pop 2 div neg 0 ",
+                   "rmoveto (MFlops) show\n";  
+  }
+
+  print PSFILE "stroke\n";
+
+  $inc = $height / $ticks_x;
+  for($i=0;$i<$ticks_x;$i++) {
+    print PSFILE "-7 ", int($i*$inc)-3 , " moveto ";
+    $str = sprintf("%d", int($max_x / $ticks_x)*$i);
+    print PSFILE "($str) stringwidth pop neg 0 rmoveto ($str) show\n";
+  }
+  print PSFILE "/Helvetica findfont 8 scalefont setfont\n";
+  print PSFILE "0 0 moveto\n -7 ",$height-3," rmoveto ",
+               "($label_x) stringwidth pop neg 0 rmoveto ($label_x) show\n";
+  print PSFILE "stroke\n";
+
+}
+\end{code}
+
+\begin{code}
+sub drawStrata {
+  local($height,$width,$max_x,$draw_out,$is_theory) = @_;
+  local($i,$j,$k,$stepid,$time_start,$time_end,$data,$theorycost);
+  local(@xs,$sum,$x,$y,$yend,$oldx,$oldy,$savex,$savey,$oldx,$oldtime_end);
+
+  print PSFILE "/Helvetica findfont 8 scalefont setfont\n";
+  for($i=$nprocs;$i>=0;$i--) {
+    print PSFILE "%% Drawing strata for process $i\n",
+                 "gsave newpath 0 0 moveto\n";
+    $x=0; $y=0.0;$yend=0.0;$oldtime_end=$min_time;
+    for($j=0;$j<=$#strata_list;$j++) {
+      ($stepid,$time_start,$time_end,$data) 
+        = split(/\s+\@\@\s+/,$strata_list[$j]);
+      
+      $time_start = $time_start/1.0;
+      $time_end   = $time_end/1.0;
+      @xs = split(/\s+/,$data);
+      $sum=0;
+      for($k=0;$k<=$i;$k++) {
+        $sum += $xs[(2*$k)+$draw_out];
+      }
+      $oldx = $x; 
+      $oldy = int($yend);
+      $x    = int(($sum*$height)/$max_x);
+      if ($is_theory) {
+        $theorycost= $strata_hrelcost[$j];
+        $theorycost =~ /^.*@@.*@@\s*(.*)\s*@@/ && 
+          ($theorycost = (int($1) + $bsp_l)/1000000);
+        $y    =$yend + ((($time_start - $oldtime_end)*$bsp_s*$width)/
+                        ($max_s-$min_s));
+        $yend =$yend + ((((($time_start - $oldtime_end)*$bsp_s)+
+                           $theorycost)*$width)/($max_s-$min_s));
+        $oldtime_end= $time_end;
+      } else {
+        #absolute positions
+        $y    = (($time_start-$min_time)*$width)/($max_time-$min_time);
+        $yend = (($time_end-$min_time)*$width)/($max_time-$min_time);
+      }
+
+      if ((!($oldx == $x && $oldy == int($yend))) && ($x > 0)) {
+        printf PSFILE "%d %d %d sb\n",$x, int($y),int($yend);
+      }
+    }
+    print PSFILE "closepath\n";
+    
+    # Only draw one strata if the -nostrata option is used---saves
+    # postscript size.
+    if ($DrawStrata) {
+      &setStrataFill($i);
+    } else {
+      $i=0;
+      print PSFILE "0.5 setlinewidth stroke\n";
+    }
+    print PSFILE "grestore\n";
+  }
+
+}
+\end{code}
+
+\begin{code}
+sub setStrataFill {
+  local($pid)=$_[0];
+#  local(@back_shades) = (0.95, 0.75, 0.55, 0.35, 0.15);
+  local(@back_shades)  = (0.95,  0.8, 0.65,  0.5, 0.35, 0.2);
+
+  local(@r_colours)=(1.0,0.0,0.0, 1.0,1.0,0.0, 1.0,0.5,0.0, 1.0,0.0,0.5);
+  local(@g_colours)=(0.0,1.0,0.0, 1.0,0.0,1.0, 0.5,0.0,1.0, 0.0,0.5,1.0);
+  local(@b_colours)=(0.0,0.0,1.0, 0.0,1.0,1.0, 0.0,1.0,0.5, 0.5,1.0,0.0);
+
+  local(@fill_styles) = ("VanillaFill",
+                         "0.0 LineFill",
+                         "0.0 SpotFill", 
+                         "1.0 LineFill",
+                         "1.0 SpotFill",
+                         "0.45 SpotFill");
+
+  local($no_colours, $no_fill_styles);
+  local($r_colour, $g_colour, $b_colour);
+  local($back_shade, $fill_style);
+
+  if ($#back_shades > $#r_colours) {
+    print STDERR "error{setStrataFill} shades smaller than colours\n";
+    exit(1);
+  }
+
+  $no_colours     = $#back_shades + 1;
+  $no_colours     = $#r_colours    + 1  if $Colour;
+  $no_fill_styles = $#fill_styles + 1;
+
+
+  $back_shade = $pid % $no_colours;
+  $r_colour   = $pid % $no_colours;
+  $g_colour   = $pid % $no_colours;
+  $b_colour   = $pid % $no_colours;
+  $fill_style = ($pid / $no_colours) % $no_fill_styles;
+
+  print PSFILE "gsave\n";
+  $nofillstyles = $#fillstyles +1;
+  printf PSFILE "%.2f %.2f %.2f %.2f %s\n",
+                  $r_colours[$r_colour],
+                  $g_colours[$g_colour],
+                  $b_colours[$b_colour],
+                  $back_shades[$back_shade],
+                  $fill_styles[$fill_style];
+
+  printf PSFILE "grestore 0.5 setlinewidth stroke\n";
+}
+\end{code}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Draw the super-step marks on the time axis}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub drawStrataSsteps {
+  local($height,$width,$max_x,$draw_out)=@_;
+  local($i,$x,$y,$xold,$yold,$k,$sum,$str);
+  local($stepid,$time_start,$time_end,$data);
+  local(@xs);
+  local(@result);
+
+  print PSFILE "/Helvetica findfont 8 scalefont setfont\n";
+  $xold = 0; $yold = 0;
+  foreach $j (@strata_list) {
+    ($stepid,$time_start,$time_end,$data) = split(/\s+\@\@\s+/,$j);
+    $time_start = $time_start/1.0;
+    @xs = split(/\s+/,$data);
+    $sum=0;
+    for($k=0;$k<=$nprocs;$k++) {
+      $sum += $xs[(2*$k)+$draw_out];
+    } 
+    $xold = $x;
+    $yold = $y;
+    $x=int(($sum*$height)/$max_x);
+    $y=int((($time_start-$min_time)*$width)/($max_time-$min_time));
+    if (!($xold == $x && $yold == $y)) {
+      printf PSFILE "%d %d (%s) sd\n",$y,$x,$stepid;
+    }
+  }
+}
+\end{code}
+
+\begin{code}
+sub cmpKeys {
+  return (int($a) <=> int($b));
+}
+
+sub drawStrataKey {
+  local($sstep,$line,$file,$proclabel);
+  local($y,$oldy,$x,$i,$splitpoint,$scale_y,$scale_x);
+  local(@keys);
+  local(%valid_ssteps);
+
+  #Only put the things in the zoom region into the key
+  foreach $i (@strata_list) {
+    $i =~ /^(\d+)/ && ($valid_ssteps{$1}=1);
+  }
+  @keys = keys(%valid_ssteps);
+
+  $scale_y = $nprocs;
+  $scale_y = $maxlabels_per_column if ($nprocs > $maxlabels_per_column);
+  $scale_y = $graphheight  / ((($#keys+1)*15) + ($scale_y*40) +80);
+
+  $scale_x = int($nprocs / ($maxlabels_per_column))+1;
+  $scale_x = (6.0*$cmpoints)/ (30 + (70*$scale_x));
+  
+  $scale_x = $scale_y if ($scale_y < $scale_x);
+
+  if ($scale_x < 1.0) {
+    $proclabel = "Proc.";
+    $x    = 30;
+    printf PSFILE "0 %d translate %f %f scale \n",
+                  int($graphheight*(1-$scale_x)),$scale_x,$scale_x;
+  } else {
+    $proclabel = "Process";
+    $x    = 50;
+  }
+  
+  $y = $graphheight-50;
+  print PSFILE "/Courier findfont 8 scalefont setfont\n";
+  foreach $sstep (sort cmpKeys @keys) {
+    $line = $sstepTable_line{$sstep};
+    $file = $sstepTable_file{$sstep};
+    $line  =~ /(.{1,4})/  && ($line  = $1);
+    $file  =~ /(.{1,15})/ && ($file  = $1);
+    print PSFILE "40 $y moveto ($sstep) stringwidth pop ",
+                 "neg 0 rmoveto ($sstep) show\n";
+  
+    print PSFILE "120 $y moveto ($file) stringwidth pop ",
+                 "neg 0 rmoveto ($file) show\n";
+
+    print PSFILE "145 $y moveto ($line) stringwidth pop ",
+                 "neg 0 rmoveto ($line) show\n";
+
+    $y -= 15;
+  }
+  print PSFILE "0.5 setlinewidth\n";
+  print PSFILE "newpath  ",
+               "10  ",$graphheight-30, " moveto ",
+               "10  ",$y+13," lineto ",
+               "155 ",$y+13," lineto ",
+               "155 ",$graphheight-30, " lineto closepath stroke\n";
+
+  print PSFILE "newpath  42 ",$graphheight-30,
+               " moveto  42 ",$y+13," lineto stroke\n",
+
+               "newpath 122 ",$graphheight-30,
+               " moveto 122 ",$y+13," lineto stroke\n",
+             
+               "newpath 10 ", $graphheight-43, " moveto ",
+               "155 ", $graphheight-43, " lineto stroke"; 
+
+  print PSFILE "/Helvetica-Bold findfont 8 scalefont setfont\n",
+               "15 ",$graphheight-41," moveto (Step) show\n",
+               "64 ",$graphheight-41," moveto (Filename) show\n",
+               "125 ",$graphheight-41," moveto (Line) show\n";
+
+  $y   -= 30;
+  $oldy = $y;
+  for($i=0;$i<$nprocs;$i++) {
+    print PSFILE "newpath $x $y moveto 0 -20 rlineto 20 0 rlineto ",
+                 "0 20 rlineto closepath ";
+    &setStrataFill($i);
+    print PSFILE "$x 25 add ", $y-12, " moveto ($proclabel $i) show\n";
+    $y -=40;
+    if (($i % $maxlabels_per_column) == ($maxlabels_per_column-1)) {
+      $y  = $oldy;
+      $x += 70;
+    }
+  }
+}
+\end{code}
+
+
+\begin{code}
+sub strataPrologue {
+  print PSFILE <<"_END_PS_PROLOGUE_";
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Fill pattern prototypes
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+/SpotProto 12 dict def
+SpotProto begin
+  /PatternType 1 def
+  /PaintType 2   def
+  /TilingType 1  def
+  /BBox [ 0 0 1000 1000 ] def
+  /XStep 1000 def
+  /YStep 1000 def
+  /PaintProc {
+     begin
+       500 500 300 0 360 arc fill
+     end
+   } def
+end
+
+SpotProto [0.007 0 0 0.007 0 0 ] makepattern
+/SpotPattern exch def
+
+/LineProto 12 dict def
+LineProto begin
+  /PatternType 1 def
+  /PaintType 2   def
+  /TilingType 1  def
+  /BBox [ 0 0 1000 1000 ] def
+  /XStep 1000 def
+  /YStep 1000 def
+  /PaintProc {
+     begin
+       100 100 moveto 900 900 lineto 200 setlinewidth stroke
+     end
+   } def
+end
+
+LineProto [0.007 0 0 0.007 0 0 ] makepattern
+/LinePattern exch def
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% New fill commands
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+/MyPatternFill {
+  6 dict begin
+  /patternfun exch def
+  /forecolour exch def
+  /backcolour exch def
+  /bcolour    exch def
+  /gcolour    exch def
+  /rcolour    exch def
+
+  profcolour {
+    gsave rcolour gcolour bcolour setrgbcolor fill grestore
+  } {
+    gsave backcolour setgray fill grestore
+  } ifelse
+  [ /Pattern /DeviceGray ] setcolorspace
+  forecolour patternfun setcolor fill
+  end
+} def
+
+/SpotFill       {SpotPattern     MyPatternFill} def
+/LineFill       {LinePattern     MyPatternFill} def
+
+/VanillaFill {
+  4 dict begin
+  /backcolour exch def
+  /bcolour    exch def
+  /gcolour    exch def
+  /rcolour    exch def
+
+  profcolour {
+    rcolour gcolour bcolour setrgbcolor fill
+  } {
+    backcolour setgray fill
+  } ifelse
+  end
+} def
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% diamond
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+/diamond {
+  newpath
+  moveto
+  0 4 rmoveto
+  -4 -4 rlineto
+  4 -4 rlineto
+  4 4  rlineto
+  closepath
+  gsave
+  1.0 setgray fill
+  grestore
+  stroke
+} def
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Point for scatter graph
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+/go {
+  newpath
+  1 0 360 arc 
+  closepath
+  gsave
+  1.0 setgray fill
+  grestore
+  stroke
+} def
+
+/gx {
+  newpath
+  2 0 360 arc 
+  closepath
+  gsave
+  0.0 setgray fill
+  grestore
+  stroke
+} def
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Strata Block
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+/sb {
+  3 dict begin
+  /yend exch def
+  /y    exch def
+  /x    exch def
+    y 0 lineto y x lineto yend x lineto yend 0 lineto
+  end
+} def
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Strata Diamond
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+/sd  {
+  3 dict begin
+  /str exch def
+  /x   exch def
+  /y   exch def
+    y x diamond y x 5 add moveto 
+    str stringwidth pop 2 div neg 0 rmoveto str show
+  end
+} def
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+90 rotate
+0 pageheight neg translate
+barDrawBorder
+0 1.2 cm translate
+_END_PS_PROLOGUE_
+}
+1;
+\end{code}

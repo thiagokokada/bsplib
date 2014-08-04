@@ -1,0 +1,144 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Some (old) parallel systems require a host as well as a node
+program. This file contains system specific host programs that are
+called by the bsprun script. 
+
+\begin{code}
+#include <stdio.h>
+#define _BSD_SIGNALS
+#include <signal.h>
+#include <unistd.h>
+#include <string.h>
+
+#ifdef  MPASS_PARMACS
+#define MPASS_PARMACS_HOST
+#endif
+
+#define BSP_MPASS
+#include "bsp_lib.h"
+
+/* The following are defined in the library (which isn't linked
+   against this program, and used in some of the macros.
+ */
+
+int _bsp_buffer_size=1024;
+#define bsp_abort printf
+
+void kill_process(int signal_no) {
+  fprintf(stderr,"\n Caught SIGNAL %d\n",signal_no);
+#ifdef MPASS_PARMACS
+  pm_delete();
+#endif
+}
+
+void main(int argc, char *argv[]) {
+  int nprocs, i,j,size,from,type,recv_bytes,exit_status,hostpid;
+  char kill_str[256],tempc, *node_program, *flatargv, *ptr;
+
+  if (argc<3) {
+    fprintf(stderr,"{bsp_spmdhost} fatal error not enough arguments\n");
+    exit(1);
+  } else {
+    nprocs=atoi(argv[1]);
+    node_program=argv[2];
+
+    signal(SIGHUP,  kill_process);
+    signal(SIGTERM, kill_process);
+    signal(SIGINT,  kill_process);
+    signal(SIGQUIT, kill_process);
+    signal(SIGABRT, kill_process);
+    signal(SIGFPE,  kill_process);
+#ifndef REALDEBUG
+    signal(SIGSEGV, kill_process); 
+    signal(SIGBUS,  kill_process); 
+#endif
+#ifndef LINUX
+    signal(SIGSYS,  kill_process); 
+#endif
+
+#ifdef MPASS_PARMACS
+    pm_init();
+    pm_maptorus(1, &nprocs,node_program);
+    pm_create();
+
+    if (pm_inqmap() != PM_TORUS) {
+      fprintf(stderr,"{bsp_spmdhost} not running as torus (%d)\n",
+	      pm_inqmap());
+      exit(1);
+    }
+#endif
+    size = 0;
+    for(i=2;i<argc;i++) size += 1+strlen(argv[i]);
+    if (size%sizeof(void*))
+      size += sizeof(void*) - (size%sizeof(void*));
+#ifdef DEBUG
+    fprintf(stderr,"{bsprun} |argv|=%d bytes\n",size);
+#endif
+    flatargv=malloc(size);
+    if (flatargv==NULL) {
+      fprintf(stderr,"bsprun: unable to allocate %d bytes\n",size);
+      exit(1);
+    }
+    ptr = flatargv;
+    for(i=2;i<argc;i++) {
+      strcpy(ptr,argv[i]);
+      ptr+=strlen(argv[i]);
+      *ptr++='\0';
+    }
+
+#ifdef DEBUG
+    fprintf(stderr,"{bsprun} nonblock send of size\n");
+#endif
+    while (!nonblock_send((char*) &size,sizeof(int),0,BSP_MPASS_ARGV_SIZE)) {
+      wait_sends();
+    }
+#ifdef DEBUG
+    for(i=0;i<size;i++)
+      fprintf(stderr,"{bsprun} nonblock send of flatargv[%d]='%c'\n",
+	      i,flatargv[i]);
+#endif
+    while (!nonblock_send(flatargv,size,0,BSP_MPASS_ARGV_DATA)) {
+      wait_sends();
+    }
+#ifdef DEBUG
+    fprintf(stderr,"{bsprun} waiting for node programs to finish\n");
+#endif
+
+    from=PID_DONTCARE;
+    type=BSP_MPASS_ABORT;
+    block_recv(&exit_status,sizeof(int),&from,&type,&recv_bytes);   
+#ifdef MPASS_PARMACS
+    if (!exit_status) {
+      pm_waitend();
+      pm_end();
+    } else {
+      i=1;
+      hostpid=getpid();
+      do {
+        sprintf(kill_str,"pmdkill %d",hostpid+i);
+        fprintf(stderr,"BSPlib host: trying to kill process %d\n",
+		hostpid+(i++));
+      } while (!system(kill_str));
+      pm_end();
+    }
+#endif  
+    exit(exit_status);
+  }
+}
+\end{code}

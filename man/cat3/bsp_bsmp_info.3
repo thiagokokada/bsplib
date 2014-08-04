@@ -1,0 +1,132 @@
+
+
+
+bsp_qsize(3)            BSPlib FUNCTIONS             bsp_qsize(3)
+
+
+
+NAME
+     bsp_qsize - checks to see how many BSMP packets arrived.
+
+
+C SYNOPSIS
+     #include "bsp.h"
+
+     void  bsp_qsize(int *_p_a_c_k_e_t_s, int *_a_c_c_u_m__n_b_y_t_e_s);
+
+FORTRAN SYNOPSIS
+     SUBROUTINE  bspqsize(_p_a_c_k_e_t_s,_a_c_c_u_m__n_b_y_t_e_s)
+     INTEGER, intent(OUT) ::_p_a_c_k_e_t_s,accum_nbytes
+
+
+
+DESCRIPTION
+     The  function  bsp_qsize(3)  is  an  enquiry  function  that
+     returns  the  number of messages that were sent to this pro-
+     cess in the previous superstep and have not  yet  been  con-
+     sumed  by  a  bsp_move(3). Before any message is consumed by
+     bsp_move(3), the total  number  of  messages  received  will
+     match those sent by any bsp_send(3) operations in the previ-
+     ous superstep.  function also returns the  accumulated  size
+     of  all the payloads of the unconsumed messages. This opera-
+     tion is intended to help the user to allocate  an  appropri-
+     ately  sized  data  structure  to hold all the messages that
+     were sent to a process during a superstep.
+
+
+
+SEE ALSO
+     bsmp(3) ,bsp_send(3), bsp_move(3)
+
+     ``_B_S_P_l_i_b: _T_h_e _B_S_P _P_r_o_g_r_a_m_m_i_n_g _L_i_b_r_a_r_y'' Jonathan M. D. Hill,
+     Bill  McColl,  Dan  C.  Stefanescu,  Mark W. Goudreau, Kevin
+     Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and
+     Rob  Bisseling.  Parallel  Computing,  to  appear  1998. See
+     _h_t_t_p://_w_w_w._b_s_p-_w_o_r_l_d_w_i_d_e._o_r_g for more details.
+
+
+NOTES
+     i    bsp_qsize(3) returns the number of messages in the sys-
+          tem  queue  at  the  point the operation is called; the
+          number   returned   therefore   decreases   after   any
+          bsp_move(3) operation.
+
+
+BUGS
+     Problems  and  bug  reports  should  be  mailed  to  _b_s_p_l_i_b-
+     _b_u_g_s@_c_o_m_l_a_b._o_x._a_c._u_k
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    1
+
+
+
+
+
+
+bsp_qsize(3)            BSPlib FUNCTIONS             bsp_qsize(3)
+
+
+
+AUTHORS
+     The Oxford BSP Toolset implementation of BSPlib was  written
+     by Jonathan.Hill@comlab.ox.ac.uk
+     http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    2
+
+
+

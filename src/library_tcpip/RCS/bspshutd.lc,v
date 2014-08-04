@@ -1,0 +1,196 @@
+head	1.1;
+access;
+symbols;
+locks
+	jonh:1.1; strict;
+comment	@# @;
+
+
+1.1
+date	97.07.11.10.27.25;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@% $Id$
+% $Log$
+
+\begin{code}
+/* 
+ * Program bspshutd.c is responsible for an orderly shutdon of the various
+ * daemons. Whether a port daemon is used or not, this program attempts to 
+ * connect to the daemon at the BSP port. If this is a BSP Daemon then 
+ * the daemon accepts the shutdown request and terminates. If the daemon 
+ * on the BSP port is the BSP Port Daemon, then the request is also accepted
+ * but the request is passed on to all BSP Daemons that are still registered
+ * with this Port Daemon before it shuts down.
+ *
+ * The name of the file and the BSP port number can be supplied from the 
+ * command line as arguments. If these are missing, then an attempt to 
+ * use the environment variable BSPTCP_HOSTNAMES for the file name
+ * containing list of participating hosts and the environment variable
+ * BSPTCP_PORTNUMBER for the BSP port number.
+ */
+
+#include <unistd.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <fcntl.h>
+#include <errno.h>
+
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <netdb.h>
+
+#include "bsptcpdefs.h"
+
+void main(int argc, char *argv[])
+   {
+   int i;
+   char msgbuf[200];                /* formatted messages buffer */
+   int bsp_dport;                   /* port BSP daemons listen on */
+   struct sockaddr_in csockaddr;    /* for addressing BSP daemons */
+   int csock;                       /* socket fd to BSP Daemon */
+
+   bsptcp_msghdr_t msghdr;          /* message header struct */
+
+   char bsp_hostnames[80];          /* BSP hostnames file name */
+   FILE *hostnames;                 /* BSP hostnames file */
+   char hostname[80];               /* a single hostname */
+   char *env_val;                   /* environment variable value address */
+
+   struct hostent *host;            /* netdb format host info */
+
+  /* 
+   * The name of the hostnames file and the port number the BSP/TCP Daemons
+   * are listening on are taken from the command line. If either of these
+   * parameters is missing from the command line then an attempt is made 
+   * to get them from environment variables.
+   */
+
+   bsp_hostnames[0] = 0;
+   bsp_dport = BSPTCP_LPORT; 
+   for (i = 1; i < argc-1; i += 2)
+      if (!strcmp(argv[i],"-p"))
+         {
+         if (sscanf(argv[i+1],"%u",&bsp_dport) != 1)
+            {
+            printf("BSP/TCP Shutdown: Error in port number argument.\n");
+            exit(1);
+            }
+         }
+      else
+        if (!strcmp(argv[i],"-f"))
+           strcpy(bsp_hostnames,argv[i+1]);
+        else
+           {
+           printf("BSP/TCP Shutdown: Invalid option \"%s\".\n",argv[i]);
+           exit(1);
+           }
+
+   if (bsp_hostnames[0] == 0) 
+      if (env_val = getenv("BSPTCP_HOSTNAMES"))
+         strcpy(bsp_hostnames,env_val);
+
+   if (bsp_dport < 0) 
+      if (env_val = getenv("BSPTCP_PORTNUMBER"))
+         if (sscanf(env_val,"%u",&bsp_dport) != 1)
+            {
+            printf("BSP/TCP Shutdown: Error in BSPTCP_PORTNUMBER value\n");
+            exit(1);
+            }
+
+   if (bsp_hostnames[0] == 0 || bsp_dport < 0)
+      {
+      printf("BSP/TCP Shutdown: Usage is %s [[option] ... ]\n",argv[0]);
+      printf("Where option is: \"-f <file name>\" or \"-p <port number>\"\n");
+      exit(1);
+      }
+
+  /*
+   * Attempt to establish a connection with each of the hosts in the 
+   * the hostname file and request shutdown.
+   */
+
+   /* open the file containing the list of host names */
+   hostnames = fopen(bsp_hostnames,"r");
+   if (!hostnames)
+      {
+      printf("BSP/TCP Shutdown: error opening host names file %s.\n",
+              bsp_hostnames);
+      exit(1);
+      }
+
+   /* attempt to contact the processes */
+   while(fgets(hostname,sizeof(hostname),hostnames))
+      {
+      char *delim;
+      if (delim = strchr(hostname,'\n')) *delim = 0;
+      host = gethostbyname(hostname);
+      if (host)
+         {
+         /* create an internet socket */
+         csock = socket(AF_INET,SOCK_STREAM,0);
+         if (csock < 0)
+            {
+            perror("Error creating control socket");
+            exit(1);
+            }
+         /* setup addressing structure of host and attempt connect */ 
+         memset(&csockaddr,0,sizeof(struct sockaddr));
+         csockaddr.sin_family = AF_INET;
+         csockaddr.sin_port = htons(bsp_dport);
+         memcpy(&csockaddr.sin_addr.s_addr,host->h_addr_list[0],
+                sizeof(csockaddr.sin_addr.s_addr));
+         if (!connect(csock,(struct sockaddr *)&csockaddr,
+                      sizeof(struct sockaddr)))
+            {
+            msghdr.msgtype = BSPTCP_MSG_EXIT;
+            msghdr.msgspid = 0;
+            msghdr.msgdpid = 0;
+            msghdr.msglen = 0;
+            /* send shutdown request to remote Daemon */
+            if (send(csock,(char *)&msghdr,sizeof(msghdr),0) < 0)
+               {
+               sprintf(msgbuf,
+                   "BSP/TCP Shutdown: error sending shutdown request to %s:%d",
+                    hostname,bsp_dport);
+               perror(msgbuf);
+               } 
+            else
+               {
+               printf("BSP/TCP Shutdown: shutdown request sent to %s:%d.\n",
+                    hostname,bsp_dport);
+               } 
+            close(csock);
+            }
+         else
+            {
+            sprintf(msgbuf,
+                "BSP/TCP Shutdown: error trying to connect to %s:%d",
+                 hostname,bsp_dport);
+            perror(msgbuf);
+            }
+         }
+      else
+         printf("BSP/TCP Shutdown: hostname lookup failed for %s.\n",
+                 hostname);
+      } /* while there are hosts in the hostname file */
+ 
+   printf("BSP/TCP Shutdown: broadcast complete.\n");
+   exit(0);
+   }
+\end{code}
+@

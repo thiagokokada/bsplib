@@ -1,0 +1,548 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsp_register.lc,v 1.2 1997/04/16 12:48:53 jonh Exp jonh $
+% $Log: bsp_register.lc,v $
+% Revision 1.2  1997/04/16 12:48:53  jonh
+% Changing registration back to a heap of stacks.
+%
+% Revision 1.1  1997/01/29 10:51:51  jonh
+% Initial revision
+%
+
+\begin{code}
+#include "bsp_lib.h"
+#include "bsp_profile.h"
+#define BSP_REG_TABLE_GROW_SIZE 100
+
+bsp_registration **_bsp_reg_local;
+bsp_registration **_bsp_reg_global;
+int                _bsp_reg_next_global_id;
+int                _bsp_reg_push_pop_pairs;
+void*              _bsp_reg_cached_local;
+int                _bsp_reg_cached_global;
+bsp_registration  *_bsp_reg_cached_registration;
+#ifdef BSP_DRMA
+static void       *_bsp_reg_drma_ids[BSP_MAX_PROCS*BSP_MAX_PROCS];
+static int        _bsp_reg_drma_sizes[BSP_MAX_PROCS*BSP_MAX_PROCS];
+#endif
+\end{code}
+
+Two hash tables that share common information. The first hash table
+\texttt{bsp\_reg\_local} performs lookups using addresses that form
+the identifies local to each process. The second hash table
+\texttt{bsp\_reg\_global} performs lookups using integers that are the
+global idenifiers that are consitent among all processors.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Error messages}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+void bsp_error_reg_small(int from,int global_addr,int nbytes, int offset) {
+  char *reg_filename;
+  int  reg_nbytes, reg_lineno;
+
+  if (from==UNKNOWN_SENDER) {
+    bsp_register_info(global_addr,
+		    _bsp_pid,&reg_nbytes,&reg_lineno,&reg_filename);
+    bsp_abort("{bsp_sync} line %d of \"%s\"\n"
+              "\tOut of bound communication (%d bytes at offset %d)\n"
+              "\twas attempted into a data-structure that was only\n"
+              "\tregistered with %d bytes at line %d of \"%s\"\n",
+              _bsp_lineno,_bsp_filename,nbytes,offset,
+              reg_nbytes,reg_lineno,reg_filename);
+  } else {
+    bsp_register_info(global_addr,
+		      from,&reg_nbytes,&reg_lineno,&reg_filename);
+    bsp_abort("{bsp_sync} line %d of \"%s\"\n"
+              "\tWhilst communicating into process %d's memory, an\n"
+              "\tout of bound communication (%d bytes at offset %d)\n"
+              "\twas attempted into a data-structure that was only\n"
+              "\tregistered with %d bytes at line %d of \"%s\"\n",
+              _bsp_lineno,_bsp_filename,from,nbytes,offset,
+              reg_nbytes,reg_lineno,reg_filename);
+  }   
+}
+\end{code}
+
+\begin{code}
+void bsp_error_reg_inconsitent() {
+  bsp_abort("{bsp_sync} line %d of \"%s\"\n"
+            "\tThe number of registrations is inconsitent among the processes.",
+	    _bsp_lineno,_bsp_filename);
+}
+\end{code}
+
+\begin{code}
+void bsp_error_reg_pop_empty() {
+  bsp_abort("{bsp_pop_reg} line %d of \"%s\"\n"
+            "\tTrying to derigister an unregistered address.",
+	    _bsp_lineno,_bsp_filename);
+}
+\end{code}
+
+\begin{code}
+void bsp_error_dereg_comm_same_superstep() {
+  bsp_abort("{bsp_sync} line %d of \"%s\"\n"
+            "\tTried to communicate into a data-structure that has\n"
+            "\tjust been deregistered.",
+            _bsp_lineno,_bsp_filename);
+}
+
+void bsp_error_unregistered() {
+  bsp_abort("{bsp_sync} line %d of \"%s\"\n"
+	    "\tAttempted to communicate into an unregistered area.",
+	    _bsp_lineno,_bsp_filename);
+}
+
+void bsp_error_reg_pop_push_gone() {
+  bsp_abort("{bsp_pop_reg} line %d of \"%s\"\n"
+	    "\tThe registration stack is empty, cannot pop anything.",
+	    _bsp_lineno,_bsp_filename);
+}
+
+void bsp_error_reg_pop_inconsistent(int lineno,char *filename) {
+  bsp_abort("{bsp_pop_reg} line %d of \"%s\"\n"
+	    "\tThe variable used in a pop must be the same across all \n"
+            "\tprocesses. The registration was at line %d of \"%s\".",
+	    _bsp_lineno,_bsp_filename,lineno,filename);
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Initialise the hash table}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+#define bsp_register_invalidate_cache() \
+  do {                                  \
+    _bsp_reg_cached_local =(void*) (-1);\
+    _bsp_reg_cached_global=-1;          \
+  } while(0)
+
+void bsp_register_init() {
+  int i;
+
+  _bsp_reg_next_global_id=0;
+  _bsp_reg_push_pop_pairs=0;
+  _bsp_reg_local =CALLOC(REG_TABLE_SIZE,SIZEOF(bsp_registration*));
+  _bsp_reg_global=CALLOC(REG_TABLE_SIZE,SIZEOF(bsp_registration*));
+  if (_bsp_reg_local==NULL || _bsp_reg_global==NULL)
+    bsp_abort("{bsp_register_init} unable to allocate hash table");
+
+  for(i=0;i<REG_TABLE_SIZE;i++) {
+    _bsp_reg_local[i] =NULL;
+    _bsp_reg_global[i]=NULL;
+  }
+  bsp_register_invalidate_cache();
+  
+}
+
+int bsp_register_total() {
+  return (_bsp_reg_push_pop_pairs);
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Lookup an entry in the hash table}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+STATIC bsp_registration *bsp_register_lookup_local(const void *addr) {
+  bsp_registration *ptr;
+  int found=0,idx;
+
+  if (_bsp_reg_cached_local==addr) {
+    return _bsp_reg_cached_registration;
+  } else {
+    ptr = _bsp_reg_local[hash_local(addr)];   
+    while(ptr != NULL && !found) {
+      if (ptr->local_id == addr)
+        found = 1;
+      else 
+        ptr = ptr -> next_local;
+    }
+    if (ptr==NULL) bsp_register_invalidate_cache();
+    else {
+      _bsp_reg_cached_global       = ptr->global_id;
+      _bsp_reg_cached_local        = (void*) addr;
+      _bsp_reg_cached_registration = ptr;
+    }
+    return ptr;
+  }
+}  
+
+STATIC bsp_registration *bsp_register_lookup_global(int global) {
+  bsp_registration *ptr;
+  int found=0;
+
+  if (_bsp_reg_cached_global==global) {
+    return _bsp_reg_cached_registration;
+  } else {
+    ptr = _bsp_reg_global[hash_global(global)];
+    while(ptr != NULL && !found) {
+      if (ptr->global_id == global)
+        found = 1;
+      else 
+        ptr = ptr -> next_global;
+    }
+    if (ptr==NULL) bsp_register_invalidate_cache();
+    else {
+      _bsp_reg_cached_global       = global;
+      _bsp_reg_cached_local        = ptr->local_id;
+      _bsp_reg_cached_registration = ptr;
+    }
+    return ptr;
+  }
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Delete an entry in the hash table}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_pop_reg_cpp(const void *addr,int lineno,const char* filename) {
+  bsp_registration *ptr, *drag;
+  int global_id, idx;
+
+#ifdef SANITY_CHECK
+  _bsp_lineno   = lineno;
+  _bsp_filename = (char*) filename;
+#endif
+    
+#ifdef DEBUG
+  bsp_debug("{bsp_pop_reg} 0x%x line %d of \"%s\"",addr,lineno,filename);
+#endif
+  ptr = bsp_register_lookup_local(addr);
+  if (ptr==NULL)
+    bsp_error_reg_pop_push_gone();
+
+  global_id = ptr->global_id;
+#ifdef SANITY_CHECK
+  if (!_bsp_constant(global_id))
+    bsp_error_reg_pop_inconsistent(ptr->lineno,ptr->filename);
+#endif
+
+  /* Remove registration from global table */
+  idx = hash_global(global_id);
+  ptr =_bsp_reg_global[idx];
+  if (ptr->global_id==global_id) 
+    _bsp_reg_global[idx]=ptr->next_global;
+  else {
+    while (ptr->global_id != global_id) {
+      drag=ptr;
+      ptr =ptr->next_global;
+#ifdef SANITY_CHECK
+      if (ptr==NULL)
+	bsp_abort("{bsp_pop_reg} line %d of \"%s\"\n"
+		  "\tfatal error whilst walking down global table",
+		  lineno,filename);
+#endif      
+    }
+    drag->next_global=ptr->next_global;    
+  }
+
+  /* Remove registration from local table */
+  idx = hash_local(addr);
+  ptr = _bsp_reg_local[idx];
+  if (ptr->global_id==global_id) 
+    _bsp_reg_local[idx]=ptr->next_local;
+  else {
+    while (ptr->global_id != global_id) {
+      drag=ptr;
+      ptr =ptr->next_local;
+#ifdef SANITY_CHECK
+      if (ptr==NULL)
+	bsp_abort("{bsp_pop_reg} line %d of \"%s\"\n"
+		  "\tfatal error whilst walking down local table",
+		  lineno,filename);
+#endif      
+    }
+    drag->next_local=ptr->next_local;    
+  }
+  _bsp_reg_push_pop_pairs--;
+#ifdef BSP_DRMA
+  free(ptr->remote_ids);
+  free(ptr->remote_sizes);
+#endif
+  if (ptr->filename) free(ptr->filename);
+  free(ptr);
+  bsp_register_invalidate_cache();
+}
+
+#undef bsp_popregister
+void bsp_popregister(const void *addr) {
+  bsp_pop_reg_cpp(addr,0,"unprofiled");
+}
+
+#undef bsp_pop_reg
+void bsp_pop_reg(const void *addr) {
+  bsp_pop_reg_cpp(addr,0,"unprofiled");
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Register an entry in the register}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_push_reg_cpp(const void *addr, int size,
+                      int lineno,const char* filename) {
+  bsp_registration *ptr;
+  int i,local_idx, global_idx;
+#ifdef BSP_DRMA
+  static int   size_cpy,j;
+  static void *addr_cpy;
+#endif
+ 
+#ifdef SANITY_CHECK
+  _bsp_lineno   = lineno;
+  _bsp_filename = (char*) filename;
+#endif
+
+  ptr = MALLOC(SIZEOF(bsp_registration));
+  if (ptr==NULL)
+    bsp_abort("{bsp_push_reg} failed to allocate %d bytes for registration",
+	      SIZEOF(bsp_registration));
+
+  local_idx  = hash_local(addr);
+  global_idx = hash_global(_bsp_reg_next_global_id);
+#ifdef SANITY_CHECK
+  if (local_idx>=REG_TABLE_SIZE || global_idx>=REG_TABLE_SIZE)
+    bsp_abort("{bsp_push_reg} assertion failed: hash functions");
+#endif
+#ifdef DEBUG
+  bsp_debug("{bsp_push_reg}: 0x%x %d bytes line %d of %s has gid=%d "
+            "hash loc=%d global=%d ptr=0x%x",addr,size,lineno,filename,
+	    _bsp_reg_next_global_id,local_idx,global_idx,ptr);
+#endif
+  ptr->next_local  = _bsp_reg_local[local_idx];
+  ptr->next_global = _bsp_reg_global[global_idx];
+  _bsp_reg_local[local_idx]   = ptr;
+  _bsp_reg_global[global_idx] = ptr;
+  bsp_register_invalidate_cache();
+
+  ptr->global_id   = _bsp_reg_next_global_id++;
+  ptr->local_id    = (void*)addr;
+  ptr->lineno      = lineno;
+  ptr->filename    = bsp_strdup(filename);
+#ifndef BSP_DRMA
+  ptr->local_size  = size;
+#else
+  ptr->remote_ids  = CALLOC(_bsp_nprocs,SIZEOF(void*));
+  if (ptr->remote_ids==NULL)
+    bsp_abort("{bsp_push_reg}during registration %d\n"
+              "\tfailed to allocate %d bytes for registration addresses",
+	      ptr->global_id,_bsp_nprocs*SIZEOF(void*));
+
+  ptr->remote_sizes= CALLOC(_bsp_nprocs,SIZEOF(int));
+  if (ptr->remote_sizes==NULL)
+    bsp_abort("{bsp_push_reg} during registration %d\n"
+              "\tfailed to allocate %d bytes for registration sizes",
+	      ptr->global_id,_bsp_nprocs*SIZEOF(int));
+
+  addr_cpy = (void*) addr;
+  size_cpy = size;
+  barrier_sync();
+  for(i=1;i<_bsp_nprocs;i++) {
+    j = (_bsp_pid + i)%_bsp_nprocs;
+    drma_get(j,&addr_cpy,&ptr->remote_ids[j],  SIZEOF(void*));
+    drma_get_int(j,&size_cpy,&ptr->remote_sizes[j]);
+  }
+  barrier_sync();
+  ptr->remote_ids[_bsp_pid]   = (void*) addr;
+  ptr->remote_sizes[_bsp_pid] = size;
+#endif
+#if defined(BSP_DRMA) && defined(SANITY_CHECK)
+  if (ptr->local_id != ptr->remote_ids[_bsp_pid])
+    bsp_abort("{bsp_push_reg} local-global assertion failed");
+#endif   
+  _bsp_reg_push_pop_pairs++;
+}
+
+#undef bsp_pushregister
+void bsp_pushregister(const void *addr,int size) {
+  bsp_push_reg_cpp(addr,size,0,"unprofiled");
+}
+
+#undef bsp_push_reg
+void bsp_push_reg(const void *addr,int size) {
+  bsp_push_reg_cpp(addr,size,0,"unprofiled");
+}
+
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Change registration information}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef BSP_DRMA
+void bsp_register_changetostatics(void *buffer,int buffno) {
+  bsp_registration *ptr;
+  int i;
+
+  ptr = bsp_register_lookup_local(buffer);
+  if (ptr==NULL) 
+    bsp_abort("{bsp_register_changetostatics} line %d of \"%s\"\n"
+              "\tOne of BSPlibs internal data-structures has "
+              "been corrupted.\n",_bsp_lineno,_bsp_filename);
+
+  for(i=0;i<_bsp_nprocs;i++) {
+   _bsp_reg_drma_sizes[(buffno*_bsp_nprocs)+i]=ptr->remote_sizes[i];
+   _bsp_reg_drma_ids[(buffno*_bsp_nprocs)+i]=ptr->remote_ids[i];
+  }
+  
+  ptr->remote_sizes = &_bsp_reg_drma_sizes[buffno*_bsp_nprocs];
+  ptr->remote_ids   = &_bsp_reg_drma_ids[buffno*_bsp_nprocs];  
+}
+#endif
+\end{code}
+
+This routine should only be used locally to the implementation of the
+library. Note \texttt{oldlocal}, \texttt{newlocal}, and \texttt{size}
+have to be pointers to statically allocated storage.
+
+\begin{code}
+void bsp_changeregister(const void  *oldlocal,
+                        const void *newlocal, 
+                        const int   size,
+			int   buffno) {
+  bsp_registration *ptr_global, *ptr_local, *drag;
+  int i,j,local_idx,lineno;
+  char *filename;
+  
+  ptr_global = bsp_register_lookup_local(oldlocal);
+  if (ptr_global==NULL) 
+    bsp_abort("{bsp_changeregister} line %d of \"%s\"\n"
+              "\tOne of BSPlibs internal data-structures has "
+              "been corrupted.\n",_bsp_lineno,_bsp_filename);
+  
+#ifdef DEBUG
+  bsp_debug("{bsp_changeregister} globid %d to %d bytes",
+              ptr_global->global_id,size);
+#endif
+  local_idx  = hash_local(oldlocal);
+  ptr_local  = _bsp_reg_local[local_idx];
+
+  /* Remove old local pointer from the local ptr hash table */
+  if (ptr_local->local_id == oldlocal) {
+#ifdef DEBUG
+    bsp_debug("{bsp_changeregister} found at head of symbol table");
+#endif
+    _bsp_reg_local[local_idx] = ptr_local->next_local;
+  } else {
+    while (ptr_local->local_id!=oldlocal) {
+#ifdef DEBUG
+      bsp_debug("{bsp_changeregister} skipping over gid=%d",
+	       ptr_local->global_id);
+#endif
+      drag = ptr_local;
+      ptr_local = ptr_local->next_local;
+    }
+    drag->next_local = ptr_local->next_local;
+  }
+  ptr_global->local_id      = (void*)newlocal;  
+  local_idx                 = hash_local(newlocal);
+  ptr_global->next_local    = _bsp_reg_local[local_idx];
+  _bsp_reg_local[local_idx] = ptr_global;
+  bsp_register_invalidate_cache();
+
+#ifdef BSP_DRMA
+  for(i=1;i<_bsp_nprocs;i++) {
+    j = (_bsp_pid + i)%_bsp_nprocs;
+    drma_put(j,&newlocal, &ptr_global->remote_ids[_bsp_pid], SIZEOF(void*));
+    drma_put_int(j,&size,     &ptr_global->remote_sizes[_bsp_pid]);
+  }
+  ptr_global->remote_ids[_bsp_pid]   = (void*) newlocal;
+  ptr_global->remote_sizes[_bsp_pid] = size; 
+#else
+  ptr_global->local_size  = size;
+#endif
+#if defined(BSP_DRMA) && defined(SANITY_CHECK)
+  if (ptr_global->local_id != ptr_global->remote_ids[_bsp_pid])
+    bsp_abort("{bsp_changeregister} local-global assertion failed");
+#endif   
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Using registration information}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+int _bsp_register_local_to_global(const void *addr) {
+  bsp_registration *ptr;
+  
+  ptr = bsp_register_lookup_local(addr);
+  if (ptr!=NULL) return (ptr->global_id);
+  else {
+    bsp_error_unregistered();
+    return -1;
+  }
+}
+
+char *_bsp_register_global_to_local(int global, int onpid) {
+  bsp_registration *ptr;
+  
+  ptr = bsp_register_lookup_global(global);
+  if (ptr!=NULL) 
+#ifdef BSP_DRMA
+    return (ptr->remote_ids[onpid]);
+#else
+    return (ptr->local_id);
+#endif
+  else {
+    bsp_error_dereg_comm_same_superstep();
+    return NULL;
+  }
+}
+
+void bsp_register_info(int global,int onpid,
+                       int *size,int *lineno,char **filename) {
+  bsp_registration *ptr;
+  
+  ptr = bsp_register_lookup_global(global);
+  if (ptr==NULL)
+    bsp_abort("{bsp_register_info} shouldn't get here");
+  else {
+#ifdef BSP_DRMA
+    *size     = ptr->remote_sizes[onpid];
+#else
+    *size     = ptr->local_size;
+#endif
+    *filename = ptr->filename;
+    *lineno   = ptr->lineno;
+  }
+}
+
+int bsp_register_nbytes(int global,int onpid) {
+  bsp_registration *ptr;
+
+  ptr = bsp_register_lookup_global(global);
+  if (ptr!=NULL) {
+#ifdef BSP_DRMA
+    return (ptr->remote_sizes[onpid]);
+#else 
+    return (ptr->local_size);
+#endif 
+  } else {
+    bsp_error_unregistered();
+    return 0;
+  } 
+}
+\end{code}

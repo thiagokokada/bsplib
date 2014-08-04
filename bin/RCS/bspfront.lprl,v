@@ -1,0 +1,729 @@
+head	1.1;
+access;
+symbols;
+locks
+	jonh:1.1; strict;
+comment	@# @;
+
+
+1.1
+date	95.09.01.13.55.36;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995, University of Oxford                         %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id$
+% $Log$
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{The all new singing and dancing BSP compilation driver}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Architecture specific stuff}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+$Version           = "0.1beta";
+$bsp_library_dir   = "/users/jonh/BSP/";
+chop($Arch = `uname -s`);
+
+%isSharedMemory = ("IRIX64",1);
+
+%ccArch        = (
+  "IRIX64",  "cc",
+  "AIX",     "mpcc");
+
+%f77Arch = (
+  "IRIX64","f77",
+  "AIX",   "mpxlf");
+
+
+%ccompFlagsArch = (
+  "IRIX64", "-64 -mips4",
+  "AIX",    "");
+
+%fcompFlagsArch = (
+  "IRIX64", "",
+  "AIX",    "");
+
+%coptFlagsArch = (
+  "IRIX64-O1", "-O",
+  "IRIX64-O2", "-O2",
+  "IRIX64-O3", "-O3 -sopt,-o=5",
+  "AIX-O",     "-O",
+  "AIX-O2",    "-O2",
+  "AIX-O3",    "-O3");
+
+%foptFlagsArch = (
+  "IRIX64-O",  "-O",
+  "IRIX64-O2", "-O2",
+  "IRIX64-O3", "-O3",
+  "AIX-O",     "-O",
+  "AIX-O2",    "-O2",
+  "AIX-O3",    "-O3 -Pk -Wp,-r=3");
+
+
+%ldFlagsArch   = (
+  "IRIX64",  "-woff all", 
+  "AIX",    "");
+
+%librariesArch = (
+  "IRIX64",  "",
+  "AIX",     "");
+
+
+%mpi_library_dir = (
+  "IRIX64","/usr/local/mpich/lib/IRIX/ch_shmem/");
+
+\end{code}
+
+\begin{code}
+# Various helper programs---they do the real work :-)
+$CC    = $ccArch{$Arch};
+$F77   = $f77Arch{$Arch};
+$LD    = $ccArch{$Arch};
+$CPP   = "/lib/cpp";
+$UNLIT = "litToPgm";
+
+$bsp_buffer_size    = 16384;
+if ($isSharedMemory{$Arch}) {
+  $bsp_comm_fifo_size = 1000;
+} else {
+  $bsp_comm_fifo_size = 100;
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Usage message}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+($Pgm = $0) =~ s|.*/||;
+$ShortUsage = "\nusage: for basic information, try the `-help' option\n";
+$LongUsage = "\n" . <<EOUSAGE;
+The all **N E W** BSP library compilation system driver:
+
+    $Pgm [command-line-options-and-input-files]
+
+------------------------------------------------------------------------
+This driver ($Pgm) guides each input file through (some of the)
+possible phases of a compilation:
+
+    - litToPgm:     extract code from a "literate program"
+    - cc:           run the C compiler
+ or - f77:          run the Fortran 77 compiler
+    - ld:           run the Unix linker
+
+For each input file, the phase to START with is determined by the
+file's suffix:
+    - .lc           literate ANSI-C + BSP library calls
+    - .c            ANSI-C + BSP library calls
+    - .lf           literate Fortran77 + BSP library calls
+    - .f            Fortran77 + BSP library calls
+    - other         passed directly to the linker
+.
+
+------------------------------------------------------------------------
+Command line options:
+
+     -v      Verbose mode.
+
+     -c      Suppress the loading phase of the compilation and force an object
+             file to be produced even if only one program is compiled.
+
+     -o <output>
+             Name the final output file. 
+
+     -miller
+             Assume the source has been written for the old BSP library.
+
+     -mpi
+	     Use the slow MPI implementation of the BSP library in preference 
+             to an extremely fast native version :-)
+
+     -malloc
+	     The source contains BSP malloc library calls 
+             (Only available from C).
+
+     -O      Turn on the -O optimisation in the C or Fortran compiler
+
+     -O2     Turn on the -O2 compiler optimisation and turn off both runtime 
+             sanity and bounds checking within the library. ***some programs 
+             may fall over unexpectantly if internal tables overflow***
+
+     -O3     Use the highest possible optimisation level in conjunction with 
+             any other optimsation tools such as copt(1) or pca(1). At 
+             this optimisation level the library has been tuned in such 
+             a way that it assumes no one else is using the machine.
+
+     -debug  Turn on the runtime debugging information in the library (this 
+             will probably be meaningless to people other than implementors).
+
+     -savepre
+	     Save a copy of the BSP preprocessor output.
+
+     -g      Turn on standard Unix debugging.
+
+     -prof
+	     Turn on BSP runtime profiling. The file "STAT.bsp" will be 
+             written to the current working directory. The file contains
+             profiling information.
+
+     -p      Turn on standard Unix prof(1) profiling.
+
+     -l<library>
+	     Pass <library> to the linker.
+
+     -L<directory>
+	     Add <directory> to the library load path.
+
+     -cflags='<options>'
+             Pass <options> straight through to the C compiler.
+
+     -f77flags='<options>'
+             Pass <options> straight through to the F77 compiler.
+
+     -ldflags='<options>'
+             Pass <options> straight through to the Unix Linker compiler.
+
+     -bspbuffer=<number>
+     -bspbuffer=<number>
+             Set the buffer size used to hold communication messages. 
+             If <number> ends in a 'K', then the size is in kilobytes; 
+             otherwise the size is assumed to be bytes (see the results
+             from the -prof option for optimal buffer sizes for particular
+             codes). [default value is $bsp_buffer_size bytes]
+
+     -bspfifo=<number>
+     -bspfifo=<number>
+             Set the size of an internal FIFO queue. This will only need 
+             to be increased if a runtime overflow is raised. 
+             [default value is $bsp_comm_fifo_size elements]
+
+------------------------------------------------------------------------ 
+EOUSAGE
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Initialisation}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+select(STDERR); $| = 1; select(STDOUT); # no STDERR buffering, please.
+
+$Status            = 0;
+$Verbose           = 0;
+$Debug             = 0;
+$UnixDebug         = 0;
+$Malloc            = 0;
+$Mpi               = 0;
+$Prof              = 0;
+$UnixProf          = 0;
+$Optimisaton       = 0;
+$KeepTemps         = 0;
+$Given_output_file = "a.out";
+
+@@Input_files       = ();
+@@Link_files        = ();
+@@Files_to_tidy     = ();
+  
+# Set up the signal handler
+$SIG{'INT'}  = 'tidy_up_and_die';
+$SIG{'QUIT'} = 'tidy_up_and_die';
+
+$Tmpfile_prefix = "/tmp/bspfront$$";
+\end{code}
+
+Include, import directories, and CPP defines.
+\begin{code}
+@@CComp_flags    = ($ccompFlagsArch{$Arch});  # Fortran specific flags 
+@@FComp_flags    = ($fcompFlagsArch{$Arch});  # C specific flags
+@@Comp_flags     = ();                        # Language independant flags
+@@Ld_flags       = ($ldFlagsArch{$Arch});
+@@Import_dir     = ('.',$bsp_library_dir . "/include");
+@@Library_dir    = ('.',$bsp_library_dir . "/lib/$Arch"); #-L things
+@@Library_user   = ();    
+@@Library_sys    = ($librariesArch{$Arch});    
+@@Cpp_defines    = ();    
+@@Inject_includes= ("\"bsp_lib_user.h\"");
+@@Inject_bspcpp  = ();
+$BspCpp_flags   = ();
+
+$CC_extra_flags  = "";
+$F77_extra_flags = "";
+$LD_extra_flags  = "";
+\end{code}
+
+\begin{code}
+$Do_cc    =1;
+$Do_f77   =0;
+$Do_ld    =1;
+
+&main();
+&tidy_up();
+exit(0);
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Main program}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub main {
+
+arg: while($_=$ARGV[0]) {
+  shift(@@ARGV);
+
+  #--------HELP------------------------------------------------
+  /^-help$/ && do {print $LongUsage; exit(0);};
+  
+  #--------VERBOSE---------------------------------------------
+  /^-v$/    && do {$Verbose = 1; next arg;};
+
+  #--------Optimisation----------------------------------------
+  /^-O$/    && do {$Optimisation=1; next arg;};
+
+  /^-O2$/   && do {$Optimisation=2; next arg;};
+
+  /^-O3$/   && do {$Optimisation=3; next arg;};
+
+  #--------Debugging-------------------------------------------
+  /^-debug$/   && do {$Debug    = 1; 
+                      push(@@Cpp_defines,"DEBUG");
+                      next arg;};
+
+  /^-savepre$/ && do {$SaveBspCpp = 1;
+                      next arg;};
+
+  /^-g$/       && do {$UnixDebug= 1; push(@@Comp_flags,"-g");next arg;};
+
+  /^-keep$/    && do {$KeepTemps= 1; next arg;};
+
+  #--------Profiling-------------------------------------------
+  /^-prof$/  && do {$Prof     = 1; next arg;};
+  /^-p$/       && do {$UnixProf = 1; push(@@Comp_flags,"-p");next arg;};
+
+  #--------Suppress linker-------------------------------------
+  /^-c$/    && do {$Do_ld = 0; next arg;};
+
+  #--------Output file-----------------------------------------
+  # -o <file>
+  /^-o$/    && do {$Given_output_file = &grab_next_arg("-o");
+                   if ($Given_output_file =~ /\/[^\/]*$/) {
+                     if (! -d $`) {
+                        print STDERR "$Pgm: no such directory $`\n";
+                        $Status++;
+                     }
+                   }
+                   next arg;
+                  };
+  #--------CPP Defines----------------------------------------
+  /^-D/     && do {push(@@Cpp_defines,$'); next arg;};
+
+  #--------FLAGS passed straight onto a compiler phase--------
+  /^-cflags=/   && do {$CC_extra_flags=$';  next arg;};
+  /^-f77flags=/ && do {$F77_extra_flags=$'; next arg;};
+  /^-ldflags=/  && do {$LD_extra_flags=$';  next arg;};
+
+  #--------Set runtime buffer sizes---------------------------
+  /^-bspbuffer=(\d+)$/   && do {$bsp_buffer_size   =       int($1); next arg;};
+  /^-bspbuffer=(\d+)K$/i && do {$bsp_buffer_size   =1024 * int($1); next arg;};
+  /^-bspfifo=(\d+)$/     && do {$bsp_comm_fifo_size=       int($1); next arg;};
+  /^-bspfifo=(\d+)K$/i   && do {$bsp_comm_fifo_size=1024 * int($1); next arg;};
+
+  #--------Libraries------------------------------------------
+  /^-l/   && do {push(@@Library_user,$'); next arg;};
+
+  /^-L/   && do {if (-d $') {
+                     push(@@Library_dir,$'); 
+                  } else {
+                     print STDERR "Pgm: Library directory \"$'\" does",
+                                  "not exist";
+                  }
+                  next arg;};
+  #--------BSP library munging--------------------------------
+  /^-miller$/ && do {push(@@BspCpp_flags,"-miller");
+                     next arg;};
+
+  /^-mpi$/    && do {$Mpi = 1;
+                     push(@@Library_dir,$mpi_library_dir{$Arch});
+                     next arg;
+                     };
+
+  /^-malloc$/ && do {$Malloc = 1;
+                     push(@@Inject_bspcpp,  "\"bsp_malloc_unfold.h\"");
+                     push(@@Inject_includes,"\"bsp_malloc_user.h\"");
+                     $Do_precpp = 1; 
+                     next arg;};
+                     
+  #--------Imports--------------------------------------------
+  /^-I$/ && do {if (-d $') {
+                     push(@@Import_dir,$'); 
+                  } else {
+                     print STDERR "Pgm: Import directory \"$'\" does",
+                                  "not exist";
+                  }
+                  next arg;};
+
+  #--------Input file-----------------------------------------
+  /\.o$/   && do {push(@@Link_files, $_); 
+                   next arg;};
+     if (/\.lf$/ || /\.f$/ || /\.lc$/ || /\.c$/) {
+        if (-f $_) {
+           push(@@Input_files,$_);
+        } else {
+           print STDERR "$Pgm: input file doesn't exit: $_\n";
+           $Status++;
+        }
+     } else {
+        print STDERR "$Pgm: unable to recognise option or file \"$_\"\n";
+        $Status++;
+     }
+  }
+
+  if (($#Input_files <0) && ($#Link_files<0)) {
+    printf STDERR "$Pgm: no input files specified\n";
+    $Status++;
+  }
+  
+  if ($Status > 0) {
+    print STDERR $ShortUsage;
+    exit(1);
+  }
+  
+  push(@@Cpp_defines,"SANITY_CHECK") if ($Optimisation<=1);
+  &driverTag() if $Verbose;
+  local($file);
+  
+  push(@@Input_files,&preloadInitFile(@@Input_files,@@Link_files)) if $Do_ld;
+  foreach $file (@@Input_files) {
+    &compileFile($file);
+  }
+  if ($Do_ld) {
+   foreach $file (@@Input_files) {
+     $file =~ /\.\w+$/ && (push(@@Link_files,$`.".o"));
+   }
+   
+   push(@@Library_sys,"bspmalloc".&libraryExtension()) if ($Malloc);
+   if ($Mpi) { 
+     push(@@Library_sys,"bspfrontmpi". &libraryExtension());
+     push(@@Library_sys,"mpi");
+   } else {
+     push(@@Library_sys,"bspfront". &libraryExtension());
+   }
+   
+   &run_something("$LD " .
+                      $archSpecificFlags{$Arch}              .
+                      &addprefix_concat(" ",@@Comp_flags)     .
+                      &addprefix_concat(" ",@@Ld_flags)       .
+                      " $LD_extra_flags "                    .
+                      &addprefix_concat(" -I",@@Import_dir)   .
+                      " -o $Given_output_file "              .
+                      join(" ",@@Link_files)                  .
+                      &addprefix_concat(" -L",@@Library_dir)  .
+                      &addprefix_concat(" -l",@@Library_sys)  .
+                      &addprefix_concat(" -l",@@Library_user),
+                  "Unix linker");                  
+  }
+}
+
+sub libraryExtension {
+   if    ($Debug)                   {return "_G";}
+   elsif ($UnixDebug)               {return "_g";}
+   elsif ($Prof && $Optimisation>0) {return "_PO";}
+   elsif ($Prof)                    {return "_P";}
+   elsif ($Optimisation>0)          {return "_O";}
+   elsif ($UnixProf)                {return "_p";}
+   else                             {return "";}
+}
+\end{code}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Compile file}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+sub compileFile {
+  local($filename) =$_[0];
+  local($basename);
+  local($filename_postlit); 
+  local($filename_precpp);
+  local($filename_postcpp);
+  local($filename_bspcpp);
+
+  $filename =~ /.\w+$/ && ($basename = $`);
+
+  if      ($filename =~ /\.lc/) {
+     &run_something("$UNLIT $filename", 
+                    "Program that extracts C from a literate program");
+     $filename_postlit = $basename . ".c";
+     push(@@Files_to_tidy,$filename_postlit);  
+  } 
+  elsif ($filename =~ /\.lf/) {
+     $Do_f77          = 1;
+     $Do_cc           = 0;
+     &run_something("$UNLIT $filename", 
+                    "Program that extract F77 from a literate program");
+     $filename_postlit = $basename       . ".f";
+     push(@@Files_to_tidy,$filename_postlit);
+  } elsif ($filename =~ /\.f/) {
+     $Do_f77          = 1;
+     $Do_cc           = 0;
+     $filename_postlit = filename;
+  } else {
+    $filename_postlit = $filename;
+  }
+
+  $Do_cc  && (push(@@CComp_flags,$coptFlagsArch{$Arch . "-O" . $Optimisaton}));
+  $Do_f77 && (push(@@FComp_flags,$foptFlagsArch{$Arch . "-O" . $Optimisaton}));
+  
+ 
+  if ($Do_f77) {
+    if ($Malloc) {
+      print STDERR "**warning** the malloc library is only available from C";
+    }
+  }
+
+  if ($Do_cc) {
+     $filename_precpp  = $basename;
+     $filename_postcpp = $Tmpfile_prefix . ".cppc";
+     $filename_bspcpp  = $Tmpfile_prefix . ".bspcppc";
+     $filename_precc   = $Tmpfile_prefix . ".c";
+  } else {
+     $filename_precpp  = $basename;
+     $filename_postcpp = $Tmpfile_prefix . ".cppf";
+     $filename_bspcpp  = $Tmpfile_prefix . ".bspcppf";
+     $filename_precc   = $Tmpfile_prefix . ".f";
+  }  
+
+  # Only inject stuff into C files...
+  if ($#Inject_bspcpp >=0 && $Do_cc) {
+    print STDERR "\nInjecting \#includes onto front of file:\n" if $Verbose;
+    open(CPPOUT,"> $filename_precpp");
+    local($i);
+    foreach $i (@@Inject_bspcpp) {
+      print STDERR "\t\#include $i\n" 	if $Verbose;
+      print CPPOUT "\#include $i\n";
+    }
+    print CPPOUT "\#line 1 \"$basename\"\n";
+    open(CPPIN,"$filename_postlit");
+    while (<CPPIN>) {
+      if (/^\s*\#include\s*(.*)$/) {
+         print STDERR "\t #include $1 [extracted]\n" if $Verbose;
+         print CPPOUT "\n";
+         push(@@Inject_includes,$1);
+      } else {
+         print CPPOUT $_;
+      }
+    }
+    close(CPPOUT);
+    &run_something("$CPP " . 
+                   &addprefix_concat(" -I",@@Import_dir) .
+                   &addprefix_concat(" -D",@@Cpp_defines) .
+                   " $filename_precpp > $filename_postcpp",
+                   "C preprocessor on the C");
+  } else {
+    $filename_postcpp = $filename_postlit;
+  }
+  
+
+  
+  push(@@BspCpp_flags,"-mpass") if (!$isSharedMemory{$Arch} || $Mpi);
+  if ($Do_cc) {
+    &run_something("bspcpp " . join(" ",@@BspCpp_flags).
+                   " $filename $filename_postcpp $filename_bspcpp",
+                   "preprocessor for BSP C library directives");
+    print STDERR "\nInjecting \#includes onto front of file:\n" if $Verbose;
+    open(CPPOUT,"> $filename_precc");
+    local($i);
+    foreach $i (@@Inject_includes) {
+      print STDERR "\t\#include $i\n" 	if $Verbose;
+      print CPPOUT "\#include $i\n";
+    }
+    close(CPPOUT);
+    &run_something("cat $filename_bspcpp >> $filename_precc",
+                   "cating the file onto the injected includes");
+    
+  } else {
+    &run_something("bspfpp " . join(" ",@@BspCpp_flags).
+                   " $filename $filename_postcpp $filename_bspprecc",
+                   "preprocessor for the BSP Fortran library directives");
+  }
+
+  if ($SaveBspCpp) {
+    if ($Do_cc) {
+      &run_something("cp $filename_precc $basename.bspcpp.c",
+                     "saving a copy of the BSP preprocessor output");
+    } else {
+      &run_something("cp $filename_precc $basename.bspcpp.f",
+                     "saving a copy of the BSP preprocessor output");
+    }
+  }
+
+  if ($Do_cc) {
+    &run_something("$CC -c ". $archSpecificFlags{$Arch} . 
+                      &addprefix_concat(" ",@@CComp_flags) .
+                      &addprefix_concat(" ",@@Comp_flags) .
+                      " $CC_extra_flags ".
+                      &addprefix_concat(" -I",@@Import_dir) .
+                      &addprefix_concat(" -D",@@Cpp_defines) .
+                      " $filename_precc ",
+                   "C compiler");
+
+                               
+  } else {
+    &run_something("$F77 -c ". 
+                      &addprefix_concat(" ",@@FComp_flags) .
+                      &addprefix_concat(" ",@@Comp_flags) .
+                      " $F77_extra_flags ".
+                      &addprefix_concat(" -I",@@Import_dir) .
+                      &addprefix_concat(" -D",@@Cpp_defines) .
+                      " $filename_precc ",
+                   "Fortran 77 compiler");
+
+   }
+
+  if (-e "bspfront$$.o") {
+    &run_something("mv bspfront$$.o $basename.o",
+                   "unix mv of the temporary object file");
+  } else {
+    &run_something("mv $Tmpfile_prefix.o $basename.o",
+                   "unix mv of the temporary object file");
+  }
+  push(@@Files_to_tidy,$basename.".o") if ($Do_ld);
+}
+
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Create the preload file}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub preloadInitFile {
+  local(@@linker_files);
+  open(PRELOAD,"> " . $Tmpfile_prefix . "_preload.c");
+  print PRELOAD "/* " , @@linker_files , "*/\n";
+  print PRELOAD<<"_ENDPRELOAD_";
+
+int BSP_BUFFER_SIZE;
+int BSP_COMM_FIFO_SIZE;
+
+void _bsp_preload_init() {
+   BSP_BUFFER_SIZE    = $bsp_buffer_size;
+   BSP_COMM_FIFO_SIZE = $bsp_comm_fifo_size;
+}
+_ENDPRELOAD_
+  close(PRELOAD);
+  return($Tmpfile_prefix . "_preload.c");
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Select the next argument off the command line}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub grab_next_arg {
+  local($option) = $_[0];
+  local($temp);
+  if ($#ARGV >= 0) {
+    $temp = $ARGV[0]; shift(@@ARGV); 
+    return($temp);
+  } else {
+    print STDERR "$Pgm: no argument following $option option\n";
+    $Status++;
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Function like \texttt{join} but also puts something at the front}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub addprefix_concat {
+  local($prefix,@@list) = @@_;
+  if ($#list<0) {
+    return "";
+  } else {
+    return ($prefix . join($prefix,@@list));
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Run a command}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub run_something {
+  local($str_to_do, $tidy_name) = @@_;
+  local($return_val) = 0;
+  local($die_msg);
+
+  print STDERR "\n$tidy_name:\n\t" if $Verbose;
+  print STDERR "$str_to_do\n"      if $Verbose;
+
+  system("$str_to_do");
+  $return_val = $?;
+  if ($return_val != 0) {
+    $die_msg = "$Pgm: execution of the $tidy_name had trouble";
+    $die_msg .= " (program not found)" if $return_val == 255;
+    $die_msg .= " ($!)" if $Verbose && $! != 0;
+    $die_msg .= "\n";
+    &tidy_up_and_die($return_val, $die_msg);
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Tidy up after a signal or at the end}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub tidy_up {
+  local($return_val, $msg) = @@_;
+  print STDERR "deleting... @@Files_to_tidy\n" if $Verbose && 
+                                                 $#Files_to_tidy >= 0;
+  unlink @@Files_to_tidy                       if  $#Files_to_tidy>= 0 &&
+                                                 !$KeepTemps;
+  system("rm -f $Tmpfile_prefix*")            if !$KeepTemps;
+  print STDERR $msg;
+}
+
+sub tidy_up_and_die {
+   &tidy_up(@@_);
+   exit(1);
+}
+\end{code}
+
+\begin{code}
+sub driverTag {
+print <<"_ENDTAG_";
+===================================================
+===  This is $Pgm version $Version.           
+===  Using a $Arch to compile a BSP C or Fortran 
+===  programs for a $Arch.
+===================================================
+_ENDTAG_
+}
+\end{code}
+@

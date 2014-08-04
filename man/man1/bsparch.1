@@ -1,0 +1,89 @@
+.TH bsparch 1 "1.4 25/9/98" "Oxford BSP Toolset"
+.SH NAME
+bsparch \- determine the machine architecture and communication
+device.
+
+.SH SYNOPSIS
+.B bsparch
+[ \-arch ] [ \-device ] [ \-nodefault ] [ \-name ]
+[ \-defdevice machine ] [ \-convertname machine ]
+[ \-convertdevice device ]
+[ \-allarch ] [ \-alldevice ]
+[ \-help ] 
+
+.SH DESCRIPTION
+.B bsparch
+determines the machine specific installation options required to
+install the Oxford BSP toolset.  Two factors guide the installation of
+the toolset: (1) the machine architecture and operating system
+release; and (2) the type of device used as the communication
+medium. The
+.I \-arch
+option determines the machine architecture, and  
+.I \-device 
+the relevant communication device.
+.PP
+
+To date, the tested architectures are:
+
+.nf
+.ta \w'HITACHIMPPxx'u
+SGICHALL64	Silicon Graphics Power Challenge (Irix 6.x)
+SGIORIGIN       Silicon Graphics Origin 2000 (Irix 6.x)
+SGI	Silicon Graphics workstation (Irix 5.x)
+SP2	IBM SP2 running AIX
+CRAYT3E	Cray T3E
+CRAYT3D	Cray T3D
+PARSYTEC	Parsytec Explorer
+CONVEXSPP	Convex SPP
+SunOS	SunOS 4.1.x 
+Solaris	SunOS 5.x 
+LINUX	PC based Unix 
+OSF1	Digital's alpha boxes 
+HITACHIMPP	Hitachi SR2001
+.fi 
+
+
+The tested communication devices are shown below.  It should be noted,
+that only a small subset of the cross-product of architectures and
+devices are valid builds of the toolset.
+
+.nf
+.ta \w'MPASS_EXPRESSxx'u
+SHMEM_SYSV	System V shared memory
+SHMEM_SGI	SGI specific shared memory operations 
+MPASS_TCPIP     TCP/IP based message passing
+MPASS_MPI	MPI 
+MPASS_MPL	IBM's message passing system 
+MPASS_PARIX	Message passing on the Parsytec GC 
+MPASS_EXPRESS	Express (Parasoft Ltd) message passing
+DRMA_SHMEM	Cray Shmem one-sided communications
+.fi
+
+The default device behaviour of
+.I bsparch(1)
+can be overridden by providing an environment variable 
+.I BSP_DEVICE
+in the user's environment, whose value is the name of the desired
+device. You will have to override the default behaviour when
+installing
+.B bsplib(3) 
+on top of MPI.
+
+.SH "SEE ALSO"
+bsplib(3)
+
+The Oxford BSP toolset web pages can be found  at:
+.br
+.I http://www.bsp-worldwide.org/implmnts/oxtool/
+
+.SH BUGS
+Problems and bug reports should be mailed to 
+.I bsplib-bugs@comlab.ox.ac.uk
+
+.SH AUTHORS
+The Oxford BSP Toolset implementation of BSPlib was written by
+Jonathan.Hill@comlab.ox.ac.uk
+.br
+.B http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+

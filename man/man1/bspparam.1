@@ -1,0 +1,87 @@
+.TH "bspparam" 1 "1.4 25/9/98" "Oxford BSP Toolset" 
+.SH NAME
+bspparm \- prints a table of the BSP machine parameters
+
+.SH SYNOPSIS
+.B bspparam\c
+ [ \-v ] [ \-help ] [ \a ] [ \-time ]
+
+.SH DESCRIPTION
+This command generates a table containing the BSP cost parameters for the machine
+the command is executed upon. The entries in the table are read from a
+database, and not generated on demand. 
+
+The BSP parameter database is used by 
+.B bspprof(1)\c
+\&,
+.B bspsig(1)\c
+\& and the 
+.B bsplib_level1(3)\c
+\& functions
+.B bsp_s(3)\c
+\&, 
+.B bsp_l(3)\c
+\&, 
+.B bsp_g(3)\c
+\& and
+.B bsp_nhalf(3)\c
+\&. These functions are used in the definition of the 
+.B bsplib_level1(3)
+collective communucations operations such that alternative
+implementations of a collective operation may be choosen at runtime
+depending upon the values of a machines BSP parameters.
+
+
+.SH OPTIONS
+.TP
+.B \-v
+Print (on standard error output) the phases involved in the execution
+of the command.
+.TP
+.B \-help
+Print this manual page on standard output.
+.TP
+.B \-time
+The BSP parameters are given with respect to micro-seconds instead of
+equivalent number of floating point operations. 
+.TP
+.B \-a
+Generate entries for all machines  stored in the BSP parameter database.
+
+.SH "NOTES"
+The environment variable
+.B BSP_SLG
+can be used to override the database entry for a machines BSP parameters. For
+example,
+
+.nf
+> setenv BSP_SLG 50.0,1000,10.0,12
+.fi
+
+has the effect of setting s=50.0 mflops/sec, L=1000 mflops, g=10.0
+flops/word, 
+and n_half=20 words. 
+
+.SH FILES
+The file \fIPREFIX\fR/include/bsp_parameters.ascii contains a table
+of the BSP parameters read by these functions; where
+.I PREFIX
+is the installation prefix set when configuring BSPlib.
+
+.SH  "SEE ALSO"
+bsplib(3), bspfront(1), bsparch(1)
+
+The Oxford BSP toolset web pages can be found  at:
+.br
+.I http://www.bsp-worldwide.org/implmnts/oxtool/
+.br
+.I http://www.bsp-worldwide.org/implmnts/oxtool/params.html
+
+.SH BUGS
+Problems and bug reports should be mailed to 
+.I bsplib-bugs@comlab.ox.ac.uk
+
+.SH AUTHORS
+Jonathan.Hill@comlab.ox.ac.uk
+.PP
+.B http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html

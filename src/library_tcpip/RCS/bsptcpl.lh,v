@@ -1,0 +1,46 @@
+head	1.1;
+access;
+symbols;
+locks
+	jonh:1.1; strict;
+comment	@# @;
+
+
+1.1
+date	97.07.11.10.28.30;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@% $Id$
+% $Log$
+
+\begin{code}
+
+  /*
+   * File bsptcpl.h contains the prototypes for the fucntions in the 
+   * file bsptcpl.c (the library of interface functions for the BSP/TCP
+   * implementation.
+   */
+
+int bsptcp_set_buffer_size(int size);
+void bsptcp_env(int request_procs, char *spmd_prog);
+void bsptcp_init(int *setup_procs);
+int bsptcp_nonblock_send(char *message, int size, int to, int type);
+void bsptcp_block_recv(char *msg,int size,int *from,int *type,int *nbytes);
+void bsptcp_wait_sends(void);
+int bsptcp_okto_send(int pid);
+int  bsptcp_probe(int *pid,int *type, int block, int usec_wait);
+void bsptcp_messg_stopall(void);
+void bsptcp_messg_exit(int);
+\end{code}
+@

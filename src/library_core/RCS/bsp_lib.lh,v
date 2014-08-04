@@ -1,0 +1,238 @@
+head	1.3;
+access;
+symbols;
+locks
+	jonh:1.3; strict;
+comment	@% @;
+
+
+1.3
+date	95.08.31.16.37.35;	author jonh;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	95.08.09.12.51.04;	author jonh;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	95.08.02.11.00.26;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.3
+log
+@*** empty log message ***
+@
+text
+@%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995, University of Oxford                         %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id$
+% $Log$
+\begin{code}
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include "bsp_lib_user.h"
+\end{code}
+
+\begin{code}
+#define BSP_STORE 1
+#define BSP_FETCH 0
+
+#define COMM_IS_STORE(pidtype)  (pidtype<BSP_MAX_PROCS)
+#define COMM_SET_FETCH(pidtype) (pidtype+BSP_MAX_PROCS)
+#define COMM_SET_STORE(pidtype) (pidtype)
+#define COMM_GET_PID(pidtype) ((pidtype<BSP_MAX_PROCS)?(pidtype):(pidtype-BSP_MAX_PROCS))
+
+typedef struct {
+   int    comm_pid; /* 0<pid<BSP_MAX_PROCS == store from pid */
+                    /* pid >=BSP_MAX_PROCS == fetch from pid-BSP_MAX_PROCS*/
+   int    addr_table;
+   int    offset;
+   void  *addr_real;
+   int    nbytes;
+ } _BSPcomm_thunk;
+\end{code}
+
+\begin{code}
+#ifdef BSP_SHMEM
+#include "bsp_lib_shmem.h"
+#else
+#include "bsp_lib_mpass.h"
+#endif
+\end{code}
+@
+
+
+1.2
+log
+@*** empty log message ***
+@
+text
+@d1 18
+a18 8
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsp_lib.lh,v 1.1 1995/08/02 11:00:26 jonh Exp jonh $
+% $Log: bsp_lib.lh,v $
+# Revision 1.1  1995/08/02  11:00:26  jonh
+# Initial revision
+#
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+a19 6
+#include <sys/types.h>
+#include <sys/resource.h>
+#include <sys/prctl.h>
+#include <signal.h>
+#include <sys/schedctl.h>
+#include <ulocks.h>
+a25 27
+As the implementation of locks and barriers becomes embarrassingly
+poor when the number of processes is larger than the number of
+processors, a limit is put on the number of processors the user is
+allowed to have.
+
+\texttt{BSP_BUFFER_SIZE} and \texttt{BSP_COMM_FIFO_SIZE} are global
+variables set in a preload file from the compiler.
+
+\begin{code}
+#ifndef BSP_MAX_PROCS
+#define BSP_MAX_PROCS 100
+#endif
+
+extern int BSP_BUFFER_SIZE;
+extern int BSP_COMM_FIFO_SIZE;
+
+#ifndef BSP_ADDR_TABLE_SIZE
+#define BSP_ADDR_TABLE_SIZE 100
+#endif
+\end{code}
+
+\begin{code}
+#define HARDWARE_SPINS       3000
+#define set_spinlock(lock)   uswsetlock(lock,HARDWARE_SPINS)
+#define unset_spinlock(lock) usunsetlock(lock)
+\end{code}
+
+a44 8
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Shared global variables}
+\label{sect:bspirix:shmemglobals}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+A shared memory information table is used to store locks, barriers,
+semaphores, and shared memory buffers.
+d46 5
+a50 19
+typedef struct {
+   int              nprocs;            /* total number of procs   */
+   barrier_t       *sync;              /* sync barrier            */
+   ulock_t          lock;              /* spinlock                */
+   char            *buffer;            /* scratch buffer          */
+   char           **proc_buffer;       /* write buffer per proc   */
+   ulock_t         *proc_buffer_write; /* buffer write lock       */
+   ulock_t         *proc_buffer_full;  /* buffer written          */
+   usptr_t        **proc_buffer_wait;  /* wait for buffer to fill */
+   _BSPcomm_thunk  *proc_buffer_info;  /* whats in the buffer     */
+   _BSPcomm_thunk **proc_comm_fifo;    /* pending stores          */
+   int             *proc_comm_next;    /* next position to store  */ 
+   int             *stores_to_me;      /* stores made to each proc*/
+ } _BSPinfo;
+
+extern ulock_t debug_lock;
+extern ulock_t print_lock;
+extern _BSPinfo *_shmem;
+extern int _bsp_pid;
+a51 1
+
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d2 5
+a6 2
+% $Id$
+% $Log$
+d19 1
+d27 3
+d35 2
+a36 3
+#ifndef BSP_BUFFER_SIZE
+#define BSP_BUFFER_SIZE 102400
+#endif
+d38 2
+a39 2
+#ifndef BSP_COMM_FIFO_SIZE
+#define BSP_COMM_FIFO_SIZE 2000
+d41 1
+d43 4
+a46 3
+#ifndef BSP_ADDR_TABLE_SIZE
+#define BSP_ADDR_TABLE_SIZE 10
+#endif
+d53 5
+d59 2
+a60 2
+   int    comm_type;
+   int    comm_pid;
+a97 33
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{External functions as seen by the user}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+extern void bsp_start(int, int*, int*);
+extern void bsp_newprocs(int, int*, int*);
+extern void bsp_finish();
+extern void bsp_sstep(int);
+extern void bsp_sstep_end(int);
+extern void bsp_error(char*,...);
+extern void bsp_addr(int,void*);
+extern void bsp_fetch(int,int,int,void*,int);
+extern void bsp_store(int,void*,int,int,int);
+/* 
+extern void bsp_scan(void (*)(),void*,void*,int);
+extern void bsp_reduce(void (*)(),void*,void*,int);
+*/
+\end{code}
+
+\begin{code}
+extern void bottom(char*,...);
+extern void bsp_debug(char*,...);
+extern void bsp_debug_block(char*,...);
+extern void bsp_debug_start(char*);
+extern void bsp_debug_end(char*);
+extern void bsp_print(char*,...);
+extern void bsp_priny_block(char*,...);
+extern void bsp_print_start(char*);
+extern void bsp_print_end(char*);
+extern void startProfileLog();
+\end{code}
+@

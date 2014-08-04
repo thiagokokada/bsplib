@@ -1,0 +1,506 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997,1998 University of Oxford           %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsp_misc_mpass.lc,v 1.1 1995/08/31 16:33:17 jonh Exp jonh $
+% $Log: bsp_misc_mpass.lc,v $
+% Revision 1.1  1995/08/31  16:33:17  jonh
+% Initial revision
+%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\label{sect:bspirixmisc}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Includes and defines}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#include "bsp_lib.h"
+#include <stdarg.h>
+#include "bsp_contentionfree.h"
+
+extern int _bsp_fork_nprocs;
+int *_bsp_barrier_proc_left, *_bsp_barrier_proc_right;
+\end{code}
+
+\begin{code}
+void kill_all_processors() {
+  messg_stopall();
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Error function: \texttt{bsp\_error}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+An error routine to be called when the program is running in
+parallel mode.
+
+
+\begin{code}
+void bsp_abort(char* format, ...) {
+va_list args;
+
+  va_start(args, format);
+  fprintf(stderr, "\nABORT(pid%3d)",_bsp_pid);
+  vfprintf(stderr, format, args);
+  fprintf(stderr, "\n");
+  va_end(args);
+  fflush(stderr);
+  sleep(2);
+  kill_all_processors();    
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Debugging functions}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_debug_start(char *text) {
+  printf("\nSTART DEBUG(pid%3d) :\"%s\"\n",_bsp_pid,text);
+}
+
+void bsp_debug_end(char *text) {
+  printf("END DEBUG(pid%3d)   :\"%s\"\n\n",_bsp_pid,text);
+}
+
+void bsp_debug_block(char* format, ...) {
+va_list args;
+
+   va_start(args, format);
+   printf(" DEBUG(pid%3d): ",_bsp_pid);
+   vprintf(format, args);
+   printf("\n");
+   va_end(args);
+}
+
+void bsp_debug(char* format, ...) {
+  va_list args;
+  va_start(args, format);
+  printf("DEBUG(pid%3d): ",_bsp_pid);
+  vprintf(format, args);
+  printf("\n");
+  va_end(args);
+  fflush(stdout);
+}
+
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Determine if an integer is constant throughout all processors}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+This routine is used in lots of sanity checking functions. 
+\begin{code}
+int _bsp_constant(int x) {
+  static int *array=NULL, *already_recieved=NULL, odd_even=0;
+  int i, from, type, nbytes_recv, sendbackoff;
+
+  odd_even = (odd_even)?0:1;
+  if (array==NULL) {
+    array           =CALLOC(_bsp_nprocs,SIZEOF(int));
+    already_recieved=CALLOC(_bsp_nprocs,SIZEOF(int));
+    if ((array==NULL) || (already_recieved==NULL))
+      bsp_abort("{bsp_constantI} failed to aloc space");
+  }
+
+  sendbackoff=1;
+  array[_bsp_pid]=x;
+  for(i=0;i<_bsp_nprocs;i++) already_recieved[i]=0;
+
+  for(i=0;i<_bsp_nprocs;i++) {
+    if (i!=_bsp_pid) {
+#ifdef DEBUG
+      bsp_debug("{bsp_constantI} sending to %d",i);
+#endif
+      while (!nonblock_send(&x,SIZEOF(int),i,
+                            ((odd_even)?BSP_MPASS_SOFTWARE_CONSTANT_ODD:
+                                        BSP_MPASS_SOFTWARE_CONSTANT_EVEN),0)){
+#ifdef DEBUG
+        bsp_debug("{bsp_constantI} backlog sending to %d",i); 
+#endif
+        from=PID_DONTCARE;
+        type=(odd_even)?BSP_MPASS_SOFTWARE_CONSTANT_ODD:
+                        BSP_MPASS_SOFTWARE_CONSTANT_EVEN;
+        if (nonblock_probe(&from,&type,sendbackoff)) {
+          already_recieved[from]=1;
+          block_recv(&array[from],SIZEOF(int),&from,&type,&nbytes_recv);
+          if (type        != ((odd_even)?BSP_MPASS_SOFTWARE_CONSTANT_ODD:
+                                        BSP_MPASS_SOFTWARE_CONSTANT_EVEN) || 
+              nbytes_recv != SIZEOF(int))
+             bsp_abort("{bsp_constantI} failed to receive object.\n"
+                       "From=%d type=%d nbytes=%d\n",
+                       from,type,nbytes_recv);
+	}
+        if (sendbackoff<BSP_MPASS_MAXBACKOFF) sendbackoff*=2;
+      }
+    }
+  }
+  wait_sends();
+  for(i=0;i<_bsp_nprocs;i++) {
+    if ((i!=_bsp_pid) && (!already_recieved[i])) {
+      from=i;
+      type=(odd_even)?BSP_MPASS_SOFTWARE_CONSTANT_ODD:
+                      BSP_MPASS_SOFTWARE_CONSTANT_EVEN;
+#ifdef DEBUG
+      bsp_debug("{bsp_constantI} receiving from %d",from);
+#endif 
+      block_recv(&array[i],SIZEOF(int),&from,&type,&nbytes_recv);
+      if (from        != i                           || 
+          type        != ((odd_even)?BSP_MPASS_SOFTWARE_CONSTANT_ODD:
+                                     BSP_MPASS_SOFTWARE_CONSTANT_EVEN) || 
+          nbytes_recv != SIZEOF(int))
+        bsp_abort("{bsp_constantI} failed to receive object.\n"
+                  "Expected from=%d type=%d nbytes=%d\n"
+                  "Got      from=%d type=%d nbytes=%d\n",
+                  i,((odd_even)?BSP_MPASS_SOFTWARE_CONSTANT_ODD:
+                                BSP_MPASS_SOFTWARE_CONSTANT_EVEN),SIZEOF(int),
+                  from,type,nbytes_recv);
+    }
+  }
+  from = 1;
+  for(i=1;i<_bsp_nprocs;i++) 
+    from = from && (array[i-1]==array[i]);
+  
+  return from;
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Software broadcast}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Only works if nbytes < \texttt{BSP\_BUFFER\_SIZE}.
+\begin{code}
+int messg_broadcast(int nprocs,int pid,int from,void *src,int nbytes){
+  int i,type,nbytes_recv;
+
+  type = BSP_MPASS_SOFTWARE_BCAST;
+  if (from==pid) {
+    for(i=0;i<nprocs;i++) 
+      if (i!=pid) {
+#ifdef DEBUG
+        bsp_debug("{messg_broadcast} sending %d bytes to %d",nbytes,i);
+#endif
+        while (!nonblock_send(src,nbytes,i,type,0)) {wait_sends();}
+#ifdef DEBUG
+        bsp_debug("{messg_broadcast} sent %d bytes to %d",nbytes,i);
+#endif
+      }
+  } else {
+    i           = from;
+    nbytes_recv = nbytes;
+#ifdef DEBUG
+    bsp_debug("{messg_broadcast} receiving %d bytes from %d",nbytes,from);
+#endif
+    block_recv(src,nbytes,&i,&type,&nbytes_recv);
+#ifdef DEBUG
+    bsp_debug("{messg_broadcast} received %d bytes from %d",nbytes,from);
+#endif
+#ifdef SANITY_CHECK
+    if (nbytes_recv!=nbytes || i!=from || type!=BSP_MPASS_SOFTWARE_BCAST)
+      bsp_abort("{messg_broadcast} failed");
+#endif
+  }
+  wait_sends();
+  return 0;
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Software gather}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+int messg_gather(int nprocs,int pid,
+                         int to,const void *src,void *dst,int nbytes) {
+  int i,from,type,nbytes_recv;
+  int chunk_nbytes, nbytes_to_go;
+  char *chunk_addr;
+
+  if (_bsp_pid==to) {
+    MEMCPY((char*)dst+(_bsp_pid*nbytes),(char*)src,nbytes);
+    type = BSP_MPASS_SOFTWARE_GATHER;
+    nbytes_recv = nbytes;
+#ifdef DEBUG
+    bsp_debug("{_bsp_software_gather} %d processors gathering to %d",
+              nprocs,to);
+#endif
+    for(i=0;i<nprocs;i++) {
+      if (i!=pid) {
+        chunk_addr = (char*)dst;
+        nbytes_to_go = nbytes;
+        while(nbytes_to_go>0) {
+          if (nbytes_to_go>_bsp_buffer_size) {
+            chunk_nbytes  = _bsp_buffer_size;
+            nbytes_to_go -= _bsp_buffer_size;
+          } else {
+            chunk_nbytes  = nbytes_to_go;
+            nbytes_to_go  = 0;
+          }
+          from = i;
+#ifdef DEBUG
+          bsp_debug("{_bsp_software_gather} receiving %d bytes from %d",
+                    nbytes,from);
+#endif
+          block_recv(chunk_addr+(i*nbytes),chunk_nbytes,
+                     &from,&type,&nbytes_recv);
+#ifdef SANITY_CHECK
+          if (nbytes_recv!=nbytes || 
+              i!=from || 
+              type!=BSP_MPASS_SOFTWARE_GATHER)
+            bsp_abort("{_bsp_software_gather} failed");
+#endif
+          chunk_addr+=chunk_nbytes;
+        }
+      }
+    }
+  } else {
+    type = BSP_MPASS_SOFTWARE_GATHER;
+#ifdef DEBUG
+    bsp_debug("{_bsp_software_gather} sending %d bytes to %d",
+              nbytes,to);
+#endif
+    chunk_addr = (char*) src;
+    nbytes_to_go = nbytes;
+    while(nbytes_to_go>0) {
+      if (nbytes_to_go>_bsp_buffer_size) {
+        chunk_nbytes  = _bsp_buffer_size;
+        nbytes_to_go -= _bsp_buffer_size;
+      } else {
+        chunk_nbytes  = nbytes_to_go;
+        nbytes_to_go  = 0;
+      }    
+      while (!nonblock_send(chunk_addr,chunk_nbytes,to,type,0)){wait_sends();}
+      chunk_addr += chunk_nbytes;
+    }
+  } 
+  wait_sends();
+  return 0;
+
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Software barrier synchronisation}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+#define TREE_BARRIER
+#ifdef TREE_BARRIER
+void _bsp_software_barrier() {
+  int i,rubbish,nbytes,type,left,right;
+
+  for(i=1;i<_bsp_nprocs;i=2*i) {
+    type  = BSP_MPASS_LAST_DEFINE+i;
+    right = (_bsp_pid+i) % _bsp_nprocs;
+    while (!nonblock_send(&i,SIZEOF(int),right,type,0))
+      bsp_debug("{barrier} system error, sends saturated");
+  } 
+  /* Use two phases so that the sending isn't slowed down by the
+     blocking receives
+  */
+  for(i=1;i<_bsp_nprocs;i=2*i) {
+    type  = BSP_MPASS_LAST_DEFINE+i;
+    left  = (_bsp_pid>=i)?(_bsp_pid-i):(_bsp_nprocs+(_bsp_pid-i));
+    block_recv(&rubbish,SIZEOF(int),&left,&type,&nbytes);
+  } 
+  wait_sends();
+}
+#else
+#ifdef TOTEX_BARRIER
+void _bsp_software_barrier() {
+  int i,rubbish,nbytes,type,left,right;
+
+
+  for (i=1;i<_bsp_nprocs; i++) {
+    type  = BSP_MPASS_LAST_DEFINE+i;
+    right = (_bsp_pid+i) % _bsp_nprocs;
+    if (!nonblock_send(&i,SIZEOF(int),right,type,0))
+      bsp_abort("{barrier} system error, sends saturated");
+  }
+  for(i=1;i<_bsp_nprocs;i++) {
+    type  = BSP_MPASS_LAST_DEFINE+i;
+    left  = (_bsp_pid>=i)?(_bsp_pid-i):(_bsp_nprocs+(_bsp_pid-i));
+    block_recv(&rubbish,SIZEOF(int),&left,&type,&nbytes);
+  } 
+  wait_sends();
+}
+#else
+#ifdef PWAY_BARRIER
+void _bsp_software_barrier() {
+  int i,rubbish,nbytes,type,pid;
+
+  if (_bsp_pid>0) {
+    type  = BSP_MPASS_LAST_DEFINE+_bsp_pid;
+    if (!nonblock_send(&i,SIZEOF(int),0,type,0))
+      bsp_abort("{barrier} system error, sends saturated");
+    pid=0;
+    type  = BSP_MPASS_LAST_DEFINE;
+    block_recv(&rubbish,SIZEOF(int),&pid,&type,&nbytes);
+  } else {
+    for(i=1;i<_bsp_nprocs;i++) {
+      type= BSP_MPASS_LAST_DEFINE+i;
+      pid = i;
+      block_recv(&rubbish,SIZEOF(int),&pid,&type,&nbytes);
+    }
+    for(i=1;i<_bsp_nprocs;i++) {
+      type= BSP_MPASS_LAST_DEFINE;
+      if (!nonblock_send(&i,SIZEOF(int),i,type,0))
+	bsp_abort("{barrier} system error, sends saturated");
+    }
+  }
+  wait_sends();
+}
+#endif
+#endif
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Software non blocking send followed by a receive}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void _bsp_software_nonblocksend_blockrecv(
+      const void *outmsg, int outsize,  int dest, int type,
+      void *inmsg, int inmsglen, int *src, int *nbytes){
+  int   nbytes_to_go, chunk_size, recv_nbytes, recv_src, recv_type;
+  char* msg_chunk;
+
+  if (outsize<_bsp_buffer_size)
+    if (!nonblock_send((void*) outmsg,outsize,dest,type,0))
+      bsp_abort("{bsp_software_nonblocksend_blockrecv} saturated send");
+  else {
+    nbytes_to_go = outsize;
+    msg_chunk = (void*)outmsg;
+    while(nbytes_to_go>=0) {
+      if (nbytes_to_go >= _bsp_buffer_size) {
+        chunk_size    = _bsp_buffer_size;
+        nbytes_to_go -= _bsp_buffer_size;
+      } else {
+        chunk_size    = nbytes_to_go;
+        nbytes_to_go  = -1;
+      }
+      if (!nonblock_send(msg_chunk,chunk_size,dest,type,0)) 
+	bsp_abort("{bsp_software_nonblocksend_blockrecv} saturated send");
+      msg_chunk += chunk_size;
+    }
+  }
+
+  *nbytes      = 0;
+  msg_chunk    = inmsg;
+  recv_nbytes  = _bsp_buffer_size;
+  recv_type    = type;
+  recv_src     = *src;
+  while (recv_nbytes == _bsp_buffer_size) {
+
+    block_recv(msg_chunk,_bsp_buffer_size,&recv_src,&recv_type,&recv_nbytes);
+#ifdef SANITY_CHECK
+    if ((recv_type != type)           || 
+        (recv_nbytes>_bsp_buffer_size) ||
+        (recv_src  != *src))
+      bsp_abort("{nonblocksend_blockrecv} failed type: %d=%d size: %d=%d",
+                type,recv_type,_bsp_buffer_size,recv_nbytes);
+#endif
+
+    msg_chunk += recv_nbytes;
+    *nbytes   += recv_nbytes;
+  }
+  if (inmsglen<(*nbytes))
+    bsp_abort("{nonblocksend_blockrecv} overwritten receaved data-structure");
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Broadcast of argv from host}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef MPASS_NEEDS_HOST_PROGRAM
+void mpass_argv_fromhost(int *refargc, char ***refargv) {
+  static received_host_message=0;
+  int i,j,from_pid, type, from, size, recv_nbytes;
+  char tempc,**newargv, *flatargv;
+
+  if (_bsp_pid==0 && !received_host_message) {
+    received_host_message=1;
+    type = BSP_MPASS_ARGV_SIZE; 
+    from = PID_HOSTID;
+#ifdef DEBUG
+    bsp_debug("{mpass_argv_fromhost} receiving size from host");
+#endif
+    block_recv(&size,sizeof(int),&from,&type, &recv_nbytes);
+    if ((type != BSP_MPASS_ARGV_SIZE) || (recv_nbytes!=sizeof(int)))
+      bsp_abort("{mpass_argv_fromhost} failed to receive size");
+#ifdef DEBUG
+    bsp_debug("{mpass_argv_fromhost} accepting new argv of size %d",size);
+#endif
+
+    flatargv = malloc(size);
+    if (flatargv==NULL) 
+      bsp_abort("{mpass_argv_fromhost} failed to allocate memory");
+    type = BSP_MPASS_ARGV_DATA;
+    from = PID_HOSTID;
+    block_recv(flatargv,size,&from,&type,&recv_nbytes);
+    if ((type != BSP_MPASS_ARGV_DATA) || (recv_nbytes!=size))
+      bsp_abort("{mpass_argv_fromhost} failed to receive data");
+#ifdef DEBUG
+    for(i=0;i<size;i++)
+      bsp_debug("{mpass_argv_fromhost} flatargv[%d]='%c'",i,flatargv[i]);
+#endif
+#ifdef MPASS_HOST_SWAP_BYTE_ORDERING
+    for(i=0;i<size;i+=sizeof(void*)) 
+      for(j=0;j<(sizeof(void*)/2);j++) {
+        tempc=flatargv[i+j];
+        flatargv[i+j]=flatargv[i+sizeof(void*)-1-j];
+        flatargv[i+sizeof(void*)-1-j]=tempc;
+      }        
+#endif
+    if (!(refargc==NULL || refargv==NULL)) {
+      *refargc=0;
+      i=0;
+      while(i<size) {
+        if (strlen(&flatargv[i])==0) i=size;
+        else {
+          i+=1+strlen(&flatargv[i]);
+          *refargc=*refargc+1;
+        }
+      }
+#ifdef DEBUG
+      bsp_debug("mpass_argv_fromhost} argc=%d",*refargc);
+#endif
+      newargv = calloc(1+(*refargc),sizeof(char*));
+      if (newargv==NULL)
+        bsp_abort("{mpass_argv_fromhost} calloc of %d failed",*refargc);
+      
+      j=0;
+      for(i=0;i<*refargc;i++) {
+        if (strlen(&flatargv[j])==0) j++;
+        else {
+          newargv[i]=&flatargv[j];
+          j+=1+strlen(&flatargv[j]);
+        }
+      }
+      *refargv=newargv;
+#ifdef DEBUG
+     for(i=0;i<*refargc;i++) 
+       bsp_debug("{mpass_argv_fromhost} argv[%d]=%s\n",i,(*refargv)[i]);
+#endif
+     }
+  }
+}
+#endif
+\end{code}

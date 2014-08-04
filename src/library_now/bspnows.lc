@@ -1,0 +1,808 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1997 Stephen Donaldson                             %%
+%%                      &  The University of Oxford                      %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsptcps.lc,v 1.1 1997/07/11 10:28:38 jonh Exp $
+% $Log: bsptcps.lc,v $
+% Revision 1.1  1997/07/11 10:28:38  jonh
+% Initial revision
+%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Slave process}
+%%%%%%%%%%%%%%%%%%%%%%%%%
+
+This program, bsptcps.c, is the slave BSP/TCP program started by the
+BSP/TCP daemon program when a user processor request is initiated (as
+a result of a BSPLib program executing \texttt{bsp\_begin}). This
+program is responsible for a slave end of a session. The requesting
+socket started as the result of the accept() in bsptcpd.c is used as a
+communication socket with the master process which initiated the
+request (the master executes as a result of the BSP pid 0 process
+reaching it's \texttt{bsp\_begin} statement).
+
+The name of the SPMD program is supplied to bsptcps.c using the
+socket.  This program forks. The child closes fd's 0, 1 and 2. Fd 0 is
+re-opened as \verb!/dev/null! and pipes are created for fd's 1 and
+2. This is done so that any output from the program can be shipped
+back and printed on the stdout and stderr of the BSP pid 0
+program. The BSP pid of this program is also supplied using the socket
+from the master. This is set as an an environment variable and the
+supplied path name of the SPMD program is exec'ed in the child. A
+control pipe is also created so that the SPMD program (in BSPLib
+calls) can communicate with the master via the slave process. The fd's
+of the pipe are also stored in environment variables.
+
+
+\begin{code}
+#include <unistd.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <signal.h>
+
+#include <sys/time.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
+#ifdef BSPTCP_OSAIX
+#include <sys/select.h>
+#endif
+#include <netinet/in.h>
+
+#include "bspnowdefs.h"
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%
+\section{Global variables}
+%%%%%%%%%%%%%%%%%%%
+\begin{code}
+bsptcp_msghdr_t msghdr;          /* message header struct */
+char msgbuf[BSPTCP_BUFF_LEN];    /* message buffer */
+int bsp_pid;                     /* BSP pid of local SPMD program */
+int csock = 0;                   /* fd of socket back to master */
+volatile int setup_complete = 0; /* slave initialisation complete */
+volatile int spmd_pid;           /* pid of the SPMD child */
+int cxpipe[2];                   /* child exit/signal notify pipe */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%
+\section{Macros for guard functions}
+%%%%%%%%%%%%%%%%%%%
+
+Define macros used to control error report and execution aborting and
+include the functions used to guard system calls for errors: The
+definition of the included guarding functions expand the macros and
+hence are customsed by the macros for the particular BSP/TCP
+component.
+\begin{code}
+#define BSPTCP_COMPONENT "BSP/NOW Slave"   /* component identifier */
+#define ABORT_MSG_OK csock                 /* ABORT_MSG & ABORT_EXIT are ok */
+#define ABORT_EXIT(exitcode)               /* request to abort and exit */ \
+         { \
+         msghdr.msgtype = BSPTCP_MSG_ABORT; \
+         msghdr.msglen = 0; \
+         msghdr.msgspid = bsp_pid; \
+         msghdr.msgdpid = 0; \
+         sendall(csock,(char *)&msghdr,sizeof(msghdr),0); \
+         sendall(csock,msgbuf,strlen(msgbuf),0); \
+         close(csock); csock = 0; \
+         exit(exitcode); \
+         }
+#define ABORT_MSG(text)            /* send reason for aborting execution */ \
+         { \
+         msghdr.msgtype = BSPTCP_MSG_STDERR; \
+         msghdr.msglen = strlen(text); \
+         msghdr.msgspid = bsp_pid; \
+         msghdr.msgdpid = 0; \
+         sendall(csock,(char *)&msghdr,sizeof(msghdr),0); \
+         sendall(csock,msgbuf,strlen(text),0); \
+         }
+
+#include "bspnowerrs.h"          /* system call guarding functions */
+#include "bsptcpsio.h"           /* guarded socket functions */
+
+#define IGN_INT(fn) \
+   { \
+   while ((check_rc = fn) <= 0 && errno == EINTR); \
+   }
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%
+\section{Prototypes}
+%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void spmdreap(int sig);
+void spmdkill(int sig);
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%
+\section{The main program}
+%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void main(int argc, char *argv[])
+   {
+   int i, rc, check_rc;
+
+   int ucpipe[2];                   /* pipe fds between SPMD prog and slave */
+   int dcpipe[2];                   /* pipe fds between SPMD prog and slave */
+
+   int bsp_nprocs;                  /* number of BSP processors */
+   int stdout_pipefd[2];            /* stdout fds returned from pipe */
+   int stderr_pipefd[2];            /* stderr fds returned from pipe */
+
+   int spmd_stdout;                 /* read side of pipe for SPMD stdout */
+   int spmd_stderr;                 /* read side of pipe for SPMD stderr */
+   char spmd_prog[BSPTCP_STR_LEN],
+        temp_prog[BSPTCP_STR_LEN];  /* SPMD program and path */
+   char *spmd_arg[2];               /* SPMD program arguments */
+
+   fd_set readfd;                   /* fd's to watch for reading */
+   fd_set exceptfd;                 /* fd's to watch for exceptions */
+   struct timeval timeout;          /* select timeout value */
+   int maxfd;                       /* max fd value for select */
+   int cleanup;                     /* initiate cleanup */
+   int exitset;                     /* SPMD initiated exit */
+   int cpr_pid,cpr_nprocs,
+       cpr_number;                  /* Checkpointing information */
+   char cpr_prog[BSPTCP_STR_LEN],
+       *cpr_ptr;
+
+   struct sigaction sigchild;       /* action for SIGCHLD signal */
+   struct sigaction sigbcast;       /* action for signal broadcast */
+
+  /*
+   * Get the socket fd from the command line argument:
+   */
+
+   if (argc != 2)
+      {
+      fprintf(stderr,"BSP/NOW Slave: command line argument error.\n");
+      exit(1);
+      }
+   if (1 != sscanf(argv[1],"%d",&csock))
+      {
+      fprintf(stderr,
+         "BSP/NOW Slave: expected port missing from command line.\n");
+      exit(2);
+      }
+   if (gethostname(bsp_my_hostname,BSPTCP_STR_LEN))
+      strcpy(bsp_my_hostname,"localhost");
+\end{code}
+
+Send acknowledge on socket and get name and BSP pid of SPMD program
+and the number of BSP processes used in computation.
+\begin{code}
+   /* send acknowledgement to master */
+   msghdr.msgtype = BSPTCP_MSG_ACK;
+   msghdr.msglen = 0;
+   msghdr.msgspid = bsp_pid;
+   msghdr.msgdpid = 0;
+   GUARDNN((sendall(csock,(char *)&msghdr,sizeof(msghdr),0)),
+      "sendall(csock) ack");
+\end{code}
+
+get SPMD program name from master and any environment variables 
+that were specified in the hosts file
+\begin{code}
+   do {
+      char envstr[BSPTCP_BUFF_LEN];
+
+      
+      GUARDEQ((recvall(csock,(char *)&msghdr,sizeof(msghdr),
+         MSG_WAITALL)),sizeof(msghdr),"recvall(csock) spmd header");
+      if (msghdr.msgtype == BSPTCP_MSG_ENVSET)
+         {
+         GUARDEQ((recvall(csock,envstr,msghdr.msglen,MSG_WAITALL)),
+            msghdr.msglen,"recvall(csock) env var");
+         envstr[msghdr.msglen] = 0;
+         GUARDZ(setenv(envstr,envstr+strlen(envstr)+1,1),"setenv()");
+         }
+      }
+   while (msghdr.msgtype == BSPTCP_MSG_ENVSET);
+
+   GUARDEQ((recvall(csock,spmd_prog,msghdr.msglen,MSG_WAITALL)),
+      msghdr.msglen,"recvall(csock) spmd name");
+   spmd_prog[msghdr.msglen] = 0;
+
+   /* get BSP pid of SPMD program from master */
+   GUARDEQ((recvall(csock,(char *)&msghdr,sizeof(msghdr),MSG_WAITALL)),
+      sizeof(msghdr),"recvall(csock) BSP pid header");
+   if (msghdr.msglen != sizeof(bsp_pid))
+      {
+      fprintf(stderr,"BSP/NOW Slave: error in size of expected message.\n");
+      exit(7);
+      }
+   GUARDEQ((recvall(csock,(char *)&bsp_pid,sizeof(bsp_pid),
+      MSG_WAITALL)),sizeof(bsp_pid),"recvall(csock) BSP pid");
+
+   /* set environment variable indicating the BSP pid to SPMD program */
+   sprintf(msgbuf,"%d",bsp_pid);
+   GUARDZ(setenv("BSPTCP_PID",msgbuf,1),"setenv()");
+  
+   /* get actual number of BSP procs */
+   GUARDEQ((recvall(csock,(char *)&msghdr,sizeof(msghdr),MSG_WAITALL)),
+      sizeof(msghdr),"recvall(csock) BSP nprocs header");
+   if (msghdr.msglen != sizeof(bsp_nprocs))
+      {
+      fprintf(stderr,"BSP/NOW Slave: error in size of expected message.\n");
+      exit(11);
+      }
+   GUARDEQ((recvall(csock,(char *)&bsp_nprocs,sizeof(bsp_nprocs),
+      MSG_WAITALL)),sizeof(bsp_nprocs),"recvall(csock) BSP nprocs");
+
+   /* set environment variable indicating number of procs to SPMD program */
+   sprintf(msgbuf,"%d",bsp_nprocs);
+   GUARDZ(setenv("BSPTCP_NPROCS",msgbuf,1),"setenv()");
+\end{code}
+
+Re-arrange stdin, stdout and stderr so that the data from the SPMD
+program can be sent back to the master (bsptcpm.c) and that stdin 
+can be redirected from /dev/null.
+\begin{code}
+   /* redirect stdin from /dev/null */
+   close(0); 
+   open("/dev/null",O_RDONLY);
+
+   /* create a pipe for the SPMD program's stdout */
+   GUARDZ(pipe(stdout_pipefd),"pipe()");
+   GUARDEQ(dup2(stdout_pipefd[1],1),1,"dup2(stdout 2)");
+   spmd_stdout = stdout_pipefd[0];
+
+   /* create a pipe for the SPMD program's stderr */
+   GUARDZ(pipe(stderr_pipefd),"pipe()");
+   GUARDEQ(dup2(stderr_pipefd[1],2),2,"dup2(stderr)");
+   spmd_stderr = stderr_pipefd[0];
+\end{code}
+
+Setup reaper for child BSP process termination. This also uses a pipe
+for the signal handler to communicate back with the mainlime code.
+\begin{code}
+   GUARDZ(pipe(cxpipe),"pipe(cxpipe)");
+   memset(&sigchild,0,sizeof(sigchild));
+   sigchild.sa_handler = spmdreap;
+#ifdef SA_RESTART
+   sigchild.sa_flags = SA_NOCLDSTOP+SA_RESTART;
+#else
+   sigchild.sa_flags = SA_NOCLDSTOP;
+#endif
+
+   GUARDZ(sigaction(SIGCHLD,&sigchild,NULL),"sigaction(SIGCHLD)");
+\end{code}
+
+Setup handler to broadcast selected signals which end the BSP computation.
+\begin{code}
+   memset(&sigbcast,0,sizeof(sigbcast));
+   sigbcast.sa_handler = spmdkill;
+#ifdef SA_RESTART
+   sigbcast.sa_flags = SA_NOCLDSTOP+SA_RESTART;
+#else
+   sigbcast.sa_flags = SA_NOCLDSTOP;
+#endif
+
+   GUARDZ(sigaction(SIGHUP,&sigbcast,NULL),"sigaction(SIGHUP)");
+   GUARDZ(sigaction(SIGINT,&sigbcast,NULL),"sigaction(SIGINT)");
+   GUARDZ(sigaction(SIGQUIT,&sigbcast,NULL),"sigaction(SIGQUIT)");
+   GUARDZ(sigaction(SIGILL,&sigbcast,NULL),"sigaction(SIGILL)");
+   GUARDZ(sigaction(SIGTRAP,&sigbcast,NULL),"sigaction(SIGTRAP)");
+   GUARDZ(sigaction(SIGIOT,&sigbcast,NULL),"sigaction(SIGIOT)");
+   GUARDZ(sigaction(SIGBUS,&sigbcast,NULL),"sigaction(SIGBUS)");
+   GUARDZ(sigaction(SIGFPE,&sigbcast,NULL),"sigaction(SIGFPE)");
+   GUARDZ(sigaction(SIGUSR1,&sigbcast,NULL),"sigaction(SIGUSR1)");
+   GUARDZ(sigaction(SIGSEGV,&sigbcast,NULL),"sigaction(SIGSEGV)");
+   GUARDZ(sigaction(SIGUSR2,&sigbcast,NULL),"sigaction(SIGUSR2)");
+   GUARDZ(sigaction(SIGPIPE,&sigbcast,NULL),"sigaction(SIGPIPE)");
+   GUARDZ(sigaction(SIGALRM,&sigbcast,NULL),"sigaction(SIGALRM)");
+   GUARDZ(sigaction(SIGTERM,&sigbcast,NULL),"sigaction(SIGTERM)");
+   GUARDZ(sigaction(SIGCONT,&sigbcast,NULL),"sigaction(SIGCONT)");
+/* GUARDZ(sigaction(SIGTSTP,&sigbcast,NULL),"sigaction(SIGTSTP)");
+   GUARDZ(sigaction(SIGTTIN,&sigbcast,NULL),"sigaction(SIGTTIN)");
+   GUARDZ(sigaction(SIGTTOU,&sigbcast,NULL),"sigaction(SIGTTOU)");
+   GUARDZ(sigaction(SIGURG,&sigbcast,NULL),"sigaction(SIGURG)");
+   GUARDZ(sigaction(SIGXCPU,&sigbcast,NULL),"sigaction(SIGXCPU)");
+   GUARDZ(sigaction(SIGXFSZ,&sigbcast,NULL),"sigaction(SIGXFSZ)");
+   GUARDZ(sigaction(SIGVTALRM,&sigbcast,NULL),"sigaction(SIGVTALRM)");
+   GUARDZ(sigaction(SIGPROF,&sigbcast,NULL),"sigaction(SIGPROF)");
+   GUARDZ(sigaction(SIGIO,&sigbcast,NULL),"sigaction(SIGIO)");
+   GUARDZ(sigaction(SIGPWR,&sigbcast,NULL),"sigaction(SIGPWR)");
+*/
+\end{code}
+
+Any errors from now on have to be reported to the master process
+(unless it is an error with the control socket).
+
+Create a controlling pipe for the SPMD program to communicate 
+with the master process via the slave process. The fds of the 
+pipe are stored in environement variables so that the 
+BSP library code can communicate with the slave and master 
+processes.
+
+\begin{code}
+   GUARDZ(pipe(ucpipe),"pipe(ucpipe)");
+   GUARDZ(pipe(dcpipe),"pipe(dcpipe)");
+
+   /* save fds in environment variables */
+   sprintf(msgbuf,"%d",dcpipe[0]);
+   GUARDZ(setenv("BSPTCP_CPIPE_READ",msgbuf,1),"setenv()");
+   sprintf(msgbuf,"%d",ucpipe[1]);
+   GUARDZ(setenv("BSPTCP_CPIPE_WRITE",msgbuf,1),"setenv()");
+\end{code}
+
+Fork off the SPMD program. 
+\begin{code}
+   /* create the child for the SPMD program */
+   spmd_pid = fork();
+   GUARDNN(spmd_pid,"fork()");
+
+   /* child of slave passes control to SPMD program */
+   if (spmd_pid == 0)
+      {
+      /* close unused pipe fds */
+      close(dcpipe[1]); dcpipe[1] = 0;
+      close(ucpipe[0]); ucpipe[0] = 0;
+      close(stdout_pipefd[0]); stdout_pipefd[0] = 0;
+      close(stderr_pipefd[0]); stderr_pipefd[0] = 0;
+
+
+	
+      strcpy(temp_prog,GUARDNZP(getenv("BSP_PWD"),"getenv(BSP_PWD)"));
+      if (temp_prog[0]!='/') {
+	strcpy(temp_prog,GUARDNZP(getenv("HOME"),"getenv(HOME)"));
+	strcat(temp_prog,"/");
+	strcat(temp_prog,GUARDNZP(getenv("BSP_PWD"),"getenv(BSP_PWD)"));
+      } 
+      strcat(temp_prog,"/");
+      chdir(temp_prog);
+      if (spmd_prog[0]!='/')
+         {
+         strcat(temp_prog,spmd_prog);
+         strcpy(spmd_prog,temp_prog);
+         }
+      cpr_ptr=strstr(spmd_prog,".cpr");
+      if (cpr_ptr)
+	 {
+	 *cpr_ptr='\0';
+	 cpr_ptr+=4;
+	 strcpy(cpr_prog,spmd_prog);
+	 if (sscanf(cpr_ptr,"%d_%d.%d",&cpr_pid,&cpr_nprocs,&cpr_number)==3)  
+	    {
+	    sprintf(spmd_prog,"%s.cpr%d_%d.%d",
+		    cpr_prog,bsp_pid,cpr_nprocs,cpr_number);
+	    }
+         }
+      spmd_arg[0] = spmd_prog;
+      printf(spmd_prog);
+      spmd_arg[1] = NULL;
+      execvp(spmd_arg[0],spmd_arg);
+      
+      /* if execution gets here then error with execvp() call */
+      sprintf(msgbuf,"execvp(%s): can not execute binary",spmd_arg[0]);
+      GUARDZ(1,msgbuf);
+      }
+\end{code}
+
+This code is now the slave process. The slave now waits for data from
+the SPMD program and sends any data received back to the master
+process.
+\begin{code}
+   /* close unused pipe fds */
+   close(dcpipe[0]); dcpipe[0] = 0;
+   close(ucpipe[1]); ucpipe[1] = 0;
+   close(stdout_pipefd[1]); stdout_pipefd[1] = 0;
+   close(stderr_pipefd[1]); stderr_pipefd[1] = 0;
+
+   /* set the fds to non-blocking */
+   GUARDNN(fcntl(spmd_stdout,F_SETFL,O_NONBLOCK),"fcntl(spmd_stdout)");
+   GUARDNN(fcntl(spmd_stderr,F_SETFL,O_NONBLOCK),"fcntl(spmd_stderr)");
+ 
+   /* setup select fd sets */
+   maxfd = spmd_stdout;
+   if (spmd_stderr > maxfd) maxfd = spmd_stderr;
+   if (csock > maxfd) maxfd = csock;
+   if (ucpipe[0] > maxfd) maxfd = ucpipe[0];
+   if (cxpipe[0] > maxfd) maxfd = cxpipe[0];
+   exitset = 0;
+ 
+   while(1)
+      {
+      int fd_count;
+      int remote_sig;
+      int use_sig = 0;
+
+      setup_complete = 1;   
+ 
+      FD_ZERO(&readfd);
+      FD_ZERO(&exceptfd);
+
+      timeout.tv_sec = BSPTCP_TIMEOUT_HIGH; 
+      timeout.tv_usec = 0;
+      cleanup = 0; 
+
+      if (spmd_stdout) 
+         {
+         FD_SET(spmd_stdout,&readfd);
+         FD_SET(spmd_stdout,&exceptfd);
+         }
+      if (spmd_stderr) 
+         {
+         FD_SET(spmd_stderr,&readfd);
+         FD_SET(spmd_stderr,&exceptfd);
+         }
+      if (csock) 
+         {
+         FD_SET(csock,&readfd);
+         FD_SET(csock,&exceptfd);
+         }
+      if (ucpipe[0])
+         {
+         FD_SET(ucpipe[0],&readfd);
+         FD_SET(ucpipe[0],&exceptfd);
+         }
+      if (cxpipe[0])
+         {
+         FD_SET(cxpipe[0],&readfd);
+         FD_SET(cxpipe[0],&exceptfd);
+         }
+  
+      fd_count = select(maxfd+1,&readfd,NULL,&exceptfd,&timeout);
+      if (fd_count < 0 && errno == EINTR) continue;
+      GUARDNN(fd_count,"select()");
+
+      if (!fd_count) cleanup = 1; /* no activity for a while - cleanup */
+
+      if (fd_count && FD_ISSET(ucpipe[0],&exceptfd))
+            {
+            msghdr.msgtype = BSPTCP_MSG_STDERR;
+            msghdr.msgspid = bsp_pid;
+            msghdr.msgdpid = 0;
+            sprintf(msgbuf,"BSP/NOW Slave: control pipe exception.\n");
+            msghdr.msglen = strlen(msgbuf);
+            GUARDNN((sendall(csock,(char *)&msghdr,sizeof(msghdr),0)),
+               "sendall(csock) header");
+            GUARDNN((sendall(csock,msgbuf,msghdr.msglen,0)),
+               "sendall(csock) data");
+            close(ucpipe[0]); ucpipe[0] = 0;
+            fd_count--;
+            }
+
+      if (fd_count && FD_ISSET(cxpipe[0],&exceptfd))
+            {
+            msghdr.msgtype = BSPTCP_MSG_STDERR;
+            msghdr.msgspid = bsp_pid;
+            msghdr.msgdpid = 0;
+            sprintf(msgbuf,"BSP/NOW Slave: signal pipe exception.\n");
+            msghdr.msglen = strlen(msgbuf);
+            GUARDNN((sendall(csock,(char *)&msghdr,sizeof(msghdr),0)),
+               "sendall(csock) header");
+            GUARDNN((sendall(csock,msgbuf,msghdr.msglen,0)),
+               "sendall(csock) data");
+
+            close(cxpipe[0]); cxpipe[0] = 0;
+            cleanup = 1;
+            fd_count--;
+            }
+
+      if (fd_count && FD_ISSET(csock,&exceptfd))
+            {
+            /* cut off from master process - cannot inform anyone */
+            cleanup = 1;
+            fd_count--;
+            }
+
+      /* if exceptions on stderr/stdout the then just close them */
+      if (fd_count && FD_ISSET(spmd_stdout,&exceptfd))
+         {
+         close(spmd_stdout); spmd_stdout = 0;
+         fd_count--;
+         }
+      if (fd_count && FD_ISSET(spmd_stderr,&exceptfd))
+         {
+         close(spmd_stderr); spmd_stderr = 0;
+         fd_count--;
+         }
+
+      if (fd_count && spmd_stdout && FD_ISSET(spmd_stdout,&readfd))
+         {
+         /* SPMD program has stdout data */
+         while((msghdr.msglen = read(spmd_stdout,msgbuf,
+               sizeof(msgbuf))) > 0)
+            { 
+            msghdr.msgtype = BSPTCP_MSG_STDOUT;
+            msghdr.msgspid = bsp_pid;
+            msghdr.msgdpid = 0;
+            GUARDNN((sendall(csock,(char *)&msghdr,sizeof(msghdr),0)),
+               "sendall(csock)");
+            GUARDNN((sendall(csock,msgbuf,msghdr.msglen,0)),
+               "sendall(csock)");
+            }
+         fd_count--;
+         }
+
+      if (fd_count && spmd_stderr && FD_ISSET(spmd_stderr,&readfd))
+         {
+         /* SPMD program has stderr data */
+         while((msghdr.msglen = read(spmd_stderr,msgbuf,
+               sizeof(msgbuf))) > 0)
+            { 
+            msghdr.msgtype = BSPTCP_MSG_STDERR;
+            msghdr.msgspid = bsp_pid;
+            msghdr.msgdpid = 0;
+            GUARDNN((sendall(csock,(char *)&msghdr,sizeof(msghdr),0)),
+               "sendall(csock)");
+            GUARDNN((sendall(csock,msgbuf,msghdr.msglen,0)),
+               "sendall(csock)");
+            }
+         fd_count--;
+         }
+
+      if (fd_count && csock && FD_ISSET(csock,&readfd))
+         {
+         /* data has arrived for slave on socket */
+         GUARDNN((recvall(csock,(char *)&msghdr,sizeof(msghdr),
+            MSG_WAITALL)),"recvall(csock)");
+
+         if (msghdr.msgtype == BSPTCP_MSG_ABORT)
+            {
+            if (spmd_pid>0) kill(spmd_pid,9); 
+            wait(NULL);
+            close(cxpipe[0]); cxpipe[0] = 0;
+            close(cxpipe[1]); cxpipe[1] = 0;
+            exit(1);
+            }
+
+         if (msghdr.msgtype == BSPTCP_MSG_CDATA)
+            {
+            GUARDNN((writeall(dcpipe[1],&msghdr,sizeof(msghdr))),
+               "writeall(dcpipe)");
+            GUARDNN((recvall(csock,msgbuf,msghdr.msglen,MSG_WAITALL)),
+               "recvall(csock)");
+            GUARDNN((writeall(dcpipe[1],msgbuf,msghdr.msglen)),
+               "writeall(dcpipe)");
+            }
+         else
+            if (msghdr.msgtype == BSPTCP_MSG_SIGNAL)
+               {
+               GUARDNN((recvall(csock,(char *)&remote_sig,
+                  sizeof(remote_sig),MSG_WAITALL)),"recvall(csock)");
+               if (spmd_pid>0) kill(spmd_pid,remote_sig);
+               wait(NULL);
+               close(csock); csock = 0;
+               close(cxpipe[0]); cxpipe[0] = 0;
+               close(cxpipe[1]); cxpipe[1] = 0;
+               exit(-1);
+               }
+            else
+               { /* the data was not expected */
+               fprintf(stderr,"BSP/NOW Slave: unexpected data received.\n");
+               if (spmd_pid>0) kill(spmd_pid,9);
+               wait(NULL);
+               close(csock); csock = 0;
+               close(cxpipe[0]); cxpipe[0] = 0;
+               close(cxpipe[1]); cxpipe[1] = 0;
+               exit(-1);
+               }
+         fd_count--;
+         }
+
+      if (fd_count && ucpipe[0] && FD_ISSET(ucpipe[0],&readfd))
+         {
+         /* data has arrived on control pipe from BSP process */
+         IGN_INT((rc = read(ucpipe[0],&msghdr,sizeof(msghdr))));
+         if (rc == 0) 
+            {
+            close(ucpipe[0]); ucpipe[0] = 0;
+            msghdr.msgtype = BSPTCP_MSG_STDERR;
+            msghdr.msgspid = bsp_pid;
+            msghdr.msgdpid = 0;
+            sprintf(msgbuf,"BSP/NOW Slave: control pipe end-of-file.\n");
+            msghdr.msglen = strlen(msgbuf);
+            GUARDNN((sendall(csock,(char *)&msghdr,sizeof(msghdr),0)),
+               "sendall(csock) header");
+            GUARDNN((sendall(csock,msgbuf,msghdr.msglen,0)),
+               "sendall(csock) data");
+            fd_count--;
+            continue;
+            }
+         GUARDEQ(rc,sizeof(msghdr),"readall(ucpipe) header");
+         
+         if (msghdr.msglen)
+            GUARDEQ((readall(ucpipe[0],msgbuf,msghdr.msglen)),
+               msghdr.msglen,"readall(ucpipe) data");
+
+         if (msghdr.msgtype == BSPTCP_MSG_ABORT)
+            {
+            writeall(dcpipe[1],&msghdr,sizeof(msghdr)); /* ack */
+            exitset = 1;
+            }
+ 
+         if (msghdr.msgtype == BSPTCP_MSG_SIGNAL)
+            {
+            memcpy(&use_sig,msgbuf,sizeof(msgbuf));
+            writeall(dcpipe[1],&msghdr,sizeof(msghdr)); /* ack */
+            cleanup = 1;
+            }
+ 
+         if (msghdr.msgtype == BSPTCP_MSG_EXIT)
+            {
+            GUARDNN((writeall(dcpipe[1],&msghdr,sizeof(msghdr))),
+               "writeall(dcpipe)");
+            exitset = 1;
+            }
+ 
+         /* send message onto master process */
+         GUARDNN((sendall(csock,(char *)&msghdr,sizeof(msghdr),0)),
+            "sendall(csock) header");
+         if (msghdr.msglen) 
+            GUARDNN((sendall(csock,msgbuf,msghdr.msglen,0)),
+               "sendall(csock) data");
+         fd_count--;
+         }
+
+      if (fd_count && cxpipe[0] && FD_ISSET(cxpipe[0],&readfd))
+         {
+         /* child issued improper exit or child or slave received a signal */
+         GUARDEQ((readall(cxpipe[0],&msghdr,sizeof(msghdr))),
+            sizeof(msghdr),"readall(cxpipe) header");
+
+         if (msghdr.msgtype == BSPTCP_MSG_EXIT)
+            {
+            int status;
+
+            readall(cxpipe[0],&status,sizeof(status));
+            msghdr.msgtype = BSPTCP_MSG_STDERR;
+            msghdr.msgspid = bsp_pid;
+            msghdr.msgdpid = 0;
+            sprintf(msgbuf,"BSP/NOW Slave: improper exit (status = %d).\n",
+               status);
+            msghdr.msglen = strlen(msgbuf);
+            GUARDNN((sendall(csock,(char *)&msghdr,sizeof(msghdr),0)),
+               "sendall(csock) header");
+            GUARDNN((sendall(csock,msgbuf,msghdr.msglen,0)),
+               "sendall(csock) data");
+
+            cleanup = 1;
+            }
+
+         if (msghdr.msgtype == BSPTCP_MSG_SIGNAL)
+            {
+            int sig;
+
+            readall(cxpipe[0],&sig,sizeof(sig));
+            msghdr.msgtype = BSPTCP_MSG_STDERR;
+            msghdr.msgspid = bsp_pid;
+            msghdr.msgdpid = 0;
+            sprintf(msgbuf,"BSP/NOW Slave: signal %d received.\n",
+               sig);
+            msghdr.msglen = strlen(msgbuf);
+            GUARDNN((sendall(csock,(char *)&msghdr,sizeof(msghdr),0)),
+               "sendall(csock) header");
+            GUARDNN((sendall(csock,msgbuf,msghdr.msglen,0)),
+               "sendall(csock) data");
+
+            cleanup = 1;
+            }
+         }
+
+      /* cleanup: remove SPMD process if still present and broadcast signal */ 
+      if (cleanup)
+         {
+         int sig;
+
+         msghdr.msgtype = BSPTCP_MSG_SIGNAL;
+         msghdr.msglen = sizeof(sig);
+         sig = use_sig ? use_sig : 9;
+         if (sig==10 || sig==11) sig=9;
+         msghdr.msgspid = bsp_pid;
+         msghdr.msgdpid = 0;
+         GUARDNN((sendall(csock,(char *)&msghdr,sizeof(msghdr),0)),
+            "sendall(csock) header");
+         GUARDNN((sendall(csock,(char *)&sig,sizeof(sig),0)),
+            "sendall(csock) data");
+         if (spmd_pid) 
+            {
+            if (spmd_pid>0) kill(spmd_pid,9); 
+            wait(NULL);
+            }
+         close(csock); csock = 0;
+         close(ucpipe[0]); ucpipe[0] = 0;
+         close(dcpipe[1]); dcpipe[1] = 0;
+         close(cxpipe[0]); cxpipe[0] = 0;
+         close(cxpipe[1]); cxpipe[1] = 0;
+         exit(1);
+         } 
+
+      /* cleanup if SPMD program initiated exit */
+      if (exitset)
+         {
+         wait(NULL);
+         close(csock); csock = 0;
+         close(ucpipe[0]); ucpipe[0] = 0;
+         close(dcpipe[1]); dcpipe[1] = 0;
+         close(cxpipe[0]); cxpipe[0] = 0;
+         close(cxpipe[1]); cxpipe[1] = 0;
+         exit(0);
+         } 
+
+      } /* end of while(1) */
+             
+   }
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%
+\section{Kill the spmd program and broadcast signal}
+%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+void spmdkill(int sig)
+   { 
+   bsptcp_msghdr_t msghdr;           /* sending message to mainline */
+
+   if (spmd_pid>0) kill(spmd_pid,9);
+   msghdr.msgtype = BSPTCP_MSG_SIGNAL;
+   msghdr.msglen = sizeof(sig);
+   msghdr.msgspid = 0;
+   msghdr.msgspid = 0;
+   writeall(cxpipe[1],&msghdr,sizeof(msghdr));
+   writeall(cxpipe[1],&sig,sizeof(sig));
+   }
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%
+\section{Reap exiting children}
+%%%%%%%%%%%%%%%%%%%%%
+
+When the BSP process ends, no message is sent on a pipe. This
+signal handler sends the notification of the child exit or signal to
+the mainline Master or Slave routine.
+\begin{code}
+void spmdreap(int sig)
+   {
+   int status;                       /* process exit status */
+   bsptcp_msghdr_t msghdr;           /* sending message to mainline */
+   int value,olderrno,isexit=0;
+
+   olderrno=errno;
+   waitpid(spmd_pid,&status,0);
+   value = -1;
+   if (WIFEXITED(status))
+      {
+      msghdr.msgtype = BSPTCP_MSG_EXIT;
+      value = WEXITSTATUS(status);
+      isexit=1;
+      }
+   else
+      if (WIFSIGNALED(status))
+         {
+         msghdr.msgtype = BSPTCP_MSG_SIGNAL;
+         value = WTERMSIG(status);
+         }
+
+   spmd_pid = 0;
+   msghdr.msglen = sizeof(value);
+   msghdr.msgspid = 0;
+   msghdr.msgspid = 0;
+   writeall(cxpipe[1],&msghdr,sizeof(msghdr));
+   writeall(cxpipe[1],&value,sizeof(msghdr));
+   if (!setup_complete) {
+     fprintf(stderr,"BSP/NOW Slave unexpected spmdreap(%s=%d)",
+	     (isexit?"exit":"signal"),value);
+     fflush(stderr);
+   }
+   errno=olderrno;
+   }
+\end{code}

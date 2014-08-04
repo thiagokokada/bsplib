@@ -1,0 +1,184 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1997 Stephen Donaldson                             %%
+%%                      &  The University of Oxford                      %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsptcpdefs.lh,v 1.1 1997/07/11 10:28:15 jonh Exp jonh $
+% $Log: bsptcpdefs.lh,v $
+% Revision 1.1  1997/07/11 10:28:15  jonh
+% Initial revision
+%
+
+\begin{code}
+#ifndef BSPTCPDEFS_H
+#define BSPTCPDEFS_H
+
+  /*
+   * Header file for BSP/TCP components: 
+   * - bsptcpd.c - Processor request processing daemon.
+   * - bspportd.c - Port registration daemin.
+   * - bsptcpm.c - Master processor controlling process.
+   * - bsptcps.c - Slave processor controlling process.
+   * - bsptcpl.c - Library interface routines for BSPLib.
+   */
+
+#ifndef MSG_WAITALL
+#define MSG_WAITALL           0             /* missing socket define */
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%
+\section{Tunable paramaters}
+%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{description}
+\item[\texttt{BSPTCP\_TIMEOUT\_HIGH}] is the mean time between failure
+    of the machine. It bounds the largest time that can be spent in
+    user computation and library/daemon inactivity.
+
+\item[\texttt{BSPTCP\_TIMEOUT\_LOW}] is the maximum delay between
+    daemon to daemon communication before assuming a fatal error.
+\end{description} 
+
+\begin{code}
+#ifdef MPASS_3C905B
+#define MAC_HEADER_SIZE            16  /* \index{foobar} */
+#else
+#define MAC_HEADER_SIZE            14  
+#endif
+#define MAC_PREAMBLE_CHECKSUM_SIZE 12
+#define IP_HEADER_SIZE             24
+#define UDP_HEADER_SIZE             8
+#define TCP_HEADER_SIZE            24
+
+#define BSPTCP_LPORT          4446  /* port daemon default port to listen on */
+#define BSPTCP_LOADPORT       4447  /* load daemon default port to listen on */
+#define BSPTCP_BACKLOG           5  /* default backlogged requests */
+#define BSPTCP_TIMEOUT_HIGH 604800  /* select fd inactivity timeout (secs) */
+#define BSPTCP_TIMEOUT_LOW      10  /* select fd inactivity timeout (secs) */
+#define BSPTCP_MAX_RETRIES       5  /* consecutive retries before giving up */
+
+#define BSPTCP_MAXAGE_LOAD     900  /* don't let age get more than this */
+#define BSPTCP_MAXTIMEOUT_LOAD 300  /* max load daemon inactivity (secs) */
+#define BSPTCP_MINTIMEOUT_LOAD 180  /* min load daemon inactivity (secs) */
+#define BSPTCP_LOAD_CONNECTS     3  /* number of connections per timeout */
+#define BSPTCP_LOAD_CHILDREN    10  /* max number incoming requests */
+#define BSPTCP_TIMEOUT_ENQ      60  /* minimum duration between
+				       updates of load average issued
+				       due to load enquires */
+#define BSPTCP_MAX_ATTEMPTS     50  /* limit number of connect attempts */
+#define BSPTCP_LINGER_INT       10  /* linger on socket close if data */
+#define BSPTCP_MAX_SESSIONS     20  /* max BSP processes per workstation */
+#define BSPTCP_MAX_BACKOFF 4194304  /* usec send backoff wait ceiling */
+#define BSPTCP_HOST_NAME_MAX    30  /* longest hostname in bytes */
+#define BSPTCP_STR_LEN         160  /* filename, machine name length */
+#define BSPTCP_BUFF_LEN        200  /* Temporary buffer space */
+#define BSPTCP_INFTY_LOAD     99.9  /* Largest possible load average */
+#define BSPTCP_MIGRATE_ZONE      1  /* Migration is forced if the current
+				       process is not in the top
+				       p+BSPTCP_MIGRATE_ZONE machines */
+#define BSPTCP_LOAD_MFLOP     0.02  /* Threashold at which mflop
+				       benchmark stopped */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Component paths and names}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef BSPTCP_UNITTEST
+#define BSPTCP_MASTER_PATH "/home/sd/BSPTCPIP/bspnowm"
+#define BSPTCP_SLAVE_PATH  "/home/sd/BSPTCPIP/bspnows"
+#else
+#define BSPTCP_MASTER_PATH "@binarchdir@/bspnowm"
+#define BSPTCP_SLAVE_PATH  "@binarchdir@/bspnows"
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Structure of a packet header}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+typedef struct bsptcp_msghdr bsptcp_msghdr_t;
+struct bsptcp_msghdr
+   {
+   char msgtype;    /* indicates content of payload */
+   short msglen;    /* payload length (must be signed) */
+   short msgspid;   /* source BSP process */
+   short msgdpid;   /* destination BSP process */
+#ifdef BSPTCP_TRACE
+   int   msgid;     /* Unique message identifier */
+#endif
+   };
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{msgtype values indicating message payload}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#define BSPTCP_MSG_STDOUT    1       /* Data to send to PID 0 stdout */
+#define BSPTCP_MSG_STDERR    2       /* Data to send to PID 0 stderr */
+#define BSPTCP_MSG_PASSWD    3       /* Password file entry details */
+#define BSPTCP_MSG_ACK       4       /* positive acknowledgement */
+#define BSPTCP_MSG_CDATA     5       /* master/slave control data */
+#define BSPTCP_MSG_ENVSET    6       /* environment variable data */
+#define BSPTCP_MSG_EXIT      7       /* process is exiting */
+#define BSPTCP_MSG_ABORT     8       /* severe error - halt all execution */
+#define BSPTCP_MSG_SIGNAL    9       /* Signal to/from SPMD PID */
+#define BSPTCP_MSG_LD_ENQ    10      /* Load server enquiry */
+#define BSPTCP_MSG_LD_UPD    11      /* Server-server enquiry */
+#define BSPTCP_MSG_LD_INFTY  12      /* Reset load of a server */
+#define BSPTCP_MSG_LD_RLD    13      /* Reload data from another server */
+#define BSPTCP_MSG_LD_DATA   14      /* Result from load server */
+#define BSPTCP_MSG_MASTERPID 15      /* register pid of master process */
+
+#define BSPTCP_MIN_TYPE   BSPTCP_MSG_STDOUT
+#define BSPTCP_MAX_TYPE   BSPTCP_MSG_MASTERPID
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Hostname data structures}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+typedef struct envvar envvar_t;      /* environment variable element */
+typedef struct bsphost bsphost_t;    /* details of computation candidate */
+
+struct envvar
+   {
+   envvar_t *link;                   /* next environment variable */
+   char *name;                       /* environment variable name */
+   char *value;                      /* environment variable value */
+   };
+
+struct bsphost
+   {
+   bsphost_t *link;                  /* next computation candidate */
+   char      *name;                  /* host name */
+   double     load_avg;              /* 15minute load average */
+   long       time_stamp;            /* Time load average sampled */
+   double     mflops;                /* Mflop/s rating of processor */
+   int        ncpus;                 /* No cpus in host */
+   int        nice;                  /* Nice level 0--19 */
+   long       nice_time;             /* Time limit for nice */
+   int        bspactive;             /* BSP job on the node */
+   envvar_t  *envvars;               /* head of environment variable list */
+   };
+
+extern bsphost_t *bsptcp_host_list;  /* first candidate host */
+extern int bsphost_lineno;           /* for reporting errors in yyerror() */
+#endif /* BSPTCPDEFS_H */
+\end{code}
+

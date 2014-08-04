@@ -1,0 +1,88 @@
+
+	The Oxford BSP Toolset and Profiling system -- version 1.4
+	===========================================================
+
+We are pleased to announce the third official release of the Oxford
+BSP Toolset which conforms to the BSPlib programming library
+definition. BSPlib is an SPMD communications library, and is based on
+the Bulk Synchronous Parallel (BSP) model of parallel computation. The
+main feature of BSPlib is two modes of communication, one capturing a
+BSP oriented message passing approach, and the other reflecting a
+(one-sided) direct remote memory access paradigm. The core BSP library
+consists of just 20 primitives. Sources are freely available by
+anonymous FTP. For more information on the toolset distribution see:
+
+   http://www.bsp-worldwide.org/implmnts/oxtool/
+   ftp://ftp.comlab.ox.ac.uk/pub/Packages/BSP/v1.4_bsplib_toolset.tar.gz
+
+Jonathan Hill, Stephen Donaldson, and Alistair McEwan
+Oxford University Computing Laboratory
+30th September 1997
+======================================================================
+
+Overview of v1.4
+
+* TCP/IP and UDP/IP implementations for NOWs:
+	The TCP/IP or UDP/IP implementations of BSPlib enable a homogeneous
+        cluster of workstations to be used as a parallel machine. The
+        distribution includes a load manager that ensures processes
+        are started on the least loaded processors in a cluster of
+        workstations. 
+
+* A shared memory implementation for Windows NT. 
+
+* Profiling tools:
+	The distribution of the Oxford BSP toolset contains three
+        different profiling tools: 
+        
+        1) a call-graph tool that analyses the imbalance in either
+           computation or communication that is present in an
+           algorithm; 
+
+        2) a performance profiler and prediction tool that analyses
+           the communication patterns that arise during program
+           execution, and enables the user to predict the performance
+           of an application on any other parallel machine; and 
+  
+        3) a prof style profiling tool called bspsig.
+
+        See http://www.bsp-worldwide.org/implmnts/oxtool/prof_frame.html
+
+* Available platforms:
+	Two factors guide the installation of the toolset: (1) the machine
+        architecture and operating system release; and (2) the type of
+        device used as the communication medium. To date, the tested
+        architectures are:
+
+        SGICHALL64      Silicon Graphics Power Challenge (Irix 6.x)
+        SGIORIGIN       Silicon Graphics Origin 2000 (Irix 6.x)
+        SGI             Silicon Graphics workstation (Irix 5.x)
+        SP2             IBM SP2 running AIX
+        CRAYT3E         Cray T3E
+        CRAYT3D         Cray T3D
+        PARSYTEC        Parsytec Explorer
+	PARAMID         Transtec Paramid
+        CONVEXSPP       Convex SPP
+        SunOS           SunOS 4.1.x 
+        Solaris         SunOS 5.x 
+        LINUX           PC based Unix 
+        OSF1            Digital's alpha boxes 
+        HITACHIMPP      Hitachi SR2001 
+	WIN32 		Windows NT
+
+        The tested communication devices are shown below.  It should be
+        noted, that only a small subset of the cross-product of
+        architectures and devices are valid builds of the toolset.
+        
+        SHMEM_SYSV      System V shared memory
+        SHMEM_SGI       SGI specific shared memory operations 
+        SHMEM_NULL      p=1, sequential version of the library
+	SHMEM_WIN32	Windows NT shared memory
+        MPASS_TCPIP     TCP/IP 
+        MPASS_MPI       MPI 
+        MPASS_MPL       IBM's message passing system 
+        MPASS_PARIX     Message passing on the Parsytec GC 
+        MPASS_EXPRESS   Express (Parasoft Ltd) message passing
+        MPASS_PARMACS   Parmacs message passing macros
+        DRMA_SHMEM      Cray Shmem one-sided communications
+

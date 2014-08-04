@@ -1,0 +1,1265 @@
+head	1.1;
+access;
+symbols;
+locks
+	jonh:1.1; strict;
+comment	@# @;
+
+
+1.1
+date	97.05.02.14.32.35;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id$
+% $Log$
+
+\begin{code}
+#include "bsp_lib_f77.h"
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{BSPfront variables}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+The following defaults are overwritten by the preload file of
+bspfront. However, they are given initial values just in case a
+\bsplib{} program is not compiled with \texttt{bspfront}.
+\begin{code}   
+int   BSP_NBUFFERS             = 2;
+int   BSP_BUFFER_SIZE          = 16384;
+int   BSP_BUFFER_STALLS        = 2;
+int   BSP_COMM_FIFO_SIZE       = 1000;
+int   BSP_THROTTLE_PROCS       = 0;
+char *BSP_COMPILE_FLAGS        = NULL;
+char *BSP_ARCH                 = "unknown";
+char *BSP_INCLUDE_DIR          = "/usr/include/";
+int   BSP_OPT_FCOMBINE_PUTS    = 1024;
+int   BSP_OPT_FCOMBINE_PUTS_MAX= 1024;
+int   BSP_OPT_FCOMBINE_PUTS_MIN= 1024;
+int   BSP_OPT_FLIBRARY_LEVEL   = 0;
+char  BSP_LIBRARY_TYPE         = 'O';
+int   BSP_DO_STAT              = 0;
+int   BSP_OPT_CONTENTION_LEVEL = 1;
+int   BSP_CHECK_SYNCS          = 0;
+int   BSP_DO_CGPROF            = 0;
+int   BSP_DO_PROF              = 0;
+int   BSP_OPT_BSMP_BUFFER_SIZE = BSMP_INFINITE_BUFFERS;
+char *BSP_EXEC_FILE            = "a.out";
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Buffered gets}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+The following address is used as the registration point when running
+through the communication thunk table, patching all the gets so that
+they become buffered.
+\begin{code}
+char _bsp_buffget_reference;
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Bulk synchronous message passing}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+The data-structure used to implement Bulk Synchronous Message Passing
+on top of the DRMA facilities provided.
+
+\begin{code} 
+static struct {
+  int    tag_size;
+  int    padding;
+  int    isfrozen;
+  int    current_buffer;
+  char  *oldincoming_message_buffer[BSP_MAX_PROCS];
+  char  *incoming_message_buffer[BSP_MAX_PROCS];
+  int    incoming_message_buffer_size[BSP_MAX_PROCS];
+  int    incoming_messages_size[BSP_MAX_PROCS];
+#ifdef BSP_DRMA
+  int    incoming_messages_size_safe[BSP_MAX_PROCS];
+#endif
+  int    outgoing_offset[BSP_MAX_PROCS];
+  char  *next_message;
+} _bsmp;
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Free list that holds transient malloced data}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+typedef struct _BSPfreelist {
+  char                *head;
+  struct _BSPfreelist *tail;
+} BSPfreelist;
+
+BSPfreelist *_bsp_free_list=NULL, *_bsp_last_free_list=NULL;
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Combining puts}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Data structures and operations used in the combining of puts optimisation.
+
+The following routines do not work for puts to the same processor,
+or if the put size is greater than 64K.
+\begin{code}
+typedef struct {
+  bsp_int32 reg_table_smash_nbytes;
+  bsp_int32 offset;
+} _BSPcombinfo;
+\end{code}
+
+The put_queue is arranged as a matrix of processor by maximum number
+of merged puts. For a given processor, the first element of its
+put queue vector is the number of puts that have been merged. The
+remaining elements are triples of address_table entry, offset, and nbytes;
+\begin{code}
+char *_bspcombput_buffer;
+static int    _bspcombput_region_size;
+static int    _bspcombput_half_size;
+
+/* Each of the ptr entries will actually be located at            */
+/* the beginning of each processors region of the scratch buffer. */
+typedef struct {
+  int   queue_nbytes_to_go;
+  int   queue_out_size_copy; /* shadow of the following to save indirections*/
+  int  *queue_out_size;
+  char *buffer_out;
+  int  *queue_in_size;
+  char *buffer_in;
+} _BSPcomb_accounting;
+
+static _BSPcomb_accounting _bspcombput[BSP_MAX_PROCS];
+\end{code}
+
+\begin{code}
+int   _bsp_lineno=0;
+char *_bsp_filename=NULL;
+\end{code}
+
+%%%%%%%%%%%%%%%%%
+\subsection{Reset Combining puts}
+%%%%%%%%%%%%%%%%%
+
+\begin{code}
+#define bspcombputs_resetin(i)                              \
+  do {                                                      \
+    *_bspcombput[i].queue_in_size     =0;                   \
+    _bspcombput[i].buffer_in                                \
+      =(char*) (_bspcombput[i].queue_in_size  +             \
+                (SIZEOF(_BSPcombinfo) / SIZEOF(int)));      \
+  } while(0)
+
+#define bspcombputs_resetout(i)                             \
+  do {                                                      \
+    _bspcombput[i].queue_out_size_copy=0;                   \
+    _bspcombput[i].buffer_out                               \
+      =(char*) (_bspcombput[i].queue_out_size +             \
+                (SIZEOF(_BSPcombinfo) / SIZEOF(int)));      \
+    _bspcombput[i].queue_nbytes_to_go                       \
+      =_bspcombput_region_size-SIZEOF(_BSPcombinfo);        \
+  } while(0)
+\end{code}
+
+%%%%%%%%%%%%%%%%%
+\subsection{Combine a put into a system buffer}
+%%%%%%%%%%%%%%%%%
+\begin{code}
+#define bspcombputs_applicable(pid,gid,inbytes) \
+  (((inbytes+(2*SIZEOF(_BSPcombinfo))) <        \
+    (_bspcombput[pid].queue_nbytes_to_go)) &&   \
+   (gid < 65536))          
+
+#define bspcombputs_put(pid,src,dst_addr,offset,inbytes,cacheinbytes,cachenbytes,ptr) \
+  do {                                                              \
+    ptr = (_BSPcombinfo*) _bspcombput[pid].buffer_out;              \
+    _bspcombput[pid].queue_out_size_copy++;                         \
+    ptr->reg_table_smash_nbytes = dst_addr | (inbytes << 16);       \
+    ptr->offset                 = offset;                           \
+    if (inbytes!=cacheinbytes) {                                    \
+      /* Make sure that the buffer is allocated in blocks modulo */ \
+      /* BSPcombinfo size */                                        \
+      cacheinbytes= inbytes;                                        \
+      cachenbytes = MOD_POW2(inbytes,SIZEOF(_BSPcombinfo));         \
+      if (cachenbytes)                                              \
+        cachenbytes=inbytes+(2*SIZEOF(_BSPcombinfo))-cachenbytes;   \
+      else                                                          \
+        cachenbytes = inbytes + SIZEOF(_BSPcombinfo);               \
+    }                                                               \
+    FAST_MEMCPY(ptr+1,src,inbytes);                                 \
+    _bspcombput[pid].buffer_out         += cachenbytes;             \
+    _bspcombput[pid].queue_nbytes_to_go -= cachenbytes;             \
+  } while(0)
+
+\end{code}
+
+%%%%%%%%%%%%%%%%%
+\subsection{Initialise Combining puts}
+%%%%%%%%%%%%%%%%%
+During super-steps, there is no checking that the fcombine-put
+optimisation is off or on (waste of time as its on most of the
+time). We therefore arrange that the initalised data-structure ensures
+that combining doesn't take place by setting that there are no bytes
+in the combine buffer.
+\begin{code}
+STATIC void bspcombputs_init() { 
+  int i,offset;
+
+  if (_bsp_nprocs==1) BSP_OPT_FCOMBINE_PUTS=0;
+  _bspcombput_region_size = BSP_OPT_FCOMBINE_PUTS;
+
+  if (BSP_OPT_FCOMBINE_PUTS_MAX>0 &&
+       ((_bspcombput_region_size*2*_bsp_nprocs*(_bsp_nprocs-1))>
+        BSP_OPT_FCOMBINE_PUTS_MAX)) {
+    _bspcombput_region_size=BSP_OPT_FCOMBINE_PUTS_MAX/
+                            (2*_bsp_nprocs*(_bsp_nprocs-1));
+    if (_bspcombput_region_size<BSP_OPT_FCOMBINE_PUTS_MIN) {
+      BSP_OPT_FCOMBINE_PUTS=0;
+      _bspcombput_region_size=0;
+    }
+  }
+#ifdef DEBUG
+  bsp_debug("{bspcombputs_init} %d K per process",
+            _bspcombput_region_size/1024);
+#endif
+  if (_bspcombput_region_size>0) {
+    _bspcombput_buffer=MALLOC((2*(_bsp_nprocs-1))*_bspcombput_region_size);
+    if (_bspcombput_buffer==NULL)
+      bsp_abort("{bspcombputs_init} unable to allocate %d bytes",
+                _bspcombput_buffer);
+  } else {
+    _bspcombput_buffer=MALLOC(2*SIZEOF(_BSPcombinfo));
+  }
+  /* Make sure the regions we use as buffers are word addressable */
+  _bspcombput_region_size -=_bspcombput_region_size%SIZEOF(_BSPcombinfo);
+  _bspcombput_half_size    =_bspcombput_region_size*(_bsp_nprocs-1);
+  
+  bsp_pushregister_cpp(_bspcombput_buffer,
+                       2*_bspcombput_half_size,
+                       __LINE__,
+                       "BSPlib's internal combine buffer.");
+
+  if (_bsp_nprocs>BSP_MAX_PROCS) {
+    bsp_debug("Turning off -fcombine-puts: only works for <%d processors",
+              BSP_MAX_PROCS);
+    BSP_OPT_FCOMBINE_PUTS = 0;
+  }
+
+  for(i=0;i<_bsp_nprocs;i++) {
+    if (i!=_bsp_pid) {
+      offset = (i>=_bsp_pid)?1:0;
+      _bspcombput[i].queue_out_size
+        =(int*) (_bspcombput_buffer+
+                 ((i-offset)*_bspcombput_region_size));
+      _bspcombput[i].queue_in_size
+        =(int*) (_bspcombput_buffer+_bspcombput_half_size+
+                 ((i-offset)*_bspcombput_region_size));
+      bspcombputs_resetin(i);
+      bspcombputs_resetout(i);
+    }
+  }
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%
+\subsection{Flush combined puts}
+%%%%%%%%%%%%%%%%%
+\begin{code}
+STATIC void bspcombputs_flush() {
+  int i;
+  _BSPcombinfo *ptr;
+
+  for (i=0;i<_bsp_nprocs;i++) {
+    if ((_bspcombput[i].queue_out_size_copy==0) || (i==_bsp_pid)) {
+#ifdef DEBUG
+      bsp_debug("{bspcombputs} nothing going out to %d",i);
+#endif
+    } else if (_bspcombput[i].queue_out_size_copy==1) {
+#ifdef DEBUG
+      bsp_debug("{bspcombputs} only one thing going out to %d",i);
+#endif
+      /* Only one thing to send, so just send it */
+      ptr= (_BSPcombinfo *) 
+             (_bspcombput_buffer+SIZEOF(_BSPcombinfo)+
+              ((i-((i>=_bsp_pid)?1:0))*_bspcombput_region_size));
+      _bsp_put(COMM_SET_PUT(i),
+               (_bspcombput_buffer+(2*SIZEOF(_BSPcombinfo))+
+               ((i+((i>=_bsp_pid)?-1:0))*_bspcombput_region_size)),
+               0xffff & ptr->reg_table_smash_nbytes,
+               ptr->offset,
+               ptr->reg_table_smash_nbytes >> 16);
+#ifdef STATISTICS
+      _bspstat.combput_fails++;
+#endif
+    } else {
+      *(_bspcombput[i].queue_out_size)
+        = _bspcombput[i].queue_out_size_copy;
+#ifdef DEBUG
+      bsp_debug("{bspcombputs} %d bytes from %d puts merged to proc %d",
+                _bspcombput_region_size-_bspcombput[i].queue_nbytes_to_go,
+                *(_bspcombput[i].queue_out_size),i);
+#endif 
+      _bsp_put(COMM_SET_PUT(i),
+               (char*)_bspcombput_buffer+
+                     ((i-((i>=_bsp_pid)?1:0))*_bspcombput_region_size),
+               bsp_register_local_to_global(_bspcombput_buffer),
+               _bspcombput_half_size+
+               ((_bsp_pid-((_bsp_pid>=i)?1:0))*_bspcombput_region_size),
+               _bspcombput_region_size-_bspcombput[i].queue_nbytes_to_go);
+#ifdef STATISTICS
+      _bspstat.combput_hits += *(_bspcombput[i].queue_out_size);
+#endif
+    }
+  } 
+} 
+\end{code}
+
+%%%%%%%%%%%%%%%%%
+\subsection{Finalise combined puts}
+%%%%%%%%%%%%%%%%%
+\begin{code}
+STATIC void bspcombputs_finalise() {
+  int tmp,i,j, no_puts,smash,nbytes,addr_global_src;
+  char *cached_reg_table_tgt, *buff_addr;
+  _BSPcombinfo *infoptr;
+
+  for (i=0;i<_bsp_nprocs;i++) {
+    if (i!=_bsp_pid) {
+      no_puts = *(_bspcombput[i].queue_in_size);
+      if (no_puts>1) {
+#ifdef DEBUG
+        bsp_debug("{bspcombputs_finalise} dealing with %d puts from %d",
+                  no_puts,i);
+#endif
+        buff_addr = _bspcombput[i].buffer_in;
+        for (j=0;j<no_puts;j++) {
+          infoptr         = (_BSPcombinfo*) buff_addr;
+          buff_addr      += SIZEOF(_BSPcombinfo);
+          smash           = infoptr->reg_table_smash_nbytes;
+          nbytes          = smash >> 16; 
+          addr_global_src = 0xffff & smash ;
+#ifdef DEBUG
+          bsp_debug("{bspcombputs_finalise} %d put(%x+%d,%d)=%d\n",
+                    j,bsp_register_global_to_local(addr_global_src,_bsp_pid),
+                    infoptr->offset,nbytes,*((int*) buff_addr));
+#endif
+#ifdef SANITY_CHECK
+          if (bsp_register_nbytes(addr_global_src,_bsp_pid)- 
+              infoptr->offset < nbytes)
+            bsp_error_reg_small(i,addr_global_src,nbytes,infoptr->offset);
+#endif
+          FAST_MEMCPY(((char*)bsp_register_global_to_local(addr_global_src,_bsp_pid))+
+                      infoptr->offset,
+                      buff_addr,nbytes);
+
+          if (tmp= (MOD_POW2(nbytes,SIZEOF(_BSPcombinfo)))) {
+            buff_addr += nbytes + SIZEOF(_BSPcombinfo)-tmp;
+          } else {
+            buff_addr += nbytes;
+          }       
+        }
+        if (no_puts>0) bspcombputs_resetin(i);  
+      }
+      if (_bspcombput[i].queue_out_size_copy>0)
+        bspcombputs_resetout(i);
+    }
+  } 
+}
+
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{BSP enquiry functions}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+int bsp_pid() {
+  return (_bsp_pid);
+}
+
+int bsp_nprocs() {
+  char *env_nprocs;
+  int i;
+
+  if (_bsp_nprocs>0) return (_bsp_nprocs);
+  else {
+
+    env_nprocs = getenv("BSP_PROCS");
+    if (env_nprocs!=NULL) {
+      i = atoi(env_nprocs);
+      if ((i<=0) || (i>BSP_MAX_PROCS)) 
+        return (BSP_MAX_PROCS);
+      else 
+        return i;
+    } else {
+      return (BSP_MAX_PROCS);
+    }
+  }
+    
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Deallocate free list}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Deallocate the last but one supersteps free list. This ensures that
+data used in BSMP can be put on the free list---the downside is the
+retention of \emph{some} data for a superstep longer than expected.
+
+\begin{code}
+#define deallocateFreeList()                             \
+  do {                                                   \
+    BSPfreelist *freelistptr;                            \
+    while (_bsp_last_free_list) {                        \
+      freelistptr = _bsp_last_free_list;                 \
+      _bsp_last_free_list = _bsp_last_free_list->tail;   \
+      free(freelistptr->head);                           \
+      free(freelistptr);                                 \
+   }                                                     \
+   _bsp_last_free_list = _bsp_free_list;                 \
+   _bsp_free_list      = NULL;                           \
+ } while(0)
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\texttt{bsp\_sync}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Stub used when users code doesn't include \texttt{bsp.h}
+\begin{code}
+#undef bsp_sync
+void bsp_sync() {
+  bsp_sync_cpp(0,"unprofiled");
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{DRMA: buffered \texttt{bsp\_put}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#undef bsp_put
+void bsp_put(int pid, const void *src, void *dst, int offset, int nbytes) {
+  bsp_put_cpp(pid,src,dst,offset,nbytes,0,"unprofiled");
+}
+
+void bsp_put_cpp(int pid, const void *src, void *dst, int offset, int nbytes,
+                 int lineno,const char *filename){
+  static int    cacheinbytes=0,cachenbytes=0;
+  int           gid;
+  char         *dst_plus_offset;
+  _BSPcombinfo *ptr;
+  BSPfreelist  *cons;
+
+  
+#if defined(PROFILE) || !defined(TURBO)
+  _bsp_lineno   = lineno;
+  _bsp_filename = (char*) filename;
+#endif
+#ifdef SANITY_CHECK
+  if (pid < 0 || pid >= _bsp_nprocs) 
+    bsp_abort("{bsp_put}: line %d  of \"%s\"\n"
+              "\tprocess %d is trying to put into non-existant processor %d.",
+              _bsp_lineno,_bsp_filename,_bsp_pid,pid);
+
+  if (src==NULL && nbytes>0)
+    bsp_abort("{bsp_put}: line %d of \"%s\"\n"
+              "\tSrc address is NULL while nbytes is %d",
+              _bsp_lineno,_bsp_filename,nbytes);
+#endif
+
+  if (nbytes<=0) {
+    /* do nothing */
+  } else {
+    gid=bsp_register_local_to_global(dst);
+    if ((nbytes < MAX_FCOMBINE_MESSAGE_SIZE)   &&
+        bspcombputs_applicable(pid,gid,nbytes) &&
+        (pid!=_bsp_pid)) {
+
+      bspcombputs_put(pid,src,gid,offset,nbytes,cacheinbytes,cachenbytes,ptr);
+    } else {
+      cons = (BSPfreelist*) MALLOC(SIZEOF(BSPfreelist));
+      if (cons==NULL) 
+        bsp_abort("{bsp_put}: line %d of \"%s\"\n"
+                  "\tFailed to allocate free list.",
+		  _bsp_lineno,_bsp_filename);
+      cons->head = (char*) MALLOC(nbytes);
+      if (cons->head==NULL) 
+        bsp_abort("{bsp_put}: line %d of \"%s\"\n"
+                  "\tFailed to malloc %d bytes",
+		  _bsp_lineno,_bsp_filename,nbytes);
+      MEMCPY(cons->head,src,nbytes);
+      cons->tail=_bsp_free_list;
+      _bsp_free_list = cons;
+      _bsp_put(COMM_SET_PUT(pid),cons->head,gid,offset,nbytes);
+    }
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{DRMA: unbuffered \texttt{bsp\_hpput}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+The following implementation of unbuffered/unbuffered put actually
+uses an unbuffered/buffered scheme.
+\begin{code}
+#undef bsp_hpput
+void bsp_hpput(int pid, const void *src, void *dst, int offset, int nbytes){
+  bsp_hpput_cpp(pid,src,dst,offset,nbytes,0,"unprofiled");
+}
+
+void bsp_hpput_cpp(int pid, const void *src, void *dst, int offset, int nbytes,
+                   int lineno,const char *filename){
+  static int    cacheinbytes=0,cachenbytes=0;
+  int           gid;
+  char         *dst_plus_offset;
+  _BSPcombinfo *ptr;
+  extern bsp_registration **_bsp_reg_global;
+  
+#if defined(PROFILE) || !defined(TURBO)
+  _bsp_lineno   = lineno;
+  _bsp_filename = (char*)filename;
+#endif
+#ifdef SANITY_CHECK
+  if (pid < 0 || pid >= _bsp_nprocs)
+    bsp_abort("{bsp_hpput}: line %d  of \"%s\"\n"
+              "\tprocess %d is trying to put into no-existant processor %d.",
+              _bsp_lineno,_bsp_filename,_bsp_pid,pid);
+
+  if (src==NULL && nbytes>0)
+    bsp_abort("{bsp_hpput}: line %d of \"%s\"\n"
+              "\tSrc address is NULL while nbytes is %d",
+              _bsp_lineno,_bsp_filename,nbytes);
+#endif
+
+  if (nbytes<=0) {
+    /* do nothing */
+  } else if (pid == _bsp_pid) {
+    dst_plus_offset = (char*) dst + offset;
+    if (dst_plus_offset != (char*)src)
+      FAST_MEMCPY(dst_plus_offset,src,nbytes);
+ 
+  } else {
+    gid=bsp_register_local_to_global(dst);
+    if (nbytes < MAX_FCOMBINE_MESSAGE_SIZE &&
+        bspcombputs_applicable(pid,gid,nbytes)) {
+      bspcombputs_put(pid,src,gid,offset,nbytes,cacheinbytes,cachenbytes,ptr);
+    } else {
+#if !defined(BSP_DRMA) || defined(PROFILE)
+      _bsp_put(COMM_SET_PUT(pid),src,gid,offset,nbytes);
+#else
+      if (CONTENTION_REMOVAL_SOME()) 
+        drma_put(pid,
+                 src,
+                 ((char*) bsp_register_global_to_local(gid,pid))+offset,
+                 nbytes);
+      else
+        _bsp_put(COMM_SET_PUT(pid),src,gid,offset,nbytes);
+#endif
+    }
+  }
+}
+
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{DRMA: buffered \texttt{bsp\_get}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#undef bsp_get
+void bsp_get(int pid,const void *src,int offset,void *dst,int nbytes) {
+#if defined(PROFILE) || !defined(TURBO)
+  _bsp_lineno   = 0;
+  _bsp_filename = (char*) "unprofiled";
+#endif
+#ifdef SANITY_CHECK
+  if (dst==NULL && nbytes>0)
+    bsp_abort("{bsp_get}: line %d of \"%s\"\n"
+              "\tDestination address is NULL while nbytes is %d",
+              _bsp_lineno,_bsp_filename,nbytes);
+#endif
+  if (nbytes<=0) {
+    /* do nothing */
+  } else
+    _bsp_get(COMM_SET_GET(pid),src,offset,dst,nbytes);
+}
+
+void bsp_get_cpp(int pid,const void *src,int offset,void *dst,int nbytes,
+                 int lineno, const char* filename) {
+#if defined(PROFILE) || !defined(TURBO)
+  _bsp_lineno   = lineno;
+  _bsp_filename = (char*) filename;
+#endif
+#ifdef SANITY_CHECK
+  if (dst==NULL && nbytes>0)
+    bsp_abort("{bsp_get}: line %d of \"%s\"\n"
+              "\tDestination address is NULL while nbytes is %d",
+              _bsp_lineno,_bsp_filename,nbytes);
+#endif
+  if (nbytes<=0) {
+    /* do nothing */
+  } else
+    _bsp_get(COMM_SET_GET(pid),src,offset,dst,nbytes);
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{DRMA: unbuffered \texttt{bsp\_get}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#undef bsp_hpget
+void bsp_hpget(int pid,const void *src,int offset,void *dst,int nbytes) {
+#if defined(PROFILE) || !defined(TURBO)
+  _bsp_lineno   = 0;
+  _bsp_filename = (char*) "unprofiled";
+#endif
+#ifdef SANITY_CHECK
+  if (dst==NULL && nbytes>0)
+    bsp_abort("{bsp_hpget}: line %d of \"%s\"\n"
+              "\tDestination address is NULL while nbytes is %d",
+              _bsp_lineno,_bsp_filename,nbytes);
+#endif
+  if (nbytes<=0) {
+    /* do nothing */
+  } else
+    _bsp_get(COMM_SET_HPGET(pid),src,offset,dst,nbytes);
+}
+
+#undef bsp_hpget
+void bsp_hpget_cpp(int pid,const void *src,int offset,void *dst,int nbytes,
+                   int lineno, const char* filename) {
+#if defined(PROFILE) || !defined(TURBO)
+  _bsp_lineno   = lineno;
+  _bsp_filename = (char*) filename;
+#endif
+#ifdef SANITY_CHECK
+  if (dst==NULL && nbytes>0)
+    bsp_abort("{bsp_hpget}: line %d of \"%s\"\n"
+              "\tDestination address is NULL while nbytes is %d",
+              _bsp_lineno,_bsp_filename,nbytes);
+#endif
+  if (nbytes<=0) {
+    /* do nothing */
+  } else {
+#if !defined(BSP_DRMA) || defined(PROFILE)
+    _bsp_get(COMM_SET_HPGET(pid),src,offset,dst,nbytes);
+#else
+    if (CONTENTION_REMOVAL_SOME()) 
+      drma_get(pid,
+               ((char) 
+                bsp_register_global_to_local(
+                  bsp_register_local_to_global(src), 
+                  pid))+offset,
+               dst,
+               nbytes);
+    else
+      _bsp_get(COMM_SET_HPGET(pid),src,offset,dst,nbytes);
+#endif
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{BSMP: initialisation}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+BSMP is implemented in terms of DRMA operations where there is
+\emph{conceptually} two syncs at \texttt{bsp\_sync}. Each process has
+$p$ buffers associated with it, and at the end of a superstep there is
+a sync to determine the total size of any sends coming from a given
+process. Memory is allocated to hold the sent data (a dynamically
+growing system buffer), and then another sync is performed before the
+data comes in. In the implementations for shared memory or message
+passing systems there is actually no need to perform these two
+syncs---it just helps to think of the workings of the scheme this way.
+
+
+Create and register the $p$ system. 
+\begin{code}
+STATIC void bsmp_init() {
+  bsp_registration *ptr;
+  int i=0,size;
+  _bsmp.tag_size    = 0;
+  _bsmp.padding     = 0;
+  size = (BSP_OPT_BSMP_BUFFER_SIZE<BSMP_MIN_BUFFER_SIZE)?
+           BSMP_MIN_BUFFER_SIZE:BSP_OPT_BSMP_BUFFER_SIZE;
+  for(i=0;i<_bsp_nprocs;i++) {
+    _bsmp.incoming_message_buffer[i]=MALLOC(size);
+    _bsmp.oldincoming_message_buffer[i]
+      =_bsmp.incoming_message_buffer[i];
+
+    if (_bsmp.incoming_message_buffer[i]==NULL) 
+      bsp_abort("{bsmp_init}: unable to allocate message buffer");
+    bsp_pushregister_cpp(_bsmp.incoming_message_buffer[i],
+                         size,
+                         __LINE__,
+                         "BSPlibs internal BSMP buffer. "
+                         "Use -finfinite-bsmp-buffers");
+    _bsmp.incoming_message_buffer_size[i]=size;
+    _bsmp.incoming_messages_size[i]      =0;
+#ifdef BSP_DRMA
+    _bsmp.incoming_messages_size_safe[i] =0;
+    bsp_register_changetostatics(_bsmp.incoming_message_buffer[i],i);
+#endif
+    _bsmp.outgoing_offset[i]             =0;
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{BSMP: reset incoming buffers}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Resize the $p$ system buffers associated with each process. If data is
+re-malloced, then registration information has to be changed
+accordingly.
+
+\begin{code}
+STATIC void bsmp_enlargebuffers() {
+  int i;
+
+  for(i=0;i<_bsp_nprocs;i++) {
+#ifdef DEBUG
+    bsp_debug("System buffer %d=%d bytes [incoming=%d]",i,
+              _bsmp.incoming_message_buffer_size[i],
+              _bsmp.incoming_messages_size[i]);
+#endif
+    if (_bsmp.incoming_message_buffer_size[i]<
+        _bsmp.incoming_messages_size[i]) {
+#ifdef DEBUG
+      bsp_debug("{bspmp_enlargebuffers} buffer %d from %d to %d bytes",
+                i,_bsmp.incoming_message_buffer_size[i],
+                _bsmp.incoming_messages_size[i]);
+#endif
+      _bsmp.incoming_message_buffer_size[i]
+        = _bsmp.incoming_messages_size[i];
+
+      _bsmp.oldincoming_message_buffer[i] 
+        = _bsmp.incoming_message_buffer[i];
+
+      _bsmp.incoming_message_buffer[i]
+        = MALLOC(_bsmp.incoming_message_buffer_size[i]);
+
+#ifdef SANITY_CHECK
+      if (_bsmp.incoming_message_buffer[i]==NULL)
+        bsp_abort("{bsp_sync} at line %d of \"%s\"\n"
+                  "\tunable to enlarge BSMP buffer to %d bytes",
+                  _bsp_lineno, _bsp_filename,
+                  _bsmp.incoming_message_buffer_size[i]);
+#endif  
+      /* old must not equal new. Therefore free _after_ malloc */ 
+      free(_bsmp.oldincoming_message_buffer[i]);
+          
+    }
+  }
+}
+\end{code}
+
+\begin{code}
+#ifdef TURBO
+#ifdef BSP_DRMA
+#define bsmp_resetincoming()                                \
+  do {                                                      \
+    int i;                                                  \
+    for(i=0;i<_bsp_nprocs;i++) {                            \
+      _bsmp.outgoing_offset[i]=0;                           \
+      _bsmp.incoming_messages_size_safe[i]=0;               \
+    }                                                       \
+    _bsmp.current_buffer=0;                                 \
+    _bsmp.next_message  =_bsmp.incoming_message_buffer[0];  \
+    _bsmp.isfrozen=0;                                       \
+  } while(0)
+#else
+#define bsmp_resetincoming()                                \
+  do {                                                      \
+    int i;                                                  \
+    for(i=0;i<_bsp_nprocs;i++) _bsmp.outgoing_offset[i]=0;  \
+    _bsmp.current_buffer=0;                                 \
+    _bsmp.next_message  =_bsmp.incoming_message_buffer[0];  \
+    _bsmp.isfrozen=0;                                       \
+  } while(0)
+#endif
+#else
+STATIC void bsmp_resetincoming() {
+  int i;
+  for(i=0;i<_bsp_nprocs;i++) {
+    _bsmp.outgoing_offset[i]=0;
+#ifdef BSP_DRMA
+    _bsmp.incoming_messages_size_safe[i]=0;
+#endif
+  }
+  _bsmp.current_buffer=0;  
+  _bsmp.next_message  =_bsmp.incoming_message_buffer[0];
+  
+  _bsmp.isfrozen=0;
+#ifdef SANITY_CHECK
+  if (!_bsp_constant(_bsmp.tag_size))
+    bsp_abort("{bsp_set_tag_size} line %d  of \"%s\"\n"
+              "The tag size is not the same on all processors",
+	      _bsp_lineno,_bsp_filename);
+#endif
+#ifdef DEBUG
+  bsp_debug("{bsp_freeze_tag_size} %d bytes (+%d padding)",
+            _bsmp.tag_size,_bsmp.padding);
+#endif
+}
+#endif
+\end{code}
+
+In a DRMA setting each process contains the addresses of registered
+data on all processors; in all other settings, the registerations are held
+in the address space where the registered data is. Therefore in a DRMA
+setting, \emph{registrations} for the BSMP operations have to be
+changed for each superstep as we cann't determine if any of the other
+processes BSMP registrations change.
+\begin{code}
+STATIC void bsmp_reregisterbuffers() {
+  int i;
+  for(i=0;i<_bsp_nprocs;i++) {
+    if (_bsmp.oldincoming_message_buffer[i] !=
+        _bsmp.incoming_message_buffer[i]) {
+      bsp_changeregister((const void*)_bsmp.oldincoming_message_buffer[i],
+                         (const void*)_bsmp.incoming_message_buffer[i],
+                                      _bsmp.incoming_message_buffer_size[i],
+                         i);
+      _bsmp.oldincoming_message_buffer[i]
+        = _bsmp.incoming_message_buffer[i];
+    }
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{BSMP: Setting the tag size}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_set_tag_size_cpp(int *tag_bytes,int lineno, const char *filename) {
+  int temp;
+
+#if defined(PROFILE) || !defined(TURBO)
+  _bsp_lineno   = lineno;
+  _bsp_filename = (char*) filename;
+#endif
+#ifdef SANITY_CHECK
+  if (_bsmp.isfrozen)
+    bsp_abort("{bsp_set_tag_size} line %d of \"%s\"\n"
+              "\tTag must be set before first message is sent\n",
+              _bsp_lineno,_bsp_filename);
+#endif
+  temp           = _bsmp.tag_size;
+  _bsmp.tag_size = *tag_bytes;
+  *tag_bytes     = temp;
+  /* header = size of payload + tag + padding */
+  _bsmp.padding = (temp=((SIZEOF(int)+_bsmp.tag_size) % SIZEOF(void*)))?
+                        (SIZEOF(void*)-temp):
+                        0;
+}
+
+#undef bsp_set_tag_size
+void bsp_set_tag_size(int *tag_bytes) {
+  bsp_set_tag_size_cpp(tag_bytes,0,"unprofiled");
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{BSMP: sending a message}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Make sure that when the message is packed that each constituent part
+is word aligned.
+\begin{code}
+#undef bsp_send
+void bsp_send(int pid,const void *tag, const void *payload,int payload_bytes){
+  bsp_send_cpp(pid,tag,payload,payload_bytes,0,"unprofiled");
+}
+\end{code}
+
+\begin{code} 
+void bsp_send_cpp(int pid,const void *tag, const void *payload, 
+                  int payload_bytes,int lineno,const char *filename) {
+  int temp,messg_size, *ptr;
+  BSPfreelist  *cons;
+
+#if defined(PROFILE) || !defined(TURBO)
+  _bsp_lineno   = lineno;
+  _bsp_filename = (char*) filename;
+#endif
+#ifdef SANITY_CHECK
+  if (pid < 0 || pid >= _bsp_nprocs) 
+    bsp_abort("{bsp_send}: line %d  of \"%s\"\n"
+              "\tprocess %d is trying to send to non-existant processor %d.",
+              _bsp_lineno,_bsp_filename,_bsp_pid,pid);
+  if (_bsmp.tag_size>0 && tag==NULL)
+    bsp_abort("{bsp_send} line %d of \"%s\"\n"
+              "\tTag is NULL when the tag size is %d",
+              _bsp_lineno,_bsp_filename,_bsmp.tag_size);
+
+  if (payload_bytes>0 && payload==NULL)
+     bsp_abort("{bsp_send} line %d of \"%s\"\n"
+              "\tPayload is NULL when the tag size is %d",
+              _bsp_lineno,_bsp_filename,_bsmp.tag_size);
+#endif
+  _bsmp.isfrozen = 1;
+  messg_size  = SIZEOF(int)+_bsmp.tag_size+_bsmp.padding;
+  if (temp=(MOD_POW2(payload_bytes,SIZEOF(void*))))
+        messg_size += payload_bytes + SIZEOF(void*) - temp;
+      else 
+        messg_size += payload_bytes; 
+  
+  cons = (BSPfreelist*) MALLOC(SIZEOF(BSPfreelist));
+  if (cons==NULL)
+    bsp_abort("{bsp_send} line %d of \"%s\"\n"
+              "\tunable to allocate storage for free list",
+              lineno,filename);
+  cons->head = MALLOC(messg_size);
+  if (cons->head==NULL)
+    bsp_abort("{bsp_send} line %d of \"%s\"\n"
+              "\tFailed to malloc %d bytes",
+              lineno,filename,messg_size);
+  cons->tail          =_bsp_free_list;
+  _bsp_free_list      = cons;
+
+
+  *((int*) cons->head)= payload_bytes;
+#ifdef DEBUG
+  bsp_debug("{bsp_send} to %d tag=%d payload=%d(%d) "
+            "message=%d offset=%d bytes",
+            pid,_bsmp.tag_size,payload_bytes,*((int*) cons->head),
+            messg_size,_bsmp.outgoing_offset[pid]);
+#endif
+  
+  if (_bsmp.tag_size>0) 
+    MEMCPY((((int*) cons->head)+1),tag,_bsmp.tag_size);
+
+  if (payload_bytes>0)
+    MEMCPY(((char*) cons->head)+SIZEOF(int)+_bsmp.padding+_bsmp.tag_size,
+           payload,payload_bytes);
+  
+  _bsp_put(COMM_SET_SEND(pid),
+           cons->head,
+           bsp_register_local_to_global(
+              _bsmp.incoming_message_buffer[_bsp_pid]),
+           _bsmp.outgoing_offset[pid],
+           messg_size);
+ _bsmp.outgoing_offset[pid]  +=messg_size;
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{BSMP: getting the current tag}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#undef bsp_get_tag
+void bsp_get_tag(int *status, void *tag) {
+  bsp_get_tag_cpp(status,tag,0,"unprofiled");
+}
+
+void bsp_get_tag_cpp(int *status, void *tag,int lineno, const char* filename) {
+
+#ifdef SANITY_CHECK
+  if (status==NULL)
+    bsp_abort("{bsp_get_tag}: line %d of \"%s\"\n"
+              "\tThe status address is NULL.",lineno,filename);
+#endif
+  *status=-1;
+  while(_bsmp.current_buffer<_bsp_nprocs) {
+#ifdef DEBUG
+    bsp_debug("{bsp_get_tag} buffer %d has %d bytes left",
+              _bsmp.current_buffer,
+              _bsmp.incoming_messages_size[_bsmp.current_buffer]);
+#endif
+    if (_bsmp.incoming_messages_size[_bsmp.current_buffer]<=0) 
+      _bsmp.next_message=_bsmp.incoming_message_buffer[++_bsmp.current_buffer];
+    else {
+      *status = *((int*) _bsmp.next_message);
+      if (_bsmp.tag_size > 0) {
+#ifdef SANITY_CHECK
+        if (tag==NULL) 
+        bsp_abort("{bsp_get_tag}: line %d of \"%s\"\n"
+                  "\tThe tag address is NULL.",lineno,filename);
+#endif
+        MEMCPY(tag,((int*)_bsmp.next_message)+1,_bsmp.tag_size);
+      }
+      break;
+    }  
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{BSMP: how many messages in the buffer}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#undef bsp_bsmp_info
+int bsp_bsmp_info(int *accum_size) {
+  return (bsp_bsmp_info_cpp(accum_size,0,"unprofiled"));
+}
+
+int bsp_bsmp_info_cpp(int *accum_size,
+                  int lineno, const char* filename) {
+  int i,payload_size,messg_size,no_messg=0;
+  int buffsize,buffno;
+  char *ptr;
+
+  ptr        = _bsmp.next_message;
+  buffno     = _bsmp.current_buffer;
+  *accum_size= 0;
+  buffsize   = _bsmp.incoming_messages_size[buffno];
+  while (buffno<_bsp_nprocs) {
+    if (buffsize<=0) {
+      ptr      =_bsmp.incoming_message_buffer[++buffno];
+      buffsize =_bsmp.incoming_messages_size[buffno];
+    } else {
+      payload_size = *((int*) ptr);
+      *accum_size += payload_size;
+      messg_size   = SIZEOF(int) + _bsmp.tag_size + _bsmp.padding;
+      if (i=(MOD_POW2(payload_size,SIZEOF(void*))))
+        messg_size += payload_size + SIZEOF(void*) - i;
+      else 
+        messg_size += payload_size; 
+      ptr      += messg_size;
+      buffsize -= messg_size;
+      no_messg++;
+#ifdef DEBUG
+      bsp_debug("{bsp_bsmp_info} clearing buffer %d. "
+                "%d bytes to go %d messages seen (%d bytes payload)",
+                buffno,buffsize,no_messg,*accum_size);
+#endif
+    }
+  }
+#ifdef DEBUG
+  bsp_debug("{bsp_bsmp_info} %d messages. %d bytes",
+            no_messg,*accum_size);
+#endif
+  return no_messg;
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{BSMP: move the current tag}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#undef bsp_move
+void bsp_move(void *payload, int reception_nbytes) {
+  bsp_move_cpp(payload,reception_nbytes,0,"unprofiled");
+}
+
+void bsp_move_cpp(void *payload, int reception_nbytes,
+                  int lineno, const char* filename) {
+  int i,total_size, payload_size;
+
+  while(_bsmp.current_buffer<_bsp_nprocs) {
+    if (_bsmp.incoming_messages_size[_bsmp.current_buffer]==0) {
+      _bsmp.next_message=_bsmp.incoming_message_buffer[++_bsmp.current_buffer];
+#ifdef SANITY_CHECK
+    } else if (_bsmp.incoming_messages_size[_bsmp.current_buffer]<0) {
+      bsp_abort("{bsp_move} line %d of \"%s\"\n"
+                "Severe error with bsmp buffer offsets");
+#endif
+    } else {
+      payload_size = *((int*) _bsmp.next_message);
+      total_size   = SIZEOF(int) + _bsmp.tag_size + _bsmp.padding;
+
+      if (reception_nbytes>0) {
+#ifdef SANITY_CHECK
+        if (payload==NULL)
+          bsp_abort("{bsp_move}: line %d of \"%s\"\n"
+                    "\tThe payload address is NULL whilst trying to "
+                    "to copy %d bytes",
+		    lineno,filename,payload_size);
+#endif
+        MEMCPY(payload,
+               _bsmp.next_message+total_size,
+               (payload_size>reception_nbytes)?reception_nbytes:payload_size);
+      }
+
+      if (i=(MOD_POW2(payload_size,SIZEOF(void*))))
+        total_size += payload_size + SIZEOF(void*) - i;
+      else 
+        total_size += payload_size;
+
+#ifdef DEBUG
+      bsp_debug("{bsp_move} removing %d from system. Offset=%d",
+                total_size,_bsmp.next_message-
+                _bsmp.incoming_message_buffer[_bsmp.current_buffer]);
+#endif
+      _bsmp.incoming_messages_size[_bsmp.current_buffer]
+        -= total_size;
+      _bsmp.next_message+=total_size;
+      break;
+    }  
+  }
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{BSMP: high performance move the current tag}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#undef bsp_hpmove
+int bsp_hpmove(void **tag_ptr_buf, void **payload_ptr_buf) {
+  return (bsp_hpmove_cpp(tag_ptr_buf,payload_ptr_buf,0,"unprofiled"));
+}
+
+int bsp_hpmove_cpp(void **tag_ptr_buf, void **payload_ptr_buf,
+                   int lineno, const char* filename) {
+  int i,total_size, payload_size, tag_size;
+
+#ifdef SANITY_CHECK
+  if (tag_ptr_buf==NULL)
+    bsp_abort("{bsp_hpmove}: line %d of \"%s\"\n"
+              "\tThe pointer to the tag address is NULL.",
+		    lineno,filename);
+  if (payload_ptr_buf==NULL)
+    bsp_abort("{bsp_hpmove}: line %d of \"%s\"\n"
+              "\tThe pointer to the payload address is NULL.",
+		    lineno,filename);
+#endif
+  payload_size=-1;
+  while(_bsmp.current_buffer<_bsp_nprocs) {
+#ifdef DEBUG
+    bsp_debug("{bsp_hpmove} buffer %d has %d bytes left",
+              _bsmp.current_buffer,
+              _bsmp.incoming_messages_size[_bsmp.current_buffer]);
+#endif
+   if (_bsmp.incoming_messages_size[_bsmp.current_buffer]<=0) 
+      _bsmp.next_message=_bsmp.incoming_message_buffer[++_bsmp.current_buffer];
+    else {
+      payload_size = *((int*) _bsmp.next_message);
+      total_size   = SIZEOF(int) + _bsmp.tag_size+_bsmp.padding;
+
+#ifdef DEBUG
+      bsp_debug("{bsp_hpmove} tag=%d payload=%d -%d + %d bytes [%d bytes all total]",
+                 _bsmp.tag_size,payload_size,
+                 *(((int*) _bsmp.next_message)-1),
+                 *(((int*) _bsmp.next_message)+1),
+                 _bsmp.incoming_messages_size[_bsmp.current_buffer]);
+#endif
+      *tag_ptr_buf    = (void*) ((int*)_bsmp.next_message+1);
+      *payload_ptr_buf= (void*) (((char*)_bsmp.next_message)+total_size);
+      
+      if (i=(MOD_POW2(payload_size,SIZEOF(void*))))
+        total_size += payload_size+ SIZEOF(void*) - i;
+      else
+        total_size += payload_size;
+      _bsmp.incoming_messages_size[_bsmp.current_buffer] -= total_size;
+      _bsmp.next_message+=total_size;
+      break;
+    }  
+  }
+  return(payload_size);
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%
+\section{Initialise an individual processes global variables}
+%%%%%%%%%%%%%%%%%
+
+The following routine provides a single entry point to the various
+initialisation routines required in \bsplib{}.
+
+\begin{code}
+void process_globals_init() {
+   bsp_register_init();
+   bspcombputs_init();  
+   bsp_pushregister(&_bsp_buffget_reference,1073741824);
+   bsmp_init();        
+#ifdef STATISTICS
+   if (BSP_DO_STAT) bspstat_create();
+   bspstat_init();
+#endif
+#ifdef PROFILE
+   bspprof_create();
+   bspprof_init();
+#endif
+}
+\end{code}
+
+Any initialisation routines to be called in \texttt{bsp\_begin} which
+themselves are written in \bsplib{} code.
+\begin{code}
+void bsplib_routines_init() {
+   bspparams_init(); /* From level 1 library */
+   bsp_bcast_init();
+   bsp_scan_init();
+   bsp_fold_init();
+   bsp_fold_funs_init();
+   bsp_f77_init();
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%
+\section{Sanity checking}
+%%%%%%%%%%%%%%%%%
+
+A vaiety of sanity checks are performed to ensure that the data
+initialised by \texttt{bsp\_begin} is well defined.
+
+\begin{code}
+void checkDefines() {
+   if (SIZEOF(double) != 8)
+     bsp_abort("{MEMCPY} SIZEOF(double)=%d and not 8",
+       SIZEOF(double));
+
+   if (BSP_BUFFER_SIZE % 4 != 0)
+      bsp_abort("{BSP_BUFFER_SIZE} has to be divisable by 4.");
+
+   if ((SIZEOF(_BSPcombinfo)!=8) && (SIZEOF(_BSPcombinfo)!=16))
+     bsp_abort("MOD_POW2 not going to work for SIZEOF(_BSPcombinfo)");
+
+   if (CEILING_DIV(_bsp_nprocs*_bsp_nprocs,8*SIZEOF(int))  > BSP_BUFFER_SIZE)
+     bsp_abort("log total exchange -fbspbuffer %d too small. Relink program",
+               BSP_BUFFER_SIZE);    
+       
+   if (BSP_MAX_PROCS < 0)
+      bsp_abort("{BSP_MAX_PROCS=%d} has to be positive",BSP_BUFFER_SIZE);
+
+   if (BSP_BUFFER_SIZE < (BSP_MAX_PROCS*SIZEOF(int)))
+      bsp_abort("{BSP_BUFFER_SIZE=%d}: is too small. "
+             "It is required to be at least %d bytes for the\n"
+             "internal workings of the library.\n"
+             "Recompile your code with the -bspbuffer option",
+             BSP_BUFFER_SIZE,(BSP_MAX_PROCS*SIZEOF(int)));
+   if (BSP_COMM_FIFO_SIZE < 1)
+      bsp_abort("{BSP_COMM_FIFO_SIZE} has to be greater than 1");
+
+   if (MAX_FCOMBINE_MESSAGE_SIZE>65536)
+     bsp_abort("{MAX_FCOMBINE_MESSAGE_SIZE} has to be less than 65536 "
+               "because of bit manipulations");
+
+   if (BSP_NBUFFERS<=0)
+     bsp_abort("{BSP_NBUFFERS} has to be greater than zero (set to %d)",
+               BSP_NBUFFERS);
+}
+\end{code}
+
+@

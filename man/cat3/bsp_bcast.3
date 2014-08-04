@@ -1,0 +1,66 @@
+
+
+
+bsp_bcast(3)              BSPlib level1              bsp_bcast(3)
+
+
+
+NAME
+     bsp_bcast - broadcast data from one process
+
+
+
+C SYNOPSIS
+     #include "bsp_level1.h"
+
+     void bsp_bcast(int _b_c_a_s_t__p_i_d,void *_s_r_c,void *_d_s_t,int _n_b_y_t_e_s);
+
+FORTRAN SYNOPSIS
+     SUBROUTINE bspbcast(_b_c_a_s_t__p_i_d,_s_r_c,_d_s_t,_n_b_y_t_e_s)
+       INTEGER, intent(IN)  :: _b_c_a_s_t__p_i_d,nbytes
+       <TYPE>,  intent(IN)  :: _s_r_c
+       <TYPE>,  intent(OUT) :: _d_s_t
+
+
+DESCRIPTION
+     A collective broadcast in which the data _s_r_c of size  _n_b_y_t_e_s
+     on  processor  _b_c_a_s_t__p_i_d  is copied into the _r_e_g_i_s_t_e_r_e_d (_s_e_e
+     bsp_push_reg(3)) data-structure _d_s_t on all processors.
+
+     If  your  program  is  linked  using  the  -_s_t_a_t  option  to
+     bspfront(1),  then the BSP cost formula for the broadcast is
+     echoed to the file _S_T_A_T._b_s_p.
+
+
+SEE ALSO
+     bsplib_level1(3), bsp_fold(3)
+
+
+BUGS
+     Problems  and  bug  reports  should  be  mailed  to  _b_s_p_l_i_b-
+     _b_u_g_s@_c_o_m_l_a_b._o_x._a_c._u_k
+
+
+AUTHORS
+     Jonathan.Hill@comlab.ox.ac.uk
+     http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    1
+
+
+

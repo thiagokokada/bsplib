@@ -1,0 +1,1250 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1997 Stephen Donaldson                             %%
+%%                      &  The University of Oxford                      %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it into other software, is hereby granted          %%
+%% without fee, provided that                                            %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsptcpl.lc,v 1.2 1997/09/22 14:47:37 jonh Exp jonh $
+% $Log: bsptcpl.lc,v $
+% Revision 1.2  1997/09/22 14:47:37  jonh
+% *** empty log message ***
+%
+% Revision 1.1  1997/07/11 10:26:46  jonh
+% Initial revision
+%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{TCP/IP communications library}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+This file contains the BSP/TCP library routines and the global variables
+used by these functions.
+\begin{code}
+#include <unistd.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <limits.h>
+
+#include <sys/time.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#if defined(RS6000) || defined(SP2)
+#include <sys/select.h>
+#endif
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <netdb.h>
+
+#include "../library_now/bspnowdefs.h"
+#include "bsptcpl.h"
+#include "../library_now/bsploadfuns.h"
+
+int bsptcp_nprocs;              /* number of hosts requested/participating */
+int bsptcp_active_nprocs;       /* How many involved in a communication */
+int bsptcp_pid=-1;              /* pid of the current BSP process */
+bsphost_t *bsptcp_host_list;    /* first candidate host */
+int bsptcp_ucpipe[2];           /* control pipes between child and parent */
+int bsptcp_dcpipe[2];           /* control pipes between chile and parent */
+int bsptcp_spmdout[2];          /* pipe for sending stdout to master process */
+int bsptcp_spmderr[2];          /* pipe for sending stderr to master process */
+int *bsptcp_dsock=NULL;         /* data sockets */
+int *bsptcp_candidate=NULL;     /* data sockets candidate for probing */
+int bsptcp_last_probe_type;     /* last type used in a probe call */
+fd_set bsptcp_readfd;           /* select to wait for data */
+fd_set bsptcp_writefd;          /* select to wait for data */
+fd_set bsptcp_exceptfd;         /* select to wait for exception */
+int bsptcp_maxfd;               /* max fd for select */ 
+char *bsptcp_send_buff;         /* send buffer with header */
+int   bsptcp_send_bufsize;      /* socket send buffer size */
+int   bsptcp_recv_bufsize;      /* socket receive buffer size */
+int   bsptcp_verbose=0;         /* debugging output */
+int   bsptcp_skipwaitsend=1;    /* ignore wait send */
+int   bsptcp_slot_size_usecs=1200; /* 10Mbit Ethernet frame size in usecs */
+int   bsptcp_max_frame=1526;       /* maximum packet size */
+int   bsptcp_min_packets=10;       /* number of send or receive packets */
+#ifdef BSPTCP_TRACE
+FILE* bsptcp_trace_file;
+int   bsptcp_trace=0;
+#endif
+
+int rand_a, rand_b, rand_x, rand_last; /* Random number generator */
+\end{code}
+
+Define macros used to control error report and execution aborting and
+include the functions used to guard system calls for errors: The
+definition of the included guarding functions expand the macros and
+hence are customsed by the macros for the particular BSP/TCP
+component.
+
+\begin{code}
+#define BSPTCP_COMPONENT "BSP/TCP Library" /* component identifier */
+#define ABORT_MSG_OK bsptcp_ucpipe[1]      /* ABORT_MSG & ABORT_EXIT are ok */
+#define ABORT_EXIT(exitcode)               /* request to abort and exit */ \
+         { \
+         bsptcp_msghdr_t msghdr; \
+         int exitwith; \
+         \
+         exitwith = exitcode; \
+         msghdr.msgtype = BSPTCP_MSG_ABORT; \
+         msghdr.msglen = sizeof(int); \
+         msghdr.msgspid = bsptcp_pid; \
+         msghdr.msgdpid = 0; \
+         writeall(bsptcp_ucpipe[1],&msghdr,sizeof(msghdr)); \
+         writeall(bsptcp_ucpipe[1],&exitwith,sizeof(int)); \
+         readall(bsptcp_dcpipe[0],&msghdr,sizeof(msghdr)); /* wait ack */ \
+         exit(exitcode); \
+         }
+#define ABORT_MSG(text) {fprintf(stderr,"%s",text); fflush(stderr); }
+
+#include "../library_now/bspnowerrs.h"    /* include guard functions */
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Lexer and Parser}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#include "../library_now/y.tab.c"      /* host name table parser */
+#include "../library_now/bspnowlex.c"  /* host name table lexical analyser */
+\end{code}
+
+Interface functions between the BSP Worldwide library and the TCP/IP
+Sockets interface:
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Setting the buffer size}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+Handshake between the higher level protocol and this TCP library that
+determines what is the maximum message size. 
+\begin{code}
+int bsptcp_set_buffer_size(int *size, int *nbuffers, int slotsize) 
+   {
+      
+   bsptcp_max_frame     = *size;
+   bsptcp_min_packets    = *nbuffers;
+   bsptcp_slot_size_usecs= slotsize;
+   bsptcp_recv_bufsize   = bsptcp_max_frame*bsptcp_min_packets;
+   bsptcp_send_bufsize   = bsptcp_recv_bufsize;
+
+#ifdef DEBUG
+   printf("BSP/TCP Library: SNDBUF = %d, RCVBUF = %d.\n",
+      bsptcp_send_bufsize,bsptcp_recv_bufsize);
+   fflush(stdout);
+#endif
+      
+   bsptcp_send_buff=malloc(bsptcp_max_frame);
+   GUARDNZP(bsptcp_send_buff,"malloc(set_buffer_size)");
+   return (bsptcp_max_frame-
+           MAC_PREAMBLE_CHECKSUM_SIZE - 
+           MAC_HEADER_SIZE -
+           IP_HEADER_SIZE  -
+           TCP_HEADER_SIZE -
+           sizeof(bsptcp_msghdr_t));
+   }
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Setting environment variables before process startup}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsptcp_env(int request_procs, char *spmd_prog)
+   {
+   int i;
+  
+   char *env_val;
+   char env_set[BSPTCP_STR_LEN];
+
+   /* get the BSP pid of the current process */
+   if (bsptcp_pid<0) 
+     {
+     env_val = getenv("BSPTCP_PID");
+     if (env_val) sscanf(env_val,"%d",&bsptcp_pid);
+     if (bsptcp_pid<0) bsptcp_pid = 0;
+     }
+   sprintf(env_set,"%d",bsptcp_pid);
+   GUARDZ(setenv("BSPTCP_PID",env_set,1),"setenv()");
+\end{code}
+
+The following environment variables are only required for the BSP pid
+0 process and only the BSP pid 0 process forks the master process.
+
+\begin{code}
+   if (!bsptcp_pid)
+      {
+      /* set the BSP daemon port number */
+      sprintf(env_set,"%d",BSPTCP_LPORT);
+      GUARDZ(setenv("BSPTCP_PORTNUMBER",env_set,0),"setenv()");
+
+      /* set the BSP daemon hosts file name */
+      env_val = getenv("HOME");
+      if (env_val) sprintf(env_set,"%s/.bsptcphosts",env_val);
+      else strcpy(env_set,".bsptcphosts");
+      GUARDZ(setenv("BSPTCP_HOSTNAMES",env_set,0),"setenv()");
+ 
+      /* name of the SPMD program */
+      GUARDZ(setenv("BSPTCP_SPMD_PROGRAM",spmd_prog,1),"setenv()");
+
+      /* set the number of BSP processors requested */
+      sprintf(env_set,"%d",request_procs);
+      GUARDZ(setenv("BSPTCP_NPROCS",env_set,1),"setenv()");
+
+      /* set if terminal IO should have pid banners */
+      env_val = getenv("BSP_SPLITOUTPUT");
+      if (env_val) sprintf(env_set,"%d",atoi(env_val));
+      else sprintf(env_set,"%d",0);
+      GUARDZ(setenv("BSP_SPLITOUTPUT",env_set,1),"setenv()");
+
+      /* create a pipe pair for master to communicate with BSP pid 0 */
+      GUARDZ(pipe(bsptcp_ucpipe),"pipe(ucpipe)");
+      GUARDZ(pipe(bsptcp_dcpipe),"pipe(dcpipe)");
+
+      /* create a pipe pair for stdout and stderr data to go via master */
+      GUARDZ(pipe(bsptcp_spmdout),"pipe(spmd_stdout)");
+      GUARDZ(pipe(bsptcp_spmderr),"pipe(spmd_stderr)");
+      
+      /* set fd of pipe so that master can communicate with BSP pid 0 */
+      sprintf(env_set,"%d",bsptcp_ucpipe[0]);
+      GUARDZ(setenv("BSPTCP_CPIPE_READ",env_set,1),"setenv()");
+      sprintf(env_set,"%d",bsptcp_dcpipe[1]);
+      GUARDZ(setenv("BSPTCP_CPIPE_WRITE",env_set,1),"setenv()");
+
+      /* set env vars for master to receive stdout and stderr data */
+      sprintf(env_set,"%d",bsptcp_spmdout[0]);
+      GUARDZ(setenv("BSPTCP_SPMD_STDOUT",env_set,1),"setenv(SPMD_STDOUT)");
+      sprintf(env_set,"%d",bsptcp_spmderr[0]);
+      GUARDZ(setenv("BSPTCP_SPMD_STDERR",env_set,1),"setenv(SPMD_STDERR)");
+      }
+   } /* bsptcp_env */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Spawn processes on remote nodes}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsptcp_init(int *setup_procs)
+   {
+   int i;
+
+   char *env_val;
+   char env_set[50];
+   char *master_env[2];
+
+   bsptcp_msghdr_t msghdr;
+   bsphost_t *host_entry;
+
+   struct sockaddr_in dsockaddr;   /* data socket address */
+   struct sockaddr_in lsockaddr;   /* listen socket address */
+   int lsock;                      /* listen socket fd */          
+   int fd_count;                   /* number of ready fds */
+   struct timeval polltime;        /* select timeout vallue */
+   struct linger linger;           /* linger on close if data present */
+   int fd_flags;                   /* descriptor flags */
+   int optval,optlen;              /* socket option value */
+
+   int dnamelen;                   /* length of data socket address */
+   int lnamelen;                   /* length of listen socket address */
+
+   char hostname[BSPTCP_STR_LEN];  /* hostname from gethostname() */
+   struct hostent *host;           /* netdb format host info */
+   int fork_pid;                   /* return from fork() call */
+
+
+   /* get the BSP pid of the current process - only guaranteed to be set for
+      BSP pid 0 process (by bsptcp_env()). */
+   if (bsptcp_pid<0) 
+      {
+      bsptcp_pid = 0;
+      env_val = getenv("BSPTCP_PID");
+      if (env_val) sscanf(env_val,"%d",&bsptcp_pid);
+      }
+
+   if (!bsptcp_pid)
+      {
+      /* fork and initiate the master process */
+      if ((fork_pid = fork()) > 0) 
+         {
+         /* set the pid of the BSP pid zero process */
+         sprintf(env_set,"%d",fork_pid);
+         GUARDZ(setenv("BSPTCP_BSPPID0PID",env_set,1),"setenv()");
+
+         /* close unwanted pipe ends */
+         close(bsptcp_ucpipe[1]);
+         close(bsptcp_dcpipe[0]);
+         close(bsptcp_spmdout[1]);
+         close(bsptcp_spmderr[1]);
+
+         master_env[0] = BSPTCP_MASTER_PATH;
+         master_env[1] = NULL;
+#ifdef DEBUG
+         printf("BSP/TCP Library: about to start master.\n"); fflush(stdout);
+#endif
+         execvp(master_env[0],master_env);
+         perror("BSP/TCP Library: master not started");
+         ABORT_EXIT(1);
+         }
+      GUARDNN(fork_pid,"fork()");
+
+      /* BSP pid 0: close unwanted pipe ends */
+      close(bsptcp_ucpipe[0]);
+      close(bsptcp_dcpipe[1]);
+      close(bsptcp_spmdout[0]);
+      close(bsptcp_spmderr[0]);
+\end{code}
+
+BSP pid 0: get the number of processors actually in use from master
+and any environment variables that were specified in the hostname
+file.
+\begin{code}
+      do {
+         char envstr[BSPTCP_BUFF_LEN];
+
+         GUARDEQ(readall(bsptcp_dcpipe[0],&msghdr,sizeof(msghdr)),
+			 sizeof(msghdr),"readall(dcpipe[0])");
+         if ((msghdr.msgtype == BSPTCP_MSG_ENVSET) &&
+	     (msghdr.msglen<BSPTCP_BUFF_LEN))
+            {
+	    
+            GUARDEQ(readall(bsptcp_dcpipe[0],envstr,msghdr.msglen),
+			    msghdr.msglen,"readall(dcpip[0])");
+	    envstr[msghdr.msglen] = 0;
+	    setenv(envstr,envstr+strlen(envstr)+1,1);
+            }
+         }
+      while (msghdr.msgtype == BSPTCP_MSG_ENVSET);
+      GUARDEQ(readall(bsptcp_dcpipe[0],
+			   &bsptcp_nprocs,sizeof(bsptcp_nprocs)),
+		      sizeof(bsptcp_nprocs),"readall(dcpipe[0])");
+      sprintf(env_set,"%d",bsptcp_nprocs);
+      GUARDZ(setenv("BSPTCP_NPROCS",env_set,1),"setenv()");
+
+      /* cut over stdout and stderr to master process */
+      GUARDNN(dup2(bsptcp_spmdout[1],1),"dup2(spmd_stdout)");
+      GUARDNN(dup2(bsptcp_spmderr[1],2),"dup2(spmd_stderr)");
+      close(bsptcp_spmdout[1]);
+      close(bsptcp_spmderr[1]);
+      }
+   else
+      { /* Nonzero BSP pids: get values set up by the slave process */
+	
+      GUARDEQ(sscanf(GUARDNZP(getenv("BSPTCP_NPROCS"),
+          "getenv(NPROCS)"),"%d",&bsptcp_nprocs),1,"sscanf()");
+      GUARDEQ(sscanf(GUARDNZP(getenv("BSPTCP_CPIPE_READ"),
+          "getenv(CPIPE_READ)"),"%d",&bsptcp_dcpipe[0]),1,"sscanf()");
+      GUARDEQ(sscanf(GUARDNZP(getenv("BSPTCP_CPIPE_WRITE"),
+          "getenv(CPIPE_WRITE)"),"%d",&bsptcp_ucpipe[1]),1,"sscanf()");
+      }
+
+   /* find the local machines host name (for incomming connects) */
+   if (env_val = getenv("BSPTCP_ADAPTER"))
+      strcpy(hostname,env_val);
+   else
+      GUARDZ(gethostname(hostname,sizeof(hostname)),"gethostname()");
+   host = GUARDNZP(gethostbyname(hostname),"host name lookup");
+
+   /*
+    * Each of the processors setup bsptcp_nprocs-1 data sockets. 
+    */
+   if (bsptcp_dsock==NULL)
+     GUARDNZP(bsptcp_dsock=malloc(sizeof(int)*bsptcp_nprocs),"malloc(dsock)");
+
+   if (bsptcp_candidate==NULL)
+     GUARDNZP(bsptcp_candidate=malloc(sizeof(int)*bsptcp_nprocs),
+	      "malloc(candiate)");
+   bsptcp_last_probe_type = -1;
+
+   lsock = GUARDNN(socket(AF_INET,SOCK_STREAM,0),"socket()");
+   memset(&lsockaddr,0,sizeof(struct sockaddr_in));
+   lsockaddr.sin_family = AF_INET;
+   lsockaddr.sin_port = 0;
+   lsockaddr.sin_addr.s_addr = INADDR_ANY;
+   GUARDZ(bind(lsock,(struct sockaddr *)&lsockaddr,sizeof(lsockaddr)),"bind()");
+   lnamelen = sizeof(struct sockaddr_in);
+   GUARDZ(getsockname(lsock,(struct sockaddr *)&lsockaddr,&lnamelen),
+         "getsockname()");
+   memcpy(&lsockaddr.sin_addr.s_addr,host->h_addr_list[0],
+          sizeof(lsockaddr.sin_addr.s_addr));
+   GUARDZ(listen(lsock,bsptcp_nprocs),"listen()");
+ 
+   for (i = 0; i < bsptcp_nprocs; i++)
+      if (i < bsptcp_pid)
+         {
+         GUARDEQ(readall(bsptcp_dcpipe[0],&msghdr,sizeof(msghdr)),
+            sizeof(msghdr),"readall(dcpipe)");
+         memset(&dsockaddr,0,sizeof(struct sockaddr_in));
+         GUARDEQ(readall(bsptcp_dcpipe[0],&dsockaddr,msghdr.msglen),
+            msghdr.msglen,"readall(dcpipe)");
+         bsptcp_dsock[msghdr.msgspid] = socket(AF_INET,SOCK_STREAM,0);
+         GUARDNN(bsptcp_dsock[msghdr.msgspid],"socket(dsock)");	
+         /* socket must linger on close in presence of data */
+         linger.l_onoff = 1;
+         linger.l_linger = BSPTCP_LINGER_INT;
+         GUARDZ(setsockopt(bsptcp_dsock[msghdr.msgspid],
+            SOL_SOCKET,SO_LINGER,(char *)&linger,sizeof(linger)),
+            "setsockopt(SO_LINGER)");
+
+#ifdef BSPTCP_NODELAY
+         optval = 1;
+         GUARDZ(setsockopt(bsptcp_dsock[msghdr.msgspid],
+           IPPROTO_TCP,TCP_NODELAY,(char *)&optval,sizeof(optval)),
+           "setsockopt(TCP_NODELAY)");
+         optlen = sizeof(optval);
+         GUARDZ(getsockopt(bsptcp_dsock[msghdr.msgspid],
+           IPPROTO_TCP,TCP_NODELAY,(char *)&optval,&optlen),
+               "getsockopt(TCP_NODELAY)");
+         if (!optlen || !optval)
+            {
+            fprintf(stderr,"BSP/TCP Library: TCP_NODELAY not set(A).\n");
+            fprintf(stderr,"BSP/TCP Library: optlen = %d, opval = %d\n",
+               optlen,optval);
+            fflush(stderr); 
+            }
+#endif
+
+#ifdef BSPTCP_SNDBUF
+         optval=bsptcp_send_bufsize;
+         GUARDZ(setsockopt(bsptcp_dsock[msghdr.msgspid],
+	    SOL_SOCKET,SO_SNDBUF,(char *)&optval,sizeof(optval)),
+            "setsockopt(SO_SNDBUF)");
+         optlen=sizeof(optval);
+         GUARDZ(getsockopt(bsptcp_dsock[msghdr.msgspid],
+            SOL_SOCKET,SO_SNDBUF,(char *)&optval,&optlen),
+               "getsockopt(SO_SNDBUF)");       
+         if (!optlen || (optval != bsptcp_send_bufsize)) 
+           {
+           fprintf(stderr,"BSP/TCP Library: SO_SNDBUF not set correctly. "
+               "Expected %d, got %d\n",bsptcp_send_bufsize,optval);
+           }
+#endif
+
+#ifdef BSPTCP_RCVBUF
+         optval=bsptcp_recv_bufsize;
+         GUARDZ(setsockopt(bsptcp_dsock[msghdr.msgspid],
+	    SOL_SOCKET,SO_RCVBUF,(char *)&optval,sizeof(optval)),
+            "setsockopt(SO_RCVBUF)");
+         optlen=sizeof(optval);
+         GUARDZ(getsockopt(bsptcp_dsock[msghdr.msgspid],
+            SOL_SOCKET,SO_RCVBUF,(char *)&optval,&optlen),
+            "getsockopt(SO_RCVBUF)");       
+         if (!optlen || (optval != bsptcp_recv_bufsize)) 
+           {
+           fprintf(stderr,"BSP/TCP Library: SO_RCVBUF not set correctly. "
+                   "Expected %d, got %d\n",bsptcp_recv_bufsize,optval);
+           }
+#endif
+
+#ifdef BSPTCP_SNDLOWAT
+#ifdef SO_SNDLOWAT
+         optval = bsptcp_max_frame;
+         GUARDZ(setsockopt(bsptcp_dsock[msghdr.msgspid],
+	        SOL_SOCKET,SO_SNDLOWAT,(char *)&optval,sizeof(int)),
+                "setsockopt(SO_SNDLOWAT)1");
+         optlen = sizeof(optval);
+         GUARDZ(getsockopt(bsptcp_dsock[msghdr.msgspid],
+	    SOL_SOCKET,SO_SNDLOWAT,(char *)&optval,&optlen),
+            "getsockopt(SO_SNDLOWAT)1");
+         if (!optlen || (optval != bsptcp_max_frame))
+            {
+            fprintf(stderr,"BSP/TCP Library: SNDLOWAT(up) not set correctly. "
+               "Expected %d, got %d\n",bsptcp_max_frame,optval);
+            fprintf(stderr,"BSP/TCP Library: optlen = %d, opval = %d\n",
+               optlen,optval);
+            fflush(stderr); 
+            }
+#endif
+#endif
+
+#ifdef BSPTCP_RCVLOWAT
+#ifdef SO_RCVLOWAT
+            optval = sizeof(bsptcp_msghdr_t);
+            GUARDZ(setsockopt(bsptcp_dsock[msghdr.msgspid],
+	       SOL_SOCKET,SO_RCVLOWAT,(char *)&optval,sizeof(int)),
+               "setsockopt(SO_RCVLOWAT)1");
+            optlen = sizeof(optval);
+            GUARDZ(getsockopt(bsptcp_dsock[msghdr.msgspid],
+	       SOL_SOCKET,SO_RCVLOWAT,(char *)&optval,&optlen),
+               "getsockopt(SO_RCVLOWAT)1");
+            if (!optlen || (optval != sizeof(bsptcp_msghdr_t)))
+               {
+               fprintf(stderr,"BSP/TCP Library: RCVLOWAT not set correctly. "
+                  "Expected %d, got %d\n",
+                  sizeof(bsptcp_msghdr_t),optval);
+               fprintf(stderr,"BSP/TCP Library: optlen = %d, opval = %d\n",
+                  optlen,optval);
+               fflush(stderr); 
+               }
+#endif
+#endif
+         GUARDZ(connect(bsptcp_dsock[msghdr.msgspid],
+            (struct sockaddr *)&dsockaddr,msghdr.msglen),
+            "connect(dsock)");
+	 GUARDNN(fd_flags = fcntl(bsptcp_dsock[msghdr.msgspid],
+				  F_GETFL,0),"fcntl(F_GETFL)");
+	 fd_flags |= O_NONBLOCK; 
+	 GUARDNN(fcntl(bsptcp_dsock[msghdr.msgspid],F_SETFL,fd_flags),
+		 "fcntl(dsock,NONBLOCK)");
+         }
+      else
+         if (i > bsptcp_pid)
+            {
+            msghdr.msgtype = BSPTCP_MSG_CDATA;
+            msghdr.msglen = lnamelen;
+            msghdr.msgspid = bsptcp_pid;
+            msghdr.msgdpid = i;
+            GUARDNN(writeall(bsptcp_ucpipe[1],&msghdr,sizeof(msghdr)),
+               "writeall(ucpipe)");
+            GUARDNN(writeall(bsptcp_ucpipe[1],&lsockaddr,lnamelen),
+               "writeall(ucpipe)");
+            memset(&dsockaddr,0,sizeof(struct sockaddr_in));
+            dnamelen = sizeof(struct sockaddr_in);
+            FD_ZERO(&bsptcp_readfd);
+            FD_ZERO(&bsptcp_exceptfd);
+            FD_SET(lsock,&bsptcp_readfd);
+            FD_SET(lsock,&bsptcp_exceptfd);
+            polltime.tv_sec = BSPTCP_TIMEOUT_LOW;
+            polltime.tv_usec = 0;
+            fd_count = GUARDNN(select(lsock+1,&bsptcp_readfd,NULL,
+               &bsptcp_exceptfd,&polltime),"select(lsock)");
+            GUARDNZ(fd_count,"select(timeout)");
+            GUARDZ(FD_ISSET(lsock,&bsptcp_exceptfd),"select(lsock) exception");
+            bsptcp_dsock[i] =
+               GUARDNN(accept(lsock,(struct sockaddr *)&dsockaddr,&dnamelen),
+               "accept(lsock)");
+            /* socket must linger on close in presence of data */
+            linger.l_onoff = 1;
+            linger.l_linger = BSPTCP_LINGER_INT;
+            GUARDZ(setsockopt(bsptcp_dsock[i],
+               SOL_SOCKET,SO_LINGER,(char *)&linger,sizeof(linger)),
+               "setsockopt(SO_LINGER)");
+
+#ifdef BSPTCP_NODELAY
+            optval = 1;
+            GUARDZ(setsockopt(bsptcp_dsock[i],
+               IPPROTO_TCP,TCP_NODELAY,(char *)&optval,sizeof(optval)),
+               "setsockopt(TCP_NODELAY)");
+            optlen = sizeof(optval);
+            GUARDZ(getsockopt(bsptcp_dsock[i],
+               IPPROTO_TCP,TCP_NODELAY,(char *)&optval,&optlen),
+               "getsockopt(TCP_NODELAY)2");
+            if (!optlen || !optval)
+               {
+               fprintf(stderr,"BSP/TCP Library: TCP_NODELAY not set(B)\n");
+               fprintf(stderr,"BSP/TCP Library: optlen = %d, opval = %d\n",
+                  optlen,optval);
+               fflush(stderr); 
+               }
+#endif
+
+#ifdef BSPTCP_SNDBUF
+            optval=bsptcp_send_bufsize;
+            GUARDZ(setsockopt(bsptcp_dsock[i],
+	       SOL_SOCKET,SO_SNDBUF,(char *)&optval,sizeof(optval)),
+               "setsockopt(SO_SNDBUF)");
+            optlen=sizeof(optval);
+            GUARDZ(getsockopt(bsptcp_dsock[i],
+              SOL_SOCKET,SO_SNDBUF,(char *)&optval,&optlen),
+              "getsockopt(SO_SNDBUF)");       
+            if (!optlen || (optval != bsptcp_send_bufsize)) {
+              fprintf(stderr,"BSP/TCP Library: SO_SNDBUF not set correctly. "
+              "Expected %d, got %d\n",bsptcp_send_bufsize,optval);
+            }
+#endif
+      
+#ifdef BSPTCP_RCVBUF
+            optval=bsptcp_recv_bufsize;
+            GUARDZ(setsockopt(bsptcp_dsock[i],
+	       SOL_SOCKET,SO_RCVBUF,(char *)&optval,sizeof(optval)),
+               "setsockopt(SO_RCVBUF)");
+            optlen=sizeof(optval);
+            GUARDZ(getsockopt(bsptcp_dsock[i],
+              SOL_SOCKET,SO_RCVBUF,(char *)&optval,&optlen),
+               "getsockopt(SO_RCVBUF)");       
+            if (!optlen || (optval != bsptcp_recv_bufsize)) {
+              fprintf(stderr,"BSP/TCP Library: SO_R$CVBUF not set correctly. "
+                      "Expected %d, got %d\n",bsptcp_recv_bufsize,optval);
+            }
+#endif
+
+#ifdef BSPTCP_SNDLOWAT
+#ifdef SO_SNDLOWAT
+            optval = bsptcp_max_frame;
+            GUARDZ(setsockopt(bsptcp_dsock[i],
+               SOL_SOCKET,SO_SNDLOWAT,(char *)&optval,sizeof(int)),
+               "setsockopt(SO_SNDLOWAT)2");
+            optlen = sizeof(optval);
+            GUARDZ(getsockopt(bsptcp_dsock[i],
+               SOL_SOCKET,SO_SNDLOWAT,(char *)&optval,&optlen),
+               "getsockopt(SO_SNDLOWAT)2");
+            if (!optlen || (optval != bsptcp_max_frame))
+               {
+               fprintf(stderr,"BSP/TCP Library:SNDLOWAT(%d) not set correctly."
+                  " Expected %d, got %d\n",
+                 i, bsptcp_max_frame,optval);
+               fprintf(stderr,"BSP/TCP Library: optlen = %d, opval = %d\n",
+                  optlen,optval);
+               fflush(stderr); 
+               }
+#endif
+#endif
+
+#ifdef BSPTCP_RCVLOWAT
+#ifdef SO_RCVLOWAT
+            optval = sizeof(bsptcp_msghdr_t);
+            GUARDZ(setsockopt(bsptcp_dsock[i],
+               SOL_SOCKET,SO_RCVLOWAT,(char *)&optval,sizeof(int)),
+               "setsockopt(SO_RCVLOWAT)2");
+            optlen = sizeof(optval);
+            GUARDZ(getsockopt(bsptcp_dsock[i],
+               SOL_SOCKET,SO_RCVLOWAT,(char *)&optval,&optlen),
+               "getsockopt(SO_RCVLOWAT)2");
+            if (!optlen || (optval != sizeof(bsptcp_msghdr_t)))
+               {
+               fprintf(stderr,"BSP/TCP Library: RCVLOWAT not set correctly."
+                  " Expected %d, got %d\n",
+                  sizeof(bsptcp_msghdr_t),optval);
+               fprintf(stderr,"BSP/TCP Library: optlen = %d, opval = %d\n",
+                  optlen,optval);
+               fflush(stderr); 
+               }
+#endif
+#endif
+	    GUARDNN(fd_flags = fcntl(bsptcp_dsock[i],
+				     F_GETFL,0),"fcntl(F_GETFL)");
+	    fd_flags |= O_NONBLOCK; 
+	    GUARDNN(fcntl(bsptcp_dsock[i],F_SETFL,fd_flags),
+		    "fcntl(dsock,NONBLOCK)");
+            }
+         else
+            bsptcp_dsock[i] = 0; /* no socket to current BSP pid */
+
+   /* all connections should now be setup */
+   close(lsock);
+
+   /* setup for select on data sockets */
+   bsptcp_maxfd = bsptcp_dsock[0];
+   for (i = 1; i < bsptcp_nprocs; i++)
+      if (bsptcp_dsock[i] > bsptcp_maxfd) bsptcp_maxfd = bsptcp_dsock[i];
+
+   bsptcp_active_nprocs=bsptcp_nprocs;
+   *setup_procs = bsptcp_nprocs;   /* number of BSP processors initialised */
+#ifdef BSPTCP_TRACE
+   bsptcp_trace_file=fopen("/tmp/bsptrace","w");
+   GUARDNZP(bsptcp_trace_file,"fopen(unable to open trace file)");
+#endif
+
+   if (getenv("BSPTCP_HOSTNAMES")) {
+     GUARDNZP(yyin = fopen(getenv("BSPTCP_HOSTNAMES"),"r"),
+	      "fopen(.bsptcphostlist)");
+     yyout = stderr;
+     GUARDZ(yyparse(),"yyparse(syntax error in .bsptcphostlist)");
+   } 
+   
+   host = GUARDNZP(gethostbyname(hostname),"host name lookup");
+   for (host_entry = bsptcp_host_list; host_entry; 
+        host_entry = host_entry->link)
+      if (!strcmp(host->h_name,host_entry->name)) host_entry->bspactive=1;
+   for(i=0;i<bsptcp_nprocs;i++) {
+     if (i!=bsptcp_pid) {
+       dnamelen=sizeof(struct sockaddr_in);
+       GUARDNN(getpeername(bsptcp_dsock[i],
+			   (struct sockaddr*)&dsockaddr,&dnamelen),
+	       "getpeername(1)");
+       GUARDEQ(dnamelen,sizeof(struct sockaddr_in),"getpeername(2)");
+       host = GUARDNZP(gethostbyaddr((char*)&dsockaddr.sin_addr.s_addr,
+				     sizeof(dsockaddr.sin_addr.s_addr),
+				     AF_INET),
+		       "gethostbyaddr()");
+       for (host_entry = bsptcp_host_list; host_entry; 
+	    host_entry = host_entry->link)
+	 if (!strcmp(host->h_name,host_entry->name)) host_entry->bspactive=1;
+     }
+   }
+
+   /* Initialise random number generator */
+   bsptcp_srand(bsptcp_pid*1234567891);
+   } /* bsptcp_init */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Auxillary receive function, only to be used internally}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+int bsptcp_recv(int *dsock, bsptcp_msghdr_t *msghdr, char *buf, int size)
+   { 
+   int count;
+   int seg;
+   int wait;
+   char *inmsg;
+   struct timeval polltime;
+   int fd_count;
+
+   count = 0;
+   wait = 0;
+   while (count < sizeof(bsptcp_msghdr_t))
+      {
+      if (wait)
+         {
+         FD_ZERO(&bsptcp_readfd);
+         FD_ZERO(&bsptcp_exceptfd);
+         FD_SET(*dsock,&bsptcp_readfd);
+         FD_SET(*dsock,&bsptcp_exceptfd);
+         polltime.tv_sec = BSPTCP_TIMEOUT_HIGH;
+         polltime.tv_usec = 0;
+         fd_count = GUARDNN(select(bsptcp_maxfd+1,&bsptcp_readfd,NULL,
+            &bsptcp_exceptfd,&polltime),"select()");
+         GUARDNZ(fd_count,"select() (timeout bsptcp_recv 1)");
+         GUARDZ(FD_ISSET(*dsock,&bsptcp_exceptfd),"select(socket exception)");
+         }
+      
+      seg = recv(*dsock,(char *)msghdr+count,
+                 sizeof(bsptcp_msghdr_t)-count,MSG_WAITALL);
+      if (seg > 0)
+         count += seg;
+      else
+         if (seg == 0) 
+            {
+            /* close the socket as the peer process has exited */
+            close(*dsock);
+            *dsock = 0;
+            msghdr->msgtype = BSPTCP_MSG_EXIT;
+            msghdr->msgspid = bsptcp_pid;
+            msghdr->msglen = 0;
+            return 0;
+            }
+         else if (errno != EAGAIN)
+            {
+            perror("BSP/TCP Library: error in recv() call");
+            ABORT_EXIT(2);
+            }
+      wait = 1;
+      }
+
+   if (msghdr->msglen > size)
+      GUARDNZP(inmsg = malloc(msghdr->msglen),"recv(temp)");
+   else
+      inmsg = buf;
+
+   count = 0;
+   while (count < msghdr->msglen)
+      {
+      if (msghdr->msglen >= sizeof(bsptcp_msghdr_t)) 
+	{
+	/* No select for short messages; i.e., messages less than the
+	   receive low water mark (which we set to the header size)
+	 */
+        FD_ZERO(&bsptcp_readfd);
+        FD_ZERO(&bsptcp_exceptfd);
+        FD_SET(*dsock,&bsptcp_readfd);
+        FD_SET(*dsock,&bsptcp_exceptfd);
+        polltime.tv_sec = BSPTCP_TIMEOUT_LOW;
+        polltime.tv_usec = 0;
+        fd_count = GUARDNN(select(bsptcp_maxfd+1,&bsptcp_readfd,NULL,
+           &bsptcp_exceptfd,&polltime),"select()");
+        GUARDNZ(fd_count,"select() (timeout bsptcp_recv 2)");
+        GUARDZ(FD_ISSET(*dsock,&bsptcp_exceptfd),"select(socket exception)");
+        }
+      seg = recv(*dsock,inmsg+count,msghdr->msglen-count,MSG_WAITALL);
+      if (seg >= 0)
+         count += seg;
+      else  if (errno != EAGAIN)
+         {
+         perror("BSP/TCP Library: error in recv() call");
+         ABORT_EXIT(3);
+         }
+      }
+
+   if (msghdr->msglen > size)
+      {
+      memcpy(buf,inmsg,size);
+      free(inmsg);
+      }
+
+   return count;
+   } /* bsptcp_recv */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Send predicate}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+The following function determines if any subsequent non-blocking send
+operations to process \verb!pid! will succeed. If the predicate
+returns false, then the send \emph{should not be posted}.
+\begin{code}
+int bsptcp_okto_send(int pid)
+   {
+   int fd_count;
+   struct timeval polltime;
+
+   if (!bsptcp_dsock[pid]) {
+     fprintf(stderr,"BSP/TCP Library: bsptcp_okto_send, "
+                    "socket has been closed\n");
+     return 0;  
+   }
+
+   FD_ZERO(&bsptcp_writefd);
+   FD_ZERO(&bsptcp_exceptfd);
+
+   FD_SET(bsptcp_dsock[pid],&bsptcp_writefd);
+   FD_SET(bsptcp_dsock[pid],&bsptcp_exceptfd);
+
+   polltime.tv_sec = 0;
+   polltime.tv_usec= 0;
+
+   fd_count = select(bsptcp_maxfd+1,NULL,
+      &bsptcp_writefd,&bsptcp_exceptfd,&polltime);
+
+   GUARDZ(FD_ISSET(bsptcp_dsock[pid],&bsptcp_exceptfd),
+      "select(socket exception)");
+   GUARDNN(fd_count,"select(bsptcp_okto_send)");
+
+   return fd_count;
+   } /* bsptcp_okto_send */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Non-blocking send}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+A process performs a non-blocking send to a remote process, using a
+time slotting algorithm to ensure there is no contention on the
+Ethernet. See the Hill, Donaldson, Skillicorn paper ``\emph{Quality
+versus peak communication performance: from NOWS to the Cray
+T3E.}''. The function returns a boolean that determines if the
+initiation of the send was successful. If false is returned, then the
+caller \emph{must} perform a receive to drain the network. If this is
+not performed, then the protocol will deadlock.
+\begin{code}
+int bsptcp_nonblock_send(char* message,int size,int to,int type,int iscontrol)
+   {
+   bsptcp_msghdr_t msghdr;
+   int nbytes,delta,slotsize;
+   static struct timeval polltime, start_cycle={0,0}, time_now;
+   int fd_count;
+#ifdef BSPTCP_TRACE_SLEEP
+   static FILE *tracefile;
+   char tracefname[80];
+   static int zero_time, enter_time;
+   struct timeval enter_send, exit_sleep, exit_send;
+#endif
+   static int old_slotsize=1400, old_active_nprocs=1;
+
+   bsptcp_skipwaitsend=0;
+   GUARDNZ(to<bsptcp_nprocs,"bsptcp_nonblock_send not existent process");
+   if (!bsptcp_okto_send(to)) return 0;
+
+   msghdr.msgtype = type;
+   msghdr.msglen = size;
+   msghdr.msgspid = bsptcp_pid;
+   msghdr.msgdpid = to;
+#ifdef BSPTCP_TRACE
+   msghdr.msgid   = bsptcp_trace++;
+#endif
+   memcpy(bsptcp_send_buff,&msghdr,sizeof(msghdr));
+   memcpy(bsptcp_send_buff+sizeof(msghdr),message,size);
+
+   if (bsptcp_slot_size_usecs) {
+     delta=0;
+     if (iscontrol)
+       slotsize=bsptcp_slot_size_usecs*
+	        (size+sizeof(bsptcp_msghdr_t)+
+		 MAC_HEADER_SIZE+ IP_HEADER_SIZE+ TCP_HEADER_SIZE)/
+	        bsptcp_max_frame;
+     else
+       slotsize=bsptcp_slot_size_usecs;
+     gettimeofday(&time_now,NULL);
+#ifdef BSPTCP_TRACE_SLEEP
+     enter_send=time_now;
+     enter_time=(time_now.tv_sec*1000000)+time_now.tv_usec;
+#endif
+     if (!start_cycle.tv_sec) {
+       start_cycle=time_now;
+#ifdef BSPTCP_TRACE_SLEEP
+       zero_time =(time_now.tv_sec*1000000)+time_now.tv_usec;
+       sprintf(tracefname,"sleeptrace.%d",bsptcp_pid);
+       GUARDNZP(tracefile=fopen(tracefname,"w"),"fopen(tracefile)");  
+#endif     
+     } else {
+        delta=(start_cycle.tv_sec-time_now.tv_sec)*1000000 + 
+               start_cycle.tv_usec - time_now.tv_usec;
+     }
+     if ((delta+(old_active_nprocs*old_slotsize))<0) {
+       /* If the send has skipped a couple of cycles, then reset the
+	  cycle to be now */
+       start_cycle=time_now;
+       delta=0;
+     } 
+     /* Move to the next cycle */
+     start_cycle.tv_usec+=old_active_nprocs*old_slotsize;
+     if (bsptcp_active_nprocs)
+       delta+=((bsptcp_rand()>>4)%bsptcp_active_nprocs)*slotsize;
+     old_slotsize      = slotsize;
+     old_active_nprocs = bsptcp_active_nprocs;
+     bspnow_usecsleep(delta,&time_now);
+#ifdef BSPTCP_TRACE_SLEEP
+     exit_sleep=time_now;
+#endif
+   }
+   nbytes = send(bsptcp_dsock[to],bsptcp_send_buff,
+		 sizeof(msghdr)+size,0);
+#ifdef BSPTCP_TRACE_SLEEP
+   if (bsptcp_slot_size_usecs) {
+     gettimeofday(&exit_send,NULL);
+     fprintf(tracefile,
+	     "%4d %d %8d slot no=%5d(%4d) wait=%d(%d) send=%d(%d;%d)\n",
+	     slotsize,bsptcp_active_nprocs,
+	     enter_time-zero_time,
+	     (enter_time+delta-zero_time)/(bsptcp_active_nprocs*1200),
+	     (enter_time+delta-zero_time)/(bsptcp_active_nprocs*slotsize),
+	     ( (exit_sleep.tv_sec-enter_send.tv_sec)*1000000 + 
+               exit_sleep.tv_usec - enter_send.tv_usec),
+	     delta,
+	     ( (exit_send.tv_sec-exit_sleep.tv_sec)*1000000 + 
+               exit_send.tv_usec - exit_sleep.tv_usec),
+	     size,type); 
+   }    
+#endif
+   if (nbytes>0) {
+     GUARDEQ(nbytes,sizeof(msghdr)+size,
+	     "send(nonblock) SO_SNDLOWAT isn't working");
+#ifdef BSPTCP_TRACE
+     fprintf(bsptcp_trace_file,"On %d send(%d,%d,%d) id=%d\n",
+             bsptcp_pid,to,type,size,msghdr.msgid);
+     fflush(bsptcp_trace_file);
+#endif
+     return 1;
+   } else {
+     GUARDNZ((nbytes< 0) && (errno==EAGAIN),"send(nonblock)");
+     return 0;
+   }
+   } /* bsptcp_nonblock_send */
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Blocking receive}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsptcp_block_recv(char* msg,int size,int *from,int *type,int* nbytes)
+   {
+   int i;
+   bsptcp_msghdr_t msghdr;
+   int fd_count;
+   char *inmsg;
+   int selected;
+   int gotmsg;
+   struct timeval polltime;
+
+   gotmsg = 0;
+
+   while (!gotmsg)
+      {  
+      FD_ZERO(&bsptcp_readfd);
+      FD_ZERO(&bsptcp_exceptfd);
+      for (i = 0; i < bsptcp_nprocs; i++)
+         if (i != bsptcp_pid) 
+            if (bsptcp_dsock[i])
+               {
+               FD_SET(bsptcp_dsock[i],&bsptcp_exceptfd);
+               if (*from < 0 || *from == i) 
+                  FD_SET(bsptcp_dsock[i],&bsptcp_readfd);
+               }
+   
+      polltime.tv_sec = BSPTCP_TIMEOUT_HIGH;
+      polltime.tv_usec = 0;
+      fd_count = GUARDNN(select(bsptcp_maxfd+1,&bsptcp_readfd,
+                    NULL,&bsptcp_exceptfd,&polltime),"select()");
+      GUARDNZ(fd_count,"select() (timeout bsptcp_block_recv)");
+   
+      for (i = 0; i < bsptcp_nprocs && fd_count; i++)
+         if (bsptcp_dsock[i] && FD_ISSET(bsptcp_dsock[i],&bsptcp_exceptfd))
+            {
+            fprintf(stderr,"BSP/TCP Library: bsptcp_block_recv() error.\n");
+            bsptcp_messg_stopall();
+            ABORT_EXIT(4);
+            }
+   
+      selected = *from;
+      if (*from < 0)
+        for (i = 0; i < bsptcp_nprocs && fd_count; i++)
+           if (FD_ISSET(bsptcp_dsock[i],&bsptcp_readfd))
+              selected = i;
+      
+      bsptcp_recv(&bsptcp_dsock[selected],&msghdr,msg,size);
+      if (*from >= 0)
+         gotmsg = 1;
+      else
+         if (msghdr.msgtype != BSPTCP_MSG_EXIT)
+            gotmsg = 1;
+      } /* while looking for a message */
+  
+   *from = selected; 
+   if (msghdr.msglen > size)
+      *nbytes = size;
+   else
+      *nbytes = msghdr.msglen;
+      
+   *type = msghdr.msgtype;
+
+   if (*type == bsptcp_last_probe_type) 
+      bsptcp_candidate[selected] = 1;
+   else
+      bsptcp_last_probe_type = -1;
+
+#ifdef BSPTCP_TRACE
+   fprintf(bsptcp_trace_file,"On %d recv(%d,%d,%d) id=%d\n",
+           bsptcp_pid,*from,*type,*nbytes,msghdr.msgid);
+   fflush(bsptcp_trace_file);
+#endif
+   } /* bsptcp_block_recv */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Wait for any posted sends to drain from the sending process}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsptcp_wait_sends(void)
+   {
+   int i;
+   int fd_count;
+   struct timeval polltime;
+
+   if (!bsptcp_skipwaitsend)
+     {
+      for (i = 0; i < bsptcp_nprocs; i++)
+         if (i != bsptcp_pid) 
+            if (bsptcp_dsock[i])
+               {
+               FD_ZERO(&bsptcp_writefd);
+               FD_ZERO(&bsptcp_exceptfd);
+               FD_SET(bsptcp_dsock[i],&bsptcp_writefd);
+               FD_SET(bsptcp_dsock[i],&bsptcp_exceptfd);
+               polltime.tv_sec = BSPTCP_TIMEOUT_HIGH;
+               polltime.tv_usec = 0;
+
+               fd_count = GUARDNN(select(bsptcp_maxfd+1,NULL,&bsptcp_writefd,
+                                  &bsptcp_exceptfd,&polltime),"select()");
+               GUARDNZ(fd_count,"select() (timout bsptcp_wait_sends)");
+               }      
+      bsptcp_skipwaitsend=1;
+      }
+   } /* bsptcp_wait_sends */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Predicate to check if a message has come into a process}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+int bsptcp_probe(int *pid, int* type, int block, int usec_wait)
+   {
+   int i;
+   bsptcp_msghdr_t msghdr;
+   int fd_count;
+   struct timeval polltime;
+   int rc;
+
+   if (block ||
+         *type != bsptcp_last_probe_type || bsptcp_last_probe_type < 0) 
+      {
+      bsptcp_last_probe_type = *type;
+      for (i = 0; i < bsptcp_nprocs; i++)
+         if (bsptcp_dsock[i])
+            bsptcp_candidate[i] = 1;
+         else
+            bsptcp_candidate[i] = 0; 
+      }
+
+   do {
+     if (usec_wait > BSPTCP_MAX_BACKOFF) 
+       usec_wait = BSPTCP_MAX_BACKOFF;
+
+     FD_ZERO(&bsptcp_readfd);
+     FD_ZERO(&bsptcp_exceptfd);
+     for (i = 0; i < bsptcp_nprocs; i++)
+       if (i != bsptcp_pid) 
+         {
+	   if (*pid < 0 || *pid == i) 
+	     if (bsptcp_candidate[i]) 
+               {
+		 FD_SET(bsptcp_dsock[i],&bsptcp_readfd);
+		 FD_SET(bsptcp_dsock[i],&bsptcp_exceptfd);
+               }
+         }
+     if (block)
+       polltime.tv_sec = BSPTCP_TIMEOUT_HIGH; 
+     else {
+       polltime.tv_sec = usec_wait/1000000;
+       polltime.tv_usec= usec_wait%1000000;
+     }
+
+     fd_count = select(bsptcp_maxfd+1,
+		       &bsptcp_readfd,NULL,&bsptcp_exceptfd,&polltime);
+     GUARDNN(fd_count,"select()");
+     GUARDZ(block && !fd_count,"select(blocking probe timeout)");
+     for (i = 0; i < bsptcp_nprocs && fd_count; i++)
+       if (bsptcp_dsock[i])
+         GUARDZ(FD_ISSET(bsptcp_dsock[i],&bsptcp_exceptfd),
+		"select(socket exception)");
+
+     if (!fd_count) return 0;
+
+     if (*pid < 0) 
+       {
+	 for (i = 0; i < bsptcp_nprocs; i++)
+	   if (FD_ISSET(bsptcp_dsock[i],&bsptcp_readfd))
+	     {
+	       rc = recv(bsptcp_dsock[i],(char*)&msghdr,
+			 sizeof(msghdr),MSG_PEEK);
+               
+	       if ((rc < 0 && errno == EAGAIN) ||
+                   (rc < sizeof(msghdr) && errno == 0))
+                 {
+		   /* Do nothing */
+                 }
+               else 
+                 {
+                 if (msghdr.msgtype == *type) 
+	           {
+		   *pid = i;
+		   return 1;
+		   }
+                 else 
+                   {
+                    /* this socket is no longer a canidate for probing */
+#ifdef bsptcp_trace_file
+                    fprintf(bsptcp_trace_file,
+			    "On %d probe skipping %d from %d id=%d\n",
+			    bsptcp_pid,msghdr.msgtype,i,msghdr.msgid);
+		    fflush(bsptcp_trace_file);
+#endif
+                    bsptcp_candidate[i] = 0;
+                  }
+	        }
+	     }
+       }
+     else
+        {
+        rc = recv(bsptcp_dsock[*pid],(char *)&msghdr,sizeof(msghdr),MSG_PEEK);
+        if ((rc < 0 && errno == EAGAIN) ||
+            (rc < sizeof(msghdr) && errno == 0)) 
+          if (!block) return 0;
+          else
+            {
+	    /* Do nothing */
+            }
+        else
+          {
+          GUARDEQ(rc,sizeof(msghdr),
+	          "recv(dsock2: low water mark not working)");
+          if (msghdr.msgtype == *type) return 1;
+          /* this socket is no longer a canidate for probing */
+          bsptcp_candidate[*pid] = 0;
+	  }
+        } 
+
+   } while(block);
+   return 0;
+   } /* bsptcp_probe */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Abort: one process stops all}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsptcp_messg_stopall(void)
+   {
+   bsptcp_msghdr_t msghdr;
+   int sig;
+ 
+   sig = 15; 
+   msghdr.msgtype = BSPTCP_MSG_SIGNAL;
+   msghdr.msglen = sizeof(sig);
+   msghdr.msgspid = bsptcp_pid;
+   msghdr.msgdpid = 0;
+   GUARDNN(writeall(bsptcp_ucpipe[1],&msghdr,sizeof(msghdr)),
+	   "writeall(ucpipe[1])");
+   GUARDNN(writeall(bsptcp_ucpipe[1],&sig,sizeof(sig)),
+	   "writeall(ucpipe[1])");
+   readall(bsptcp_dcpipe[0],&msghdr,sizeof(msghdr));
+   exit(1);
+   } /* bsptcp_messg_stopall */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Tidy exit from the message passing system}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsptcp_messg_exit(int status)
+   {
+   int i;
+   bsptcp_msghdr_t msghdr;
+
+#ifdef DEBUG
+   fprintf(stderr,"BSP/TCP Library: bsptcp_messg_exit(%d)\n",status);
+#endif
+   /* flush stdout and stderr buffers */
+   fflush(stdout);
+   fflush(stderr);
+
+   /* close all data sockets */
+   msghdr.msglen = 0;
+   for (i = 0; i < bsptcp_nprocs; i++)
+      if (bsptcp_dsock[i])
+         {
+         close(bsptcp_dsock[i]); 
+         bsptcp_dsock[i] = 0;
+         }
+
+   /* inform master and/or slave about exit */ 
+   msghdr.msgtype = BSPTCP_MSG_EXIT;
+   msghdr.msgspid = bsptcp_pid;
+   msghdr.msgdpid = 0;
+   msghdr.msglen = sizeof(int);
+   GUARDNN(writeall(bsptcp_ucpipe[1],&msghdr,sizeof(msghdr)),
+	   "writeall(ucpipe[1])");
+   GUARDNN(writeall(bsptcp_ucpipe[1],&status,sizeof(int)),
+	   "writeall(ucpipe[1])");
+   readall(bsptcp_dcpipe[0],&msghdr,sizeof(msghdr));
+   close(bsptcp_dcpipe[0]);
+   close(bsptcp_ucpipe[1]);
+   } /* bsptcp_messg_exit */
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Random number generator}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+#define RAND_MULT 1103515245
+#define RAND_ADD 12345
+#define RAND_MASK (0x7FFFFFFF)
+
+void bsptcp_srand(int seed) {
+   rand_a = 1;
+   rand_b = 0;
+   rand_x = (rand_a   *seed   + rand_b  ) & RAND_MASK;
+   rand_a = (RAND_MULT*rand_a           ) & RAND_MASK;
+   rand_b = (RAND_MULT*rand_b + RAND_ADD) & RAND_MASK;
+}
+
+int bsptcp_rand() {
+   rand_last = rand_x;
+   rand_x    = (rand_a*rand_x + rand_b) & RAND_MASK;
+   return rand_last;
+}
+
+\end{code}

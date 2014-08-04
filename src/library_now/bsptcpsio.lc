@@ -1,0 +1,437 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1997 Stephen Donaldson                             %%
+%%                      &  The University of Oxford                      %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%%%
+\chapter{Auxillary functions}
+%%%%%%%%%%%%%%%%%%%%%
+
+This file contains socket read and write functions sendall() and
+recvall() that guard the socket send() and recv() calls, and file 
+descriptor read and write functions readall() and writeall() that 
+guard the file descriptor read() and write() calls.
+
+For each attempt at sending,  receiving, reading or writing data, an
+attempt count is maintained and before a call is made on subsequent
+attempts, the process sleeps for an interval with duration equal
+to the attempt number in seconds.
+\begin{code}
+#include <unistd.h>
+#include <stdio.h>
+#include <errno.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#if defined(RS6000) || defined(SP2)
+#include <sys/select.h>
+#endif
+
+#include "../library_now/bspnowdefs.h"
+
+char           bsp_my_hostname[BSPTCP_STR_LEN];
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{setenv}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Some systems don't have setenv():
+\begin{code}
+#ifdef BSPTCP_SETENV
+int setenv(char *name, char *value, int set)
+   {
+   char envstring[BSPTCP_BUFF_LEN];
+   char *usestr;
+
+   if (!set)
+      if (getenv(name)) 
+         return 0;
+
+   sprintf(envstring,"%s=%s",name,value);
+   usestr = (char*) malloc(strlen(envstring)+1);
+   strcpy(usestr,envstring);
+   return putenv(usestr);
+   }
+#endif
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{sendall}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Function sendall() behaves like the socket fucntion send() (which
+it uses) except that partial messages are not sent. When send()
+does a partial write, the function redrives the send with the
+residual data. If a timeout or error occurs then the send() return
+value is returned to the caller (unless errno == EAGAIN or EINTR,
+in which case the send() function is called again).
+\begin{code}
+int sendall(int s, char *buf, int len, int flags)
+   {
+   int count;            /* residual data amount */
+   int seg;              /* segment of data sent */
+   int wait;             /* indicates partial send() and waiting
+                            to send more data */
+   fd_set writefd;       /* wait or timeout for ready fd */
+   fd_set exceptfd;      /* wait or timeout for exception on fd */
+   int fd_count;         /* number of fds ready after select() */
+   struct timeval polltime;     /* for setting select() timeout */
+   int attempts;         /* limit number of consecutive retries */
+
+   if (len == 0) return 0;
+
+   count = 0;
+   wait = 0;
+   attempts = 0;
+   while (count < len && attempts < BSPTCP_MAX_RETRIES)
+      {
+      if (attempts) sleep(attempts);
+      attempts++;
+      if (wait)
+         {
+         FD_ZERO(&writefd);
+         FD_ZERO(&exceptfd);
+         FD_SET(s,&writefd);
+         FD_SET(s,&exceptfd);
+         polltime.tv_sec = BSPTCP_TIMEOUT_LOW;
+         polltime.tv_usec = 0;
+         fd_count = select(s+1,NULL,&writefd,&exceptfd,&polltime);
+         if (fd_count < 0 && (errno == EAGAIN || errno == EINTR))
+            continue; /* try again */
+         if (!fd_count) return -BSPTCP_TIMEOUT_LOW;
+         if (FD_ISSET(s,&exceptfd))
+            {
+            fprintf(stderr,
+		    "BSP/NOW(%s):Exception should never arise on socket.\n",
+		    bsp_my_hostname);
+            exit(16);
+            }
+         }
+
+      seg = send(s,buf+count,len-count,flags);
+
+      wait = 1;  /* wait for fd to be ready next time */
+      if (seg > 0) count += seg;
+      else
+	 {
+         if (seg < 0 && errno != EAGAIN && errno != EINTR)
+            return seg;
+	 else
+	   attempts++;
+	 }
+      }
+
+   if (attempts == BSPTCP_MAX_RETRIES)
+      {
+      fprintf(stderr,"BSP/NOW(%s): Too many retries (%d) in sendall().\n",
+	      bsp_my_hostname,attempts);
+      return (-1);
+      }
+
+   if (seg < 0) return seg;
+   else return count;
+
+   }
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{recvall}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Function recvall() behaves like the socket fucntion recv() (which
+it uses) except that partial messages are not returned. When recv()
+returns a partial read, the function redrives the recv for the
+residual data. If a timeout or error occurs then the recv() return
+value is returned to the caller (unless errno == EAGAIN or EINTR,
+in which case the recv() function is called again).
+\begin{code}
+int recvall(int s, char *buf, int len, int flags)
+   {
+   int count;            /* residual data amount */
+   int seg;              /* segment of data received */
+   int wait;             /* indicates partial recv() and waiting for
+                            new data */
+   fd_set readfd;        /* wait or timeout for ready fd */
+   fd_set exceptfd;      /* wait or timeout for exception on fd */
+   int fd_count;         /* number of fds ready after select() */
+   struct timeval polltime;     /* for setting select() timeout */
+   int attempts;         /* limit number of consecutive retries */
+
+   if (len == 0) return 0;
+
+   count = 0;
+   wait = 0;
+   attempts = 0;
+   while (count < len && attempts < BSPTCP_MAX_RETRIES)
+      {
+      if (attempts) sleep(attempts);
+      if (wait)
+         {
+         FD_ZERO(&readfd);
+         FD_ZERO(&exceptfd);
+         FD_SET(s,&readfd);
+         FD_SET(s,&exceptfd);
+         polltime.tv_sec = BSPTCP_TIMEOUT_LOW;
+         polltime.tv_usec = 0;
+         fd_count = select(s+1,&readfd,NULL,&exceptfd,&polltime);
+         if (fd_count < 0 && (errno == EAGAIN || errno == EINTR))
+            continue; /* try again */
+         if (!fd_count) return -BSPTCP_TIMEOUT_LOW;
+         if (FD_ISSET(s,&exceptfd))
+            {
+            fprintf(stderr,
+		    "BSP/NOW(%s): Exception should never arise on socket.\n",
+		    bsp_my_hostname);
+            exit(16);
+            }
+         }
+
+      seg = recv(s,buf+count,len-count,flags);
+
+      wait = 1;  /* wait for fd to be ready next time */
+      if (seg > 0) count += seg;
+      else
+	 {
+         if (seg < 0 && errno != EAGAIN && errno != EINTR)
+            return seg;
+	 else
+	   attempts++;
+	 }
+      }
+
+   if (attempts == BSPTCP_MAX_RETRIES)
+      {
+      fprintf(stderr,"BSP/NOW(%s): Too many retries (%d) in recvall().\n",
+	      bsp_my_hostname,attempts);
+      return (-1);
+      }
+
+   if (seg < 0) return seg;
+   else return count;
+  
+   }
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{readall}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Function readall() behaves like the file descriptor fucntion read() (which
+it uses) except that partial messages are not returned. When read()
+returns a partial read, the function redrives the read for the
+residual data. If a timeout or error occurs then the read() return
+value is returned to the caller (unless errno == EAGAIN or EINTR,
+in which case the read() function is called again).
+\begin{code}
+int readall(int fd, char *buf, int len)
+   {
+   int count;            /* residual data amount */
+   int seg;              /* segment of data received */
+   int wait;             /* indicates partial read() and waiting for
+                            new data */
+   fd_set readfd;        /* wait or timeout for ready fd */
+   fd_set exceptfd;      /* wait or timeout for exception on fd */
+   int fd_count;         /* number of fds ready after select() */
+   struct timeval polltime;     /* for setting select() timeout */
+   int attempts;         /* limit number of consecutive retries */
+
+   if (len == 0) return 0;
+
+   count = 0;
+   wait = 0;
+   attempts = 0;
+   while (count < len && attempts < BSPTCP_MAX_RETRIES)
+      {
+      if (attempts) sleep(attempts);
+      if (wait)
+         {
+         FD_ZERO(&readfd);
+         FD_ZERO(&exceptfd);
+         FD_SET(fd,&readfd);
+         FD_SET(fd,&exceptfd);
+         polltime.tv_sec = BSPTCP_TIMEOUT_LOW;
+         polltime.tv_usec = 0;
+         fd_count = select(fd+1,&readfd,NULL,&exceptfd,&polltime);
+         if (fd_count < 0 && (errno == EAGAIN || errno == EINTR))
+            continue; /* try again */
+         if (!fd_count) return -BSPTCP_TIMEOUT_LOW;
+         if (FD_ISSET(fd,&exceptfd))
+            {
+            fprintf(stderr,
+               "BSP/NOW(%s): Exception should never arise on fd.\n",
+                    bsp_my_hostname);
+            exit(16);
+            }
+         }
+
+      seg = read(fd,buf+count,len-count);
+
+      wait = 1;  /* wait for fd to be ready next time */
+      if (seg > 0) count += seg;
+      else
+         {
+         if (seg < 0 && errno != EAGAIN && errno != EINTR)
+            return seg;
+         else
+           attempts++;
+         }
+      }
+
+   if (attempts == BSPTCP_MAX_RETRIES)
+      {
+      fprintf(stderr,"BSP/NOW(%s): Too many retries (%d) in readall().\n",
+              bsp_my_hostname,attempts);
+      return (-1);
+      }
+
+   if (seg < 0) return seg;
+   else return count;
+
+   }
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{writeall}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Function writeall() behaves like the file descriptor fucntion write() (which
+it uses) except that partial buffers are not written. When write()
+does a partial write, the function redrives the write with the
+residual data. If a timeout or error occurs then the write() return
+value is returned to the caller (unless errno == EAGAIN or EINTR,
+in which case the write() function is called again).
+\begin{code}
+int writeall(int fd, const void *buf, int len)
+   {
+   int count;            /* residual data amount */
+   int seg;              /* segment of data sent */
+   int wait;             /* indicates partial write() and waiting
+                            to write more data */
+   fd_set writefd;       /* wait or timeout for ready fd */
+   fd_set exceptfd;      /* wait or timeout for exception on fd */
+   int fd_count;         /* number of fds ready after select() */
+   struct timeval polltime;     /* for setting select() timeout */
+   int attempts;         /* limit number of consecutive retries */
+
+   if (len == 0) return 0;
+
+   count = 0;
+   wait = 0;
+   attempts = 0;
+   while (count < len && attempts < BSPTCP_MAX_RETRIES)
+      {
+      if (attempts) sleep(attempts);
+      attempts++;
+      if (wait)
+         {
+         FD_ZERO(&writefd);
+         FD_ZERO(&exceptfd);
+         FD_SET(fd,&writefd);
+         FD_SET(fd,&exceptfd);
+         polltime.tv_sec = BSPTCP_TIMEOUT_LOW;
+         polltime.tv_usec = 0;
+         fd_count = select(fd+1,NULL,&writefd,&exceptfd,&polltime);
+         if (fd_count < 0 && (errno == EAGAIN || errno == EINTR))
+            continue; /* try again */
+         if (!fd_count) return -BSPTCP_TIMEOUT_LOW;
+         if (FD_ISSET(fd,&exceptfd))
+            {
+            fprintf(stderr,
+                    "BSP/NOW(%s):Exception should never arise on fd.\n",
+                    bsp_my_hostname);
+            exit(16);
+            }
+         }
+
+      seg = write(fd,((char*)buf)+count,len-count);
+
+      wait = 1;  /* wait for fd to be ready next time */
+      if (seg > 0) count += seg;
+      else
+         {
+         if (seg < 0 && errno != EAGAIN && errno != EINTR)
+            return seg;
+         else
+           attempts++;
+         }
+      }
+
+   if (attempts == BSPTCP_MAX_RETRIES)
+      {
+      fprintf(stderr,"BSP/NOW(%s): Too many retries (%d) in writeall().\n",
+              bsp_my_hostname,attempts);
+      return (-1);
+      }
+
+   if (seg < 0) return seg;
+   else return count;
+
+   }
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{$\mu s$ based waiting function}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+The following function waits for a desired number of $\mu s$. For
+small values of \texttt{usec}, the algorithm will busily wait to
+ensure that the function is accuarate. \verb!delta/i! will represent
+the time for a call to \verb!gettimeofday!. We subtract 1.5 times the
+\verb!gettimeofday! call so that we (1) ignore the time of the initial
+\verb!gettimeofday!; and (2) move the error to evenly straddle the end
+of the interval.
+\begin{code}
+void bspnow_usecsleep(int usecs, struct timeval *now_tv) {
+   int i,sleep_usec,delta;
+   struct timeval start_tv;
+#ifndef  LIBC_HAS_USLEEP
+   struct timeval select_tv;
+#endif
+
+   if (usecs > 0) {
+      start_tv=*now_tv;
+      delta=0;
+      while (delta < (usecs-(2*LIBC_SLEEP_RESOLUTION))) {
+#ifdef LIBC_HAS_USLEEP
+         usleep(LIBC_SLEEP_RESOLUTION);
+#else
+         select_tv.tv_usec = LIBC_SLEEP_RESOLUTION;
+         select_tv.tv_sec  = 0;
+         select(0,NULL,NULL,NULL,&select_tv);
+#endif
+         gettimeofday(now_tv,NULL);
+         delta = ( ((long int) now_tv->tv_usec)-
+                   ((long int) start_tv.tv_usec)) +
+                 ( ((long int) now_tv->tv_sec)-
+                   ((long int) start_tv.tv_sec))*1000000;
+      }
+      start_tv = *now_tv;
+      usecs   -= delta;
+      delta=0;
+      i=1;
+      while (delta < (usecs - (3*delta/(2*i)))) {
+        gettimeofday(now_tv,NULL);
+        delta = ( ((long int) now_tv->tv_usec)-
+                   ((long int) start_tv.tv_usec)) +
+                 ( ((long int) now_tv->tv_sec)-
+                   ((long int) start_tv.tv_sec))*1000000;
+        i++;
+      }
+   }
+} /* bspnow_usecsleep */
+
+\end{code}

@@ -1,0 +1,938 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsp_lib_shmem.lh,v 1.5 1996/06/13 10:17:52 jonh Exp jonh $
+% $Log: bsp_lib_shmem.lh,v $
+% Revision 1.5  1996/06/13  10:17:52  jonh
+% Preliminary BSPlib proposal
+%
+% Revision 1.4  1996/02/13  13:44:05  jonh
+% Making puts_to_me a two dimensional array to eliminate the need for
+% locks when accessing it..
+%
+% Revision 1.3  1995/11/24  11:36:32  jonh
+% Adding Sys V shared memory
+%
+% Revision 1.2  1995/10/16  08:22:15  jonh
+% Adding double buffering
+%
+% Revision 1.1  1995/08/31  16:38:34  jonh
+% Initial revision
+%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Header file for shared memory architectures}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+#define _BSD_SIGNALS
+#include <signal.h>
+#ifndef WIN32
+#include <unistd.h>
+#endif
+
+#ifdef WIN32
+#include "bsp_nt_shmem.h"
+#endif
+
+#ifdef SHMEM_SGI
+#include <sys/schedctl.h>
+#include <sys/prctl.h>
+#include <ulocks.h>
+#endif
+
+#ifdef SGIORIGIN
+#include <sys/pmo.h>
+#include <fetchop.h>
+#endif
+
+#ifdef SHMEM_SYSV
+#include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/sem.h>
+#include <errno.h>
+#endif
+\end{code}
+
+As the implementation of locks and barriers becomes embarrassingly
+poor when the number of processes is larger than the number of
+processors, a limit is put on the number of processors the user is
+allowed to have. \texttt{BSP\_MAX\_PROCS} is the largest number of
+processors that will be given to a BSP user. 
+
+\begin{code}
+/* This must be a constant */
+#ifdef SHMEM_NULL
+#define BSP_MAX_PROCS 1
+#else
+#if !defined(BSP_ONLINE_PROCS) ||  (BSP_ONLINE_PROCS==1)
+#define BSP_MAX_PROCS 16
+#else
+#define BSP_MAX_PROCS BSP_ONLINE_PROCS
+#endif
+#endif
+\end{code}
+
+The Cache line size is in bytes.On the Power Challenge, the primary
+cache is 16KBytes direct with a 32byte line size.  The secondary cache
+is 4MBytes 4-way set associate with a 512bytes line size. The
+following variable determines the size of a primary cache line.
+
+\begin{code}
+#define CACHE_LINE_SIZE 32
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Waiting routine}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+The following macros provide a simple exponential back-off waiting
+routine. 
+\begin{code}
+#ifdef TURBO
+#define release_processor()  /*donothing*/
+#define reset_short_snooze() /*donothing*/
+#define short_snooze()       /*donothing*/
+#else
+
+#if defined(SGICHALL64) || defined(SGIORIGIN)
+#define release_processor() sginap(0L) 
+#else
+#ifdef LIBC_HAS_USLEEP
+#define release_processor() usleep(0)
+#else
+#ifndef WIN32
+#define release_processor() sleep(0)
+#else
+#define release_processor() nt_release_processor()
+#endif 
+#endif 
+#endif
+
+#if defined(SGICHALL64) || defined(SGIORIGIN)
+#define BSP_SNOOZE_TILL_SLEEP 512
+#define BSP_SNOOZE_MIN        32
+#else
+#define BSP_SNOOZE_TILL_SLEEP 32768
+#define BSP_SNOOZE_MIN        1024
+#endif
+
+#define reset_short_snooze()                \
+  do {                                      \
+    _shmem_sleep    =BSP_SNOOZE_TILL_SLEEP; \
+    _shmem_expsleep =BSP_SNOOZE_TILL_SLEEP; \
+  } while(0)
+ 
+#define short_snooze()                     \
+  do {                                     \
+    if (!(--_shmem_sleep)) {               \
+      if (_shmem_expsleep>BSP_SNOOZE_MIN)  \
+        _shmem_expsleep >>= 1;             \
+      _shmem_sleep = _shmem_expsleep;      \
+      release_processor();                 \
+    }                                      \
+  } while(0)
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Semantics of fork}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+#ifdef WIN32
+#define shmem_execlike_fork_init(maxprocs)                  \
+   do {                                                     \
+     bsp_set_firstprocess();				    \
+     bsp_set_nprocs(maxprocs);                              \
+     nt_bsp_handle_array= calloc(bsp_nprocs(), SIZEOF(HANDLE)); \
+   } while(0)
+#else
+
+#define shmem_execlike_fork_init(maxprocs) /* do nothing */
+#endif
+\end{code}
+
+The following predicate can be used to guard pieces of code which
+should be only erxecuted by process zero, \emph{when the semantics of
+fork are exec-like}.
+\begin{code}
+#ifdef WIN32
+#define shmem_execlike_fork() bsp_firstprocess()
+#else
+#define shmem_execlike_fork() 1
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Semaphore data-type}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Definition of a semaphore, with P, V, test, and conditional P
+operations. As a reminder:
+\begin{description}
+\item[P(roberen)] decrements a semaphore if it is non-zero. If
+         it is zero, then the process is suspended until it becomes
+         non-zero.
+\item[V(erhogen)] increments a semaphore.
+\end{description}
+
+%%%%%%%%%%%%%%%
+\subsubsection{Null shared memory}
+%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef SHMEM_NULL
+#define semaphore_type int
+#define semaphore_type_size  (SIZEOF(int))
+#define new_sema(handle,val) 1
+#define Vsema(sema)          /* do nothing */
+#define Psema(sema)          /* do nothing */
+#define Tsema(sema)          1
+#define CPsema(sema)         1
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%
+\subsubsection{SGI shared memory}
+%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef SHMEM_SGI
+#define semaphore_type       usema_t*
+#define semaphore_type_size  (SIZEOF(usema_t*))
+#define new_sema(handle,val) \
+  (!(_shmem_tmp_sema=usnewsema(handle,val))?NULL:              \
+     ((usctlsema(_shmem_tmp_sema,CS_METEROFF)==-1)?NULL:       \
+        ((usctlsema(_shmem_tmp_sema,CS_DEBUGOFF)==-1)?NULL:    \
+           (usctlsema(_shmem_tmp_sema,CS_HISTOFF)==-1),_shmem_tmp_sema)))
+
+#define Vsema(sema)          usvsema(sema)
+#define Psema(sema)          uspsema(sema)
+#define Tsema(sema)          ustestsema(sema)
+#define CPsema(sema)         uscpsema(sema)
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%
+\subsubsection{SYSV shared memory}
+%%%%%%%%%%%%%%%
+Care has to be taken when using some of the semaphore operations, as
+they can return without performing the desired operation on the
+semaphore! For example, debuggers usually interact badly with the
+semaphore operations, as breakpoints usually make the semaphore
+operations return prematurely. 
+\begin{code}
+#ifdef SHMEM_SYSV
+
+#ifdef SHMEM_SYSV_NO_SEMAPHORE_UNION
+union semun {
+          int val;
+          struct semid_ds *buf;
+          ushort *array;
+     };
+#endif
+
+extern int           _shmemsysv_nextsem;
+extern int           _shmemsysv_maxsem;
+extern int          *_shmemsysv_semid;
+extern struct sembuf _shmemsysv_sop;
+extern union semun   _shmemsysv_arg;
+
+#define SEMA_SET_SIZE 8
+#define semaphore_type       short
+#define semaphore_type_size  (SIZEOF(short))
+#define new_sema(handle,in)  \
+  (_shmemsysv_nextsem>=_shmemsysv_maxsem?                              \
+    (bsp_abort("{new_sema} line %d of \"%s\"\n"                        \
+               "\tRan out after allocating %d"            ,            \
+               __LINE__,__FILE__,_shmemsysv_maxsem),0):                \
+    ((_shmemsysv_arg.val=in),                                          \
+       (semctl(_shmemsysv_semid[_shmemsysv_nextsem/SEMA_SET_SIZE],     \
+               _shmemsysv_nextsem%SEMA_SET_SIZE,                       \
+               SETVAL,_shmemsysv_arg),                                 \
+       (_shmemsysv_nextsem++))                                         \
+   ))
+
+#define Vsema(sema)\
+  do {                                                 \
+    _shmemsysv_sop.sem_num=sema%SEMA_SET_SIZE;         \
+    _shmemsysv_sop.sem_op =1;                          \
+    _shmemsysv_sop.sem_flg=0;                          \
+    while (semop(_shmemsysv_semid[sema/SEMA_SET_SIZE], \
+                 &_shmemsysv_sop,1) && errno==EINTR) { \
+      /* DeBugger off */                               \
+    }                                                  \
+  } while(0)
+
+#define Psema(sema)\
+  do {                                                 \
+    _shmemsysv_sop.sem_num=sema%SEMA_SET_SIZE;         \
+    _shmemsysv_sop.sem_op =-1;                         \
+    _shmemsysv_sop.sem_flg=0;                          \
+    while (semop(_shmemsysv_semid[sema/SEMA_SET_SIZE], \
+                 &_shmemsysv_sop,1) && errno==EINTR) { \
+      /* DeBugger off */                               \
+    }                                                  \
+  } while(0)
+
+#define CPsema(sema)                                           \
+  (_shmemsysv_sop.sem_num=sema%SEMA_SET_SIZE,                  \
+    (_shmemsysv_sop.sem_op =-1,                                \
+      (_shmemsysv_sop.sem_flg=IPC_NOWAIT,                      \
+        ((semop(_shmemsysv_semid[sema/SEMA_SET_SIZE],          \
+                &_shmemsysv_sop,1)==-1)?                       \
+         ((errno==EAGAIN)?                                     \
+            (0):                                               \
+            (printf("DEBUG(pid %d){CPSema} failed [errno(%d)]",\
+                    _bsp_pid,errno),0)):                       \
+         1))))
+
+#define Tsema(sema) \
+  (_shmemsysv_arg.val=0,\
+   semctl(_shmemsysv_semid[sema/SEMA_SET_SIZE],sema%SEMA_SET_SIZE,GETVAL,_shmemsysv_arg))
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%
+\subsubsection{Win32 shared memory}
+%%%%%%%%%%%%%%%
+This implementation of Shared Memory Communication in Win32 uses the
+Atomic types in the Win32 api to lock integers in shared memory.  It
+is important to note that the standard Win32 Semaphores cannot be used
+in BSP because there is no simple way to test their values --- a
+feature which BSP relies heavily on in the implementation of barriers.
+
+\begin{code}
+#ifdef WIN32
+/* Some of the shmem operations for some systems require a handle to 
+   the shared memory.  We dont need this in WIN32, so lets keep it 
+   for compatibility reasons, but define it to an int, to keep
+   compilers happy.
+*/
+#define shared_memory_handle int
+#define semaphore_type          semaphore
+#define semaphore_type_size     SIZEOF(semaphore_t)
+
+/* The operations are defined as functions in the file 
+   bsp_nt_shmem.lc */ 
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Spinlock datatype}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+A spinlock is just a 0-1 semaphore. However, on some machines
+the implementations of spinlocks is far better than semaphores (e.g.,
+SGI). 
+
+%%%%%%%%%%%%%%%
+\subsubsection{SGI shared memory}
+%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef SHMEM_SGI
+#define spinlock_type      ulock_t
+#define spinlock_type_size (SIZEOF(ulock_t))
+#define new_spinlock(handle)       usnewlock(handle)
+#ifdef TURBO
+#define set_spinlock(lock)         uswsetlock(lock,3000)
+#define conlongset_spinlock(lock)  uscsetlock(lock,1000)
+#define conshortset_spinlock(lock) uscsetlock(lock,5)
+#else
+#define set_spinlock(lock)         ussetlock(lock)
+#define conlongset_spinlock(lock)  uscsetlock(lock,5)
+#define conshortset_spinlock(lock) uscsetlock(lock,5)
+#endif
+
+#define unset_spinlock(lock)  usunsetlock(lock)
+#define test_spinlock(lock)   ustestlock(lock)
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%
+\subsubsection{Spinlocks on top of semaphores}
+%%%%%%%%%%%%%%%
+\begin{code}
+#if defined(SHMEM_SYSV) || defined(SHMEM_NULL) 
+#define spinlock_type        semaphore_type
+#define spinlock_type_size   (semaphore_type_size)
+#define new_spinlock(handle) new_sema(handle,1)
+
+#define test_spinlock(lock)  (Tsema(lock)==0)
+
+#define set_spinlock(lock)   Psema(lock)
+
+#ifdef SANITY_CHECK
+#define unset_spinlock(lock)              \
+  do {                                    \
+    if (test_spinlock(lock)) Vsema(lock); \
+  } while(0)
+#else
+#define unset_spinlock(lock) Vsema(lock)
+#endif
+
+
+#define conshortset_spinlock(lock)  (CPsema(lock))
+#define conlongset_spinlock(lock)   (CPsema(lock))
+#endif
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Barriers}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+A variety of barriers have been implemented (see \cite{hill:barrierta}
+for detailed information). The barriers are:
+
+\begin{description}
+\item[\texttt{BARRIER\_HARDWARE}] Manufacturer-supplied barrier system
+call (for the SGI).
+
+\item[\texttt{BARRIER\_TREE}] A tree-based dissemination
+  \cite{andrews:concur} barrier using locks (on the SGI). This
+  algorithm uses a logarithmic number of phases in which each process
+  synchronises with its immediate neighbour in a notional linear
+  ordering, then with a process two steps away, then with one four
+  steps away, and so on.
+
+\item[\texttt{BARRIER\_TREE}] The same as the previous implementation
+  except that semaphores are used for pairwise synchronisation instead
+  of locks.
+
+\item[\texttt{BARRIER\_NONBUSYWAIT\_COUNTER}] A centralised counter
+  barrier in which each process entering the barrier increments a
+  counter protected by a lock. The process then spins on the counter
+  until it reaches $p$, the number of processes participating in the
+  barrier.
+
+\item[\texttt{BARRIER\_BUSYWAIT\_COUNTER}] A similar barrier to the
+  one above except that, rather than spinning on a counter, the first
+  $p-1$ processes to enter the barrier wait on a semaphore, and are
+  awakened by the last process that enters the barrier.
+
+\item[\texttt{BARRIER\_BUSYWAIT\_VECTOR\_COUNTER}] A barrier in which
+  each process writes a value to a unique location, and all of these
+  locations are placed on the same cache line.  After writing its
+  value, each process spins reading the entire set of locations. This
+  technique uses the architecture's cache coherence mechanism to
+  handle mutual exclusion, since only one processor can hold the line
+  in write mode at any given time.
+
+\item[\texttt{BARRIER\_ATOMIC\_COUNTER}] A barrier that is built from
+  atomic swap or increment operations. This barrier is only really
+  required on the SGI Origin 2000, as we can use non-cache coherent
+  swap operations.
+\end{description}
+
+
+\begin{code}
+#if defined(RESOURCE_FRIENDLY) || (BSP_ONLINE_PROCS==1)
+#define BARRIER_NONBUSYWAIT_COUNTER
+#else
+
+#ifdef SGIORIGIN
+#define BARRIER_ATOMIC_COUNTER
+#else
+#define BARRIER_BUSYWAIT_VECTOR_COUNTER
+#endif
+
+#endif
+ 
+
+#ifdef BARRIER_HARDWARE
+#define no_semas_barrier(nprocs)   0
+#define hardware_barrier_type      barrier_t*
+#define barrier_type_size(nprocs)  (SIZEOF(barrier_t)+SIZEOF(barrier_t*))
+#define barrier_sync()             barrier(_shmem.sync,_bsp_nprocs)
+#endif
+
+#ifdef BARRIER_TREE
+#define no_semas_barrier(nprocs)   (nprocs*nprocs)
+#define barrier_type_size(nprocs)  (2*nprocs*nprocs*semaphore_type_size)
+#define barrier_sync()             _bsp_dissemination_barrier()  
+#endif
+
+#ifdef BARRIER_NONBUSYWAIT_COUNTER
+#define no_semas_barrier(nprocs)   3
+#define barrier_type_size(nprocs)  spinlock_type_size
+#define barrier_sync()             _bsp_nonbusywait_counter_barrier()
+#endif
+
+
+#ifdef BARRIER_BUSYWAIT_COUNTER
+#define no_semas_barrier(nprocs)   0
+#define barrier_type_size(nprocs)  spinlock_type_size
+#define barrier_sync()             _bsp_busywait_counter_barrier()
+#endif
+
+#ifdef BARRIER_BUSYWAIT_VECTOR_COUNTER
+#define VEC_SEP_DISTANCE 1
+#define no_semas_barrier(nprocs)   0 
+#define barrier_type_size(nprocs)  (2*SIZEOF(int)*nprocs*VEC_SEP_DISTANCE)
+#define barrier_sync()             _bsp_busywait_vector_counter_barrier()
+#endif
+
+#ifdef BARRIER_ATOMIC_COUNTER
+#define no_semas_barrier(nprocs)  0
+#define barrier_type_size(nprocs) 0
+#define barrier_sync()            _bsp_atomic_counter_barrier()
+
+#ifdef INLINE_ATOMIC_OPS
+typedef volatile __uint32_t  atomic_swap_type;
+
+#define atomic_read(addr) (*(atomic_swap_type*)((__psunsigned_t) addr))
+#define atomic_inc(addr)  (*(atomic_swap_type*)((__psunsigned_t) (addr)+8))
+#define atomic_dec(addr)  (*(atomic_swap_type*)((__psunsigned_t) (addr)+16))
+#define atomic_write(addr,x) \
+   *(atomic_swap_type*)((__psunsigned_t) addr)=(atomic_swap_type)x
+#else
+typedef fetchop_var_t atomic_swap_type;
+#define atomic_read(addr)    fetchop_load(addr)
+#define atomic_inc(addr)     fetchop_increment(addr)
+#define atomic_dec(addr)     fetchop_decrement(addr)
+#define atomic_write(addr,x) storeop_store(addr,x)
+#endif
+#define init_atomic_barrier()                                           \
+  do {                                                                  \
+    fetchop_reservoir = fetchop_init(USE_DEFAULT_PM,2);                 \
+    if (fetchop_reservoir == NULL)                                      \
+      bsp_abort("{init_atomic_barrier} failed to allocate reservoir");  \
+    fetchop_updownA=(atomic_swap_type*)fetchop_alloc(fetchop_reservoir);\
+    fetchop_updownB=(atomic_swap_type*)fetchop_alloc(fetchop_reservoir);\
+    if (fetchop_updownA==NULL || fetchop_updownB==NULL)                 \
+      bsp_abort("{{init_atomic_barrier} allocate atomic word");         \
+    atomic_write(fetchop_updownA, 0);                                   \
+    atomic_write(fetchop_updownB, 0);                                   \
+  } while(0)
+#endif
+
+#ifdef SHMEM_NULL
+#define barrier_sync() /* do nothing */
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Memory barrier}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Some processors (e.g., the Alpha) do not have a sequential consistency
+model of memory (a good overview of the problem can be found in
+\cite{mpiNEC:gropplusk,adve:consistency}). This only really matters
+for \bsplib{} when we use the the counter vector barrier as it doesn't
+guarentee that all outstanding writes have been issued to shared
+memory. We need a fence instruction to go with the barrier as well.
+
+\begin{verbatim}
+From: Jonathan Hill <jonh@pine.comlab>
+Subject: Memory consistency problems on the 8400
+Newsgroups: comp.sys.dec
+Date: 25 Mar 1997 18:21:35 +0000
+Organization: Oxford University Computing Laboratory
+Path: news.ox.ac.uk!news
+Lines: 73
+Message-ID: <w4k67yfygr4.fsf@pine.comlab>
+NNTP-Posting-Host: pine.comlab.ox.ac.uk
+X-Newsreader: Gnus v5.3/Emacs 19.34
+Xref: news.ox.ac.uk comp.sys.dec:32802
+
+
+Hello,
+
+	I'm having some problems on an Alpha 8400 with memory
+consistency between processors. I've developed some barrier
+synchronisation routines that have a latency of 4 usec on the 8400
+compared to 90usec for the best alternative technique that uses
+semaphores (see [1] below). However, the barrier doesn't guarantee
+memory consistency (so it's pretty useless ;-) as a process can have
+writes that are still pending, although each of the processes have
+reached a consistent state. There is a nice paper about this problem
+from Digital WRL labs [2], which discusses write fences on the
+alpha. Is there a system call for performing a memory fence on the
+Alpha? i.e., something akin to the following operation which is
+available on the T3E?
+
+From: Dirk Grunwald <grunwald@foobar.cs.colorado.edu>
+Subject: Re: Memory consistency problems on the 8400
+Newsgroups: comp.sys.dec
+Date: 25 Mar 1997 21:06:23 -0700
+Organization: University of Colorado
+Path: news.ox.ac.uk!lyra.csx.cam.ac.uk!nntpfeed.doc.ic.ac.uk!sunsite.doc.ic.ac.uk!netcom.net.uk!dispatch.news.demon.net!demon!news.sprintlink.net!news-peer.sprintlink.net!howland.erols.net!newsxfer.itd.umich.edu!uunet!in2.uu.net!128.138.243.15!csnews!not-for-mail
+Message-ID: <qxpu3lznvpc.fsf@foobar.cs.colorado.edu>
+References: <w4k67yfygr4.fsf@pine.comlab>
+NNTP-Posting-Host: foobar.cs.colorado.edu
+X-Newsreader: Gnus v5.3/Emacs 19.34
+Lines: 29
+Xref: news.ox.ac.uk comp.sys.dec:32819
+
+> from Digital WRL labs [2], which discusses write fences on the
+> alpha. Is there a system call for performing a memory fence on the
+> Alpha? i.e., something akin to the following operation which is
+> available on the T3E?
+--
+
+Yeah, it's the memory barrier instruction.  Depending on your C
+compiler, you can generate it in a number of ways. I believe that
+the _mb() routine in /usr/lib/libc.a is simply a memory barrier
+instruction wrapped in a procedure call.
+
+Here's an example of a proper mutex on an Alpha, from the
+pthread include file.
+
+# define pthread_mutex_lock_prim(_m_) asm (" \
+	ldah	%t2,0x10(%r31) ;\
+    10: ldl_l	%v0,(%a0) ;\
+	bne	%v0,30f ;\
+	or	%v0,%t2,%t0 ;\
+	stl_c	%t0,(%a0) ;\
+	beq	%t0,20f ;\
+	mb	; \
+	br	%r31,30f ;\
+    20: br	%r31,10b ;\
+    30:", &(_m_)->_Pfield(lock))
+
+\end{verbatim}
+
+\begin{code}
+#ifdef OSF1
+#define memory_barrier() _mb()
+#else
+#define memory_barrier() /* Do nothing */
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Waiting on a shared memory buffer}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Routines to block/unblock on the shared buffer resources. Either
+semaphores (non-busy waiting), or purpose written (busy-waiting)
+routines can be used. The ``good chance'' operator determines when
+data has \emph{started} to be written into the buffer, but it doesn't
+guarantee that the writing has finished (sort of half-way blocking).
+\begin{code}
+#if defined(RESOURCE_FRIENDLY) || (BSP_ONLINE_PROCS==1)
+#define SEMAPHORE_BLOCKING
+#endif
+
+
+#ifdef SEMAPHORE_BLOCKING
+#define blocking_buffer_type       semaphore_type
+#define blocking_buffer_type_size  semaphore_type_size
+#define new_blocking_buffer(sema,arena)  ((sema)=new_sema(arena,0))
+#define goodchance_blocking_bufferfull(block,lock) (test_spinlock(lock))
+#define unblock_bufferfull(block)    Vsema(block)
+#define blockuntil_bufferfull(block) Psema(block)
+#else
+\end{code}
+
+\begin{code}
+#define blocking_buffer_type int
+#define blocking_buffer_type_size  SIZEOF(int)
+#define new_blocking_buffer(block,arena)               ((block)=0)
+#define goodchance_blocking_bufferfull(block,lock)     (block)
+#define unblock_bufferfull(block)      \
+  do {                                 \
+    memory_barrier();                  \
+   (block)=1;                          \
+  } while (0)
+
+#define blockuntil_bufferfull(block)   \
+  do {                                 \
+    while(!(block)) {short_snooze();}  \
+    (block)=0;                         \
+  } while(0)
+#endif
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Creating the shared memory segment}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Add ad-hoc extra amount of slosh---the system takes some unspecified
+amount of space from the shared arena!!
+\begin{code}
+#define SHMEM_SHARED_SLOSH 20000
+#define SHMEM_PROC_SLOSH    4048
+
+/* This is extra for my shared memory pool */
+#define SHMEM_ERROR_EXTRA    300
+#define SHMEM_PROC_ERROR     200
+\end{code}
+
+%%%%%%%%%%%%%%%
+\subsubsection{Null shared memory}
+%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef SHMEM_NULL
+#define shared_memory_handle int
+#define shmem_create_memory_segment(handle,nprocs,size)                     \
+do {                                                                        \
+  _nbytes_of_shared_memory_segment_free=(SHMEM_PROC_ERROR*nprocs)+          \
+                                        SHMEM_ERROR_EXTRA+size;             \
+  _the_entire_shared_memory_segment                                         \
+    =malloc(_nbytes_of_shared_memory_segment_free);                         \
+  if (_the_entire_shared_memory_segment==NULL)                              \
+    bsp_abort("{bsp_begin}\n"                                               \
+              "\tUnable to allocate %d bytes of shared memory.",            \
+              _nbytes_of_shared_memory_segment_free+SHMEM_SHARED_SLOSH+     \
+              (SHMEM_PROC_SLOSH*nprocs));                                   \
+ } while(0)
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%
+\subsubsection{SGI shared memory}
+%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef SHMEM_SGI
+#define shared_memory_handle usptr_t*
+#define shmem_create_memory_segment(handle,nprocs,size)                     \
+do {                                                                        \
+  _nbytes_of_shared_memory_segment_free=(SHMEM_PROC_ERROR*nprocs)+          \
+                                        SHMEM_ERROR_EXTRA+size;             \
+  usconfig(CONF_INITSIZE,(SHMEM_PROC_SLOSH*nprocs)+SHMEM_SHARED_SLOSH+      \
+                         _nbytes_of_shared_memory_segment_free);            \
+  usconfig(CONF_INITUSERS, nprocs);                                         \
+  usconfig(CONF_ARENATYPE, US_SHAREDONLY);                                  \
+  usconfig(CONF_LOCKTYPE,US_NODEBUG);                                       \
+  usconfig(CONF_STHREADIOON);                                               \
+  usconfig(CONF_STHREADMISCON);                                             \
+  handle = usinit(tempnam(NULL,"BSP"));                                     \
+  if (handle==NULL)                                                         \
+    bsp_abort("{bsp_begin}\n"                                               \
+              "\tUnable to allocate %d bytes of shared memory.",            \
+              _nbytes_of_shared_memory_segment_free+SHMEM_SHARED_SLOSH+     \
+              (SHMEM_PROC_SLOSH*nprocs));                                   \
+  _the_entire_shared_memory_segment=                                        \
+    usmalloc(_nbytes_of_shared_memory_segment_free,handle);                 \
+  if (_the_entire_shared_memory_segment==NULL)                              \
+    bsp_abort("{bsp_begin}\n"                                               \
+              "\tUnable to allocate %d bytes of shared memory.",            \
+              _nbytes_of_shared_memory_segment_free+SHMEM_SHARED_SLOSH+     \
+              (SHMEM_PROC_SLOSH*nprocs));                                   \
+  } while(0)
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%
+\subsubsection{SYSV shared memory}
+%%%%%%%%%%%%%%%
+Make sure that nothing falls over during shared memory segment
+creation---otherwise it will leave ipcs resources hanging around. 
+\begin{code}
+#ifdef SHMEM_SYSV
+#define shared_memory_handle int
+
+#define shmem_create_memory_segment(handle,nprocs,size)                   \
+do {                                                                      \
+  _nbytes_of_shared_memory_segment_free=(SHMEM_PROC_ERROR*nprocs)+        \
+                                        SHMEM_ERROR_EXTRA+size;           \
+   handle=shmget(IPC_PRIVATE,SHMEM_SHARED_SLOSH+(SHMEM_PROC_SLOSH*nprocs)+\
+                 _nbytes_of_shared_memory_segment_free,0600);             \
+  if (handle<0)                                                           \
+    bsp_abort("{bsp_begin} trying to start %d processors\n"               \
+              "\tCan not allocate %d bytes of shared memory.",            \
+              nprocs,_nbytes_of_shared_memory_segment_free+               \
+              SHMEM_SHARED_SLOSH+(SHMEM_PROC_SLOSH*nprocs));              \
+  _the_entire_shared_memory_segment=(char*) shmat(handle,(char*)0,0);     \
+  if (_the_entire_shared_memory_segment<(char*)0)                         \
+    bsp_abort("{bsp_begin} trying to start %d processors\n"               \
+              "\tUnable to allocate %d bytes of shared memory",           \
+             nprocs,_nbytes_of_shared_memory_segment_free);               \
+  _shmemsysv_maxsem=no_semas_barrier(nprocs)+                             \
+                    (2*(2+_bsp_nbuffers)*nprocs)+5;                        \
+  _shmemsysv_semid                                                        \
+    =(int*)CALLOC(CEILING_DIV(_shmemsysv_maxsem,SEMA_SET_SIZE),           \
+                  SIZEOF(int));                                           \
+  if (_shmemsysv_semid==NULL)                                             \
+    bsp_abort("{bsp_begin} trying to start %d processors\n"               \
+              "\tFailed to allocate semaphore set.",nprocs);              \
+  _shmemsysv_nextsem=0;                                                   \
+  for(;_shmemsysv_maxsem>0;_shmemsysv_maxsem-=SEMA_SET_SIZE)              \
+    _shmemsysv_semid[_shmemsysv_nextsem++]                                \
+      = semget(IPC_PRIVATE,SEMA_SET_SIZE,(IPC_CREAT | 0600));             \
+  _shmemsysv_maxsem=no_semas_barrier(nprocs)+                             \
+                    (2*(2+_bsp_nbuffers)*nprocs)+5;                        \
+  if (_shmemsysv_semid[_shmemsysv_nextsem-1]<0)                           \
+    bsp_abort("{bsp_begin} trying to start %d processors\n"               \
+              "\tUnable to allocate %d semaphores. "                      \
+              "Either clean up the system\n"                              \
+              "\tsemaphore sets and shared memory using "                 \
+              "ipcclean(1),\n"                                            \
+              "\tor try running fewer processors. Try setting the "         \
+              "environment\n\tvariable BSP_PROCS to a value less than %d.\n",\
+              nprocs,_shmemsysv_maxsem,nprocs);                           \
+  /* Ignore first semaphore */                                            \
+  _shmemsysv_nextsem=1;                                                   \
+  } while(0) 
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%
+\subsubsection{SGI shared memory}
+%%%%%%%%%%%%%%%
+This function is defined in \texttt{bsp\_nt\_shmem.lc}.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Make sure a newly created process gets the shared memory segment}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%
+\subsubsection{NULL shared memory}
+%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef SHMEM_NULL
+#define shmem_put_segment(handle) /* Do nothing */
+#define shmem_get_segment(handle) /* Do nothing */
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%
+\subsubsection{SGI shared memory}
+%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef SHMEM_SGI
+#define shmem_put_segment(handle)  \
+  usputinfo(handle,_the_entire_shared_memory_segment)
+
+#ifdef TURBO
+#define shmem_get_segment(handle)                                  \
+  do {                                                             \
+    _the_entire_shared_memory_segment = usgetinfo(handle);         \
+    schedctl(SCHEDMODE, SGS_GANG);                                 \
+  } while(0)
+#else
+#define shmem_get_segment(handle)                                  \
+  do {                                                             \
+    _the_entire_shared_memory_segment  = usgetinfo(handle);        \
+    schedctl(SCHEDMODE, SGS_GANG);                                 \
+  } while(0)
+#endif
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%
+\subsubsection{SYSV shared memory}
+%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef SHMEM_SYSV
+#define shmem_put_segment(handle) /* Do nothing */
+#define shmem_get_segment(handle) /* Do nothing */
+#endif
+\end{code}
+
+
+%%%%%%%%%%%%%%%
+\subsubsection{Win32 shared memory}
+%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef WIN32
+#define shmem_put_segment(handle) /* Do nothing */
+#define shmem_get_segment(handle) /* Do nothing */
+#endif
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Close down shared memory}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef SHMEM_NULL
+#define shmem_closedown_shared_memory(handle) /* donothing */
+#endif
+
+#ifdef SHMEM_SGI
+#define shmem_closedown_shared_memory(handle) /* donothing */
+#endif
+
+#ifdef SHMEM_SYSV
+#define shmem_closedown_shared_memory(handle)                       \
+  do {                                                              \
+    _shmemsysv_maxsem=CEILING_DIV(_shmemsysv_maxsem,SEMA_SET_SIZE); \
+    if (_shmemsysv_semid)                                           \
+      for(;_shmemsysv_maxsem>0;_shmemsysv_maxsem--)                 \
+        for(_shmemsysv_nextsem=0;                                   \
+            _shmemsysv_nextsem<SEMA_SET_SIZE;                       \
+            _shmemsysv_nextsem++)                                   \
+          if (_shmemsysv_semid[_shmemsysv_maxsem-1]>=0) {           \
+            _shmemsysv_arg.val=0;                                   \
+            semctl(_shmemsysv_semid[_shmemsysv_maxsem-1],           \
+                   _shmemsysv_nextsem,IPC_RMID,_shmemsysv_arg);     \
+          }                                                         \
+    _shmemsysv_arg.val=0;                                           \
+    if (handle>=0) shmctl(handle,IPC_RMID,0);                       \
+  } while(0)
+#endif 
+\end{code}
+
+ 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Shared global variables}
+\label{sect:bspirix:shmemglobals}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+A shared memory information table is used to put locks, barriers,
+semaphores, and shared memory buffers. 
+\begin{code}
+typedef struct {
+#ifdef BARRIER_HARDWARE  
+   hardware_barrier_type  sync;        /* sync barrier  */
+#endif
+
+#ifdef BARRIER_TREE
+   spinlock_type **tree_syncA;         /* sync locks     */
+   spinlock_type **tree_syncB;         /* sync locks     */
+#endif
+
+#if defined(BARRIER_BUSYWAIT_COUNTER) || defined(BARRIER_NONBUSYWAIT_COUNTER)
+   volatile int     *sync_updownA;
+   volatile int     *sync_updownB;
+   spinlock_type    sync_lock;
+#endif
+
+#ifdef BARRIER_NONBUSYWAIT_COUNTER
+   semaphore_type   sync_semaA;
+   semaphore_type   sync_semaB;
+#endif
+
+#ifdef BARRIER_BUSYWAIT_VECTOR_COUNTER
+   volatile int *sync_vector_updownA;
+   volatile int *sync_vector_updownB;
+#endif
+
+   semaphore_type         proc_slack;
+   char                ***proc_buffer;       /* no. of buffers per process*/
+   spinlock_type        **proc_buffer_write; /* no, of locks for buffer   */
+   blocking_buffer_type **proc_buffer_wait;  /* wait for buffer to fill   */
+   _BSPcomm_thunk       **proc_buffer_info;  /* whats in buffer           */ 
+
+   spinlock_type         *proc_lock;         /* lock for process          */
+   _BSPcomm_thunk       **proc_comm_put_fifo;/* pending puts              */
+   _BSPcomm_thunk       **proc_comm_get_fifo;/* pending gets              */
+   int                   *proc_comm_put_next;/* next position to put      */ 
+   int                   *proc_comm_put_size; /* max puts                  */ 
+   int                   *proc_comm_get_next;/* next position to put      */ 
+   int                  **puts_to_me;        /* puts made to each proc    */
+
+   volatile int          *constantI;
+   volatile int          *bsmp_sizes;
+   volatile int          *closedown;
+ } _BSPinfo; 
+
+extern spinlock_type debug_lock;
+extern _BSPinfo _shmem;
+\end{code}
+
+% LocalWords:  BSP TALLS

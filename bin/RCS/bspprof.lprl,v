@@ -1,0 +1,868 @@
+head	1.2;
+access;
+symbols;
+locks
+	jonh:1.2; strict;
+comment	@# @;
+
+
+1.2
+date	95.09.14.11.36.49;	author jonh;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	95.09.08.15.50.23;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@*** empty log message ***
+@
+text
+@%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995, University of Oxford                         %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bspprof.lprl,v 1.1 1995/09/08 15:50:23 jonh Exp jonh $
+% $Log: bspprof.lprl,v $
+# Revision 1.1  1995/09/08  15:50:23  jonh
+# Initial revision
+#
+\begin{code}
+($Pgm = $0) =~ s|.*/||;
+$Version        = "0.1beta";
+$Status = 0;
+$ShortUsage = "\nusage: for basic information, try the `-help' option\n";
+$LongUsage = "\n" . <<EOUSAGE;
+The BSP communication and super-step profiler:
+	
+	$Pgm [command-line-options-and-input-files]
+
+------------------------------------------------------------------------
+This profiler ($Pgm) processes trace files that result from BSP
+programs that have been compiled with bspfront when the -prof flag has
+been used. The profiler produces two types of PostScript graphs as output:
+
+  (1) Bar-like graphs that give a breakdown of accumulated time for:
+
+      o communication time
+      o synchronisation time
+      o super-step computation time (excluding the time
+        taken for the above times)
+
+      for each super-step within a program
+
+  (2) Strata-graphs for either the number of ditinct communications
+      that occur over time, or the number of bytes communicated. Two
+      graphs are presented in such a profile, one for the number of
+      bytes (or communications) going out from a processor; and
+      another for the number of bytes (or communicatons) coming into a
+      processor.
+------------------------------------------------------------------------
+Command line options:
+
+     -v      Verbose mode.
+
+     -bar
+	     Produce a bar-like graph that gives a breakdown of times
+             spent in each super-step.
+
+     -title 'string'
+	     Add 'string' as a title to the profile
+    
+
+EOUSAGE
+\end{code}
+
+\begin{code}
+$cmpoints       = 28;
+$a4width        = 842;      # A4 Rotated!!
+$a4height       = 596;      # A4 Rotated!!
+$comm_col       = 0.6;
+$wait_col       = 0.85;
+$cpu_col        = 0.0;
+$proclabel_ind  = $cmpoints;
+$ssteplabel_ind = 1*$cmpoints;
+$key_ind        = 0.5*$cmpoints;
+$graphwidth     = 0;
+$graphheight    = 0;
+
+$title       = "";
+$outfile     = "PROF.ps";
+$infile      = "PROF.bsp";
+$compileopts = "";
+$profdate    = "";
+$etime_str   = "";
+$etime       = 0.0;
+$machname    = "";
+$sstep_list  = ();
+%sstepnoEnv  = ();
+%cpuEnv      = ();
+%sstepCpuEnv = ();
+%sstepCommEnv= ();
+%sstepWaitEnv= ();
+$max_sstepno = 0;
+$max_time    = 0.0;
+$nprocs      = 0;
+
+&main();
+exit(0);
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Main program}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub main {
+  local($i);
+
+  arg: while ($_ = $ARGV[0]) {
+  shift(@@ARGV);
+  #--------HELP------------------------------------------------
+  /^-help$/ && do {print $LongUsage; exit(0);};
+
+  #--------SCALE FOR TIME--------------------------------------
+  /^-scaletime$/ && do { $i = shift(@@ARGV); 
+                         if ($i=~ /^(\d+).(\d+)/) {
+                           $max_time = "$1.$2"/1.0;
+                         } else {
+                           print STDERR "$Pgm error: -scaletime <float>";
+                           $Status++;
+                         }
+                         next arg;};
+
+  #--------TITLE------------------------------------------------
+  /^-title$/ && do { $title = shift(@@ARGV); next arg;};
+
+  #--------Output file-----------------------------------------
+  /\.ps$/   && do  {$outfile = $_; next arg;}; 
+  /\.bsp$/  && do  {$infile  = $_; next arg;};
+  $Status++;
+  }
+  if ($Status>0) {
+    print STDERR $ShortUsage;
+    exit(1);
+  }
+
+  $graphwidth     = $a4width  - (    $cmpoints + $proclabel_ind);
+  $graphheight    = $a4height - (1.5*$cmpoints + $ssteplabel_ind + $key_ind);
+  $graphheight   -= 0.75*$cmpoints if (length($title)>0);
+  &readProfileData();
+  if (!open(PSFILE,"> $outfile")) {
+    print STDERR "Pgm: unable to open \"$outfile\" for writing\n";
+    exit(1);
+  }
+  &psPrologue();
+  &createTimeGraph();
+  close(PSFILE);
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{create the time graph}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub createTimeGraph {
+  local($no_ssteps,$i,$j,$idx,$width);
+  local($x_size,$y_size);
+  local($a1,$a2,$a3,$a4);
+  local(@@xs);
+
+  @@xs = sort compKeys (grep(&ignoreEmptyTimeGraph($_),(keys %sstep_list)));  
+  $no_ssteps = $#xs + 1;
+  $x_size = int($graphwidth/($no_ssteps+1));
+  $y_size = int($graphheight/$nprocs);
+  print STDERR "$nprocs processors executing $no_ssteps ",
+               "different super-steps\n";
+
+  for($i=0; $i<$nprocs; $i++) {
+    $sum_comm = 0.0;
+    $sum_wait = 0.0;
+    $sum_cpu  = 0.0;
+    for($j=0; $j<$no_ssteps; $j++) {
+      print  PSFILE  "gsave\n";
+      print  PSFILE  ($j*$x_size), " ", 
+                     ($i*$y_size), " translate\n";
+      printf PSFILE "%.1f %1f scale\n",
+                     ($x_size/(14.0*$cmpoints)) , 
+                     ($y_size/(14.0*$cmpoints));
+        
+      $idx = $i . "-" . $xs[$j];
+      $width = $sstepnoEnv{$idx}/$max_sstepno;
+      ($width < 0.03) && ($width = 0.03);
+      printf PSFILE "%.3f %.3f %.3f %.3f drawgraph\n",
+                    $width ,
+                    ($sstepCpuEnv{$idx}/$max_time),
+                    ($sstepWaitEnv{$idx}/$max_time),
+	            ($sstepCommEnv{$idx}/$max_time);
+      $sum_comm += $sstepCommEnv{$idx} / 1.0;
+      $sum_wait += $sstepWaitEnv{$idx} / 1.0;
+      $sum_cpu  += $sstepCpuEnv{$idx}  / 1.0;
+
+      if ($j==0) {
+        $a1 = 70;   # 70 Point for process number
+        $a2 = "$i";
+      } else {
+        $a1 = 20;   # 20 point for graph label
+        $a2 = "time";
+      }
+      if ($i==0) {
+        $xs[$j] =~ /(\d+)\-(\d+)\-([a-zA-Z_\.<>]{1,15})/;
+        $a3 = "$3, line $2";
+        $a4 = "super-step $1";
+      } else {
+        $a3 = "no. super-steps";
+        $a4 = "";
+      }
+      printf PSFILE "%d (%s) (%s) (%s) %d %.2f drawaxis\n",
+                      $a1,$a2,$a3,$a4,$max_sstepno,$max_time; 
+      print PSFILE "grestore\n";
+    } 
+    print PSFILE "gsave\n";
+    print PSFILE ($no_ssteps*$x_size), " ", 
+                 ($i*$y_size), " translate\n";
+    printf PSFILE "%.1f %1f scale\n",
+                  ($x_size/(14.0*$cmpoints)) , 
+                  ($y_size/(14.0*$cmpoints));
+    printf  PSFILE "%.3f %.3f %.3f %.3f %d totalTimes\ngrestore\n",
+                   $sum_comm,$sum_wait,$sum_cpu,
+                   $etime - ($sum_comm+$sum_wait+$sum_cpu), $i;
+                   
+  }
+  printf PSFILE "showpage\n"; 
+}
+\end{code}
+
+\begin{code}
+sub ignoreEmptyTimeGraph {
+  local($idx) = $_[0];
+  local($i);
+  local($time);
+  local($limit) = $max_time * 0.02;
+  
+
+  for($i=0;$i<$nprocs;$i++) {
+    $time=($sstepCpuEnv{ $i."-" .$idx}/1.0) +
+          ($sstepWaitEnv{$i."-" .$idx}/1.0) +
+          ($sstepCommEnv{$i."-" .$idx}/1.0);
+    if ($time > $limit) {
+      return 1;
+    }
+  }
+  return 0;
+}
+\end{code}
+
+\begin{code}
+sub compKeys {
+  local($sstep_a,$sstep_b,$line_a,$line_b,$file_a,$file_b);
+
+  $a =~ /(\d+)\-(\d+)\-([a-zA-Z_\.<>]{1,15})/;
+  $sstep_a = $1; $line_a = $2; $file_a = $3;
+  $b =~ /(\d+)\-(\d+)\-([a-zA-Z_\.<>]{1,15})/;
+  $sstep_b = $1; $line_b = $2; $file_b = $3;
+
+  if ($file_a ne $file_b) {
+    return ($file_a cmp $file_b);
+  } else {
+    if ($line_a != $line_b) {
+      return ($line_a <=> $line_b);
+    } else {
+      return ($sstep_a <=> $sstep_b);
+    }
+  }
+}
+\end{code}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Read profile data}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub readProfileData {
+  local($sstepid,$sstepno,$cpu,$cpucomm,$wait,$comm,$i,$time);
+  if (!open(PROFILE,$infile)) {
+    print STDERR "$Pgm: failed to open profile data in PROF.bsp\n";
+    exit(1);
+  }
+  chop($profdate    = <PROFILE>);
+  chop($compileopts = <PROFILE>);
+  chop($machname    = <PROFILE>);
+  chop($etime_str   = <PROFILE>);
+  $etime = $etime_str / 1.0;
+  while (<PROFILE>) {
+    /^(\d+)\s+(\d+)\s+(\d+)\s+([0-9a-zA-Z\_\.<>]+)\s+(\d+)\s+(\d+).(\d+)\s+(\d+).(\d+)\s+(\d+).(\d+)\s+(\d+).(\d+)/;
+    $sstep_list{"$2-$3-$4"}=1;
+    $sstepid = "$1-$2-$3-$4";
+    $sstepno = int($5);
+    $cpu     = "$6.$7" / 1.0;
+    $cpucomm = "$8.$9" / 1.0;
+    $wait    = "$10.$11" / 1.0;
+    $comm    = "$12.$13" / 1.0;
+
+    $time    = $cpucomm + $comm + $wait;
+
+    $sstepnoEnv{$sstepid}   = $sstepno;
+    $cpuEnv{$sstepid}       = $cpu;
+    $sstepCpuEnv{$sstepid}  = $cpucomm;
+    $sstepCommEnv{$sstepid} = $comm;
+    $sstepWaitEnv{$sstepid} = $wait;
+   
+    ($sstepno > $max_sstepno) && ($max_sstepno = $sstepno);
+    ($time    > $max_time)    && ($max_time    = $time);
+    ($1       > $nprocs)      && ($nprocs      = int($1));
+    
+  }
+  close(PROFILE);
+#  ($max_sstepno%2!=0) && ($max_sstepno++);
+  $nprocs++;
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Create Postscript prologue}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub psPrologue {
+  print PSFILE <<"_END_PS_PROLOGUE_";
+%!PS-Adobe-2.0
+%%Creator:      $Pgm $Version Copyright 1995 Oxford University
+%%Title:        Super-step time graphs
+%%CreationDate: $profdate
+%%Pages: 1
+%%EndComments
+%%$Pgm: Written by Jonathan Hill (Jonathan.Hill@@comlab.ox.ac.uk)
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Global Variables
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+/title      ($title)   def
+/pagewidth  $a4width   def
+/pageheight $a4height  def
+/cm         {28 mul}   def
+/profdate  ($profdate) def
+/etime     ($etime_str seconds elapsed time on $machname) def
+/progname  (Oxford BSP library [compile flags $compileopts]) def
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Draw the Axis of the graph:
+%%%
+%%% Stack: line,sstep,i,r  <-top of stack
+%%%
+%%% where 
+%%%       line  = string with line number and file
+%%%       sstep = string with current super-step
+%%%       i     = maximum number of super-steps
+%%%       r     = maximum time in seconds
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+/drawaxis
+{
+  5 dict begin
+  /maxtime  exch def
+  /maxsstep exch def
+  /sstep    exch def
+  /filename exch def
+  /process  exch def
+  /processsize exch def
+
+	gsave
+	newpath
+	 1 cm  1 cm moveto
+	 0    10 cm rlineto
+	 1 cm  1 cm moveto
+	10 cm  0 cm rlineto
+         1 cm  1 cm moveto
+
+        % Draw the y axis
+	1 1 11
+        {
+          1 cm exch cm moveto
+	 -0.2 cm 0  rlineto
+          0.2 cm 0  rmoveto
+        } for
+
+        % Draw the x axis
+	1 1 11
+        {
+          cm   1 cm moveto
+	  0 -0.2 cm rlineto
+          0  0.2 cm rmoveto
+        } for
+    
+        /Helvetica findfont 15 scalefont setfont
+        -7 10.8 cm moveto 
+	maxtime 10 string cvs show    % Show Max-seconds at the end of axis
+	0.1 cm 0.8 cm moveto
+	(0.0) show
+
+	10.7 cm  0.4 cm moveto 
+	maxsstep 10 string cvs show   
+	5.85 cm  0.4 cm moveto 
+        
+        maxsstep 2 mod 0 eq
+        {
+          maxsstep 2 idiv 
+	  10 string cvs show   
+        } if
+	0.9 cm 0.4 cm moveto
+	(0) show
+        stroke
+        /Helvetica findfont 20 scalefont setfont
+        filename stringwidth pop
+        10 cm exch sub 2 div
+        1 cm add
+        dup
+        -10 moveto
+        filename show
+        -35 moveto
+        sstep show
+        stroke
+        /Helvetica findfont processsize scalefont setfont
+        -25 6 cm moveto process show
+        stroke
+	grestore
+  end
+} def
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Draw the bars in the graph
+%%%
+%%% Stack: a,b,c,d  <-top of stack
+%%%
+%%% where a = Percentage of maximum number of
+%%%           super-steps executed
+%%%       b = %age of total time in sstep CPU
+%%%       c = %age of total time in waiting for sync
+%%%       d = %age of total time in communication
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+/drawgraph 
+{
+   4 dict begin
+   /commtime     exch def
+   /sstepcputime exch def
+   /cputime      exch def
+   /sstep        exch def
+
+	gsave
+        %%% Block for Super-step cputime
+	newpath
+	1 cm 1 cm moveto
+	  10 cm sstep mul 
+	  0 
+	rlineto
+          0
+	  10 cm cputime mul
+	rlineto
+	  -10 cm sstep mul
+	  0
+	rlineto
+	closepath
+	$cpu_col setgray
+	fill  
+
+        %%% Block for Waiting time
+	newpath
+	  1  cm
+	  10 cm cputime mul 1 cm add
+	moveto
+	  10 cm sstep mul
+	  0
+	rlineto
+	  0
+          10 cm sstepcputime  mul
+	rlineto
+	  -10 cm sstep mul
+	  0
+        rlineto
+	closepath
+	$wait_col setgray
+	fill
+
+        %%% Block for Comm time
+        newpath
+	  1 cm
+	  10 cm cputime sstepcputime add mul 1 cm add
+	moveto
+	  10 cm sstep mul
+	  0
+	rlineto
+	  0
+          10 cm commtime  mul
+	rlineto
+	  -10 cm sstep mul
+	  0
+        rlineto
+	closepath
+	$comm_col setgray
+	fill
+	grestore
+   end
+} def
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Draw the border
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+/drawborder 
+{
+	gsave
+	newpath
+	0.5 cm 0.5 cm moveto
+	pagewidth 1 cm sub 0 rlineto
+	0 pageheight 1 cm sub rlineto
+        pagewidth neg 1 cm add 0 rlineto         
+	closepath
+	stroke
+        0.5 cm pageheight 1.2 cm sub moveto
+        pagewidth 1 cm sub 0 rlineto
+        stroke
+        1.0 cm pageheight 1.0 cm sub moveto
+        /Helvetica findfont 10 scalefont setfont
+        progname show
+        1.0 cm pageheight 1.0 cm sub moveto
+        etime stringwidth pop
+        pagewidth 1 cm sub exch sub 2 div
+        0 rmoveto
+        etime show
+
+        pagewidth 1.0 cm sub pageheight 1.0 cm sub moveto
+        profdate stringwidth pop
+        neg 0 rmoveto
+        profdate show
+        title stringwidth pop
+        0 gt
+        {
+         0.5 cm pageheight 1.95 cm sub moveto 
+         pagewidth 1 cm sub 0 rlineto
+         stroke
+         0.5 cm pageheight 1.75 cm sub moveto
+         /Helvetica-BoldOblique findfont 15 scalefont setfont
+         title stringwidth pop
+         pagewidth 1 cm sub exch sub 2 div
+         0 rmoveto
+         title show
+        } if
+	grestore
+} def
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Draw the key
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+/drawlegend {
+	gsave
+        /Helvetica findfont 10 scalefont setfont
+	newpath
+        0.5 cm 0.5 cm $key_ind add moveto
+        pagewidth 1 cm sub 0 rlineto
+        stroke
+        
+        newpath
+        1.5 cm 0.6 cm moveto
+        0.3 cm 0 rlineto
+        0      0.3 cm rlineto
+         -0.3 cm 0 rlineto
+        closepath
+        $comm_col setgray fill
+        2.5 cm 0.6 cm moveto
+        0.0 setgray (Super-step communication time) show
+ 
+          $a4width 1 cm sub 
+          3
+        idiv
+        dup dup dup
+        newpath
+        1 cm add 0.6 cm moveto
+        0.3 cm 0 rlineto
+        0      0.3 cm rlineto
+         -0.3 cm 0 rlineto
+        closepath
+        $wait_col setgray fill
+        2 cm add 0.6 cm moveto
+        0.0 setgray (Super-step synchronisation time) show 
+        2 mul dup
+        newpath
+        1 cm add 0.6 cm moveto
+        0.3 cm 0 rlineto
+        0      0.3 cm rlineto
+         -0.3 cm 0 rlineto
+        closepath
+        $cpu_col setgray fill
+        2 cm add 0.6 cm moveto
+        0.0 setgray (Super-step computation time) show 
+	grestore
+} def
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Draw totals
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+/totalTimes
+{
+   5 dict begin
+   /process      exch def
+   /cputime      exch def
+   /scputime     exch def
+   /waittime     exch def
+   /commtime     exch def
+
+	gsave
+	/Helvetica findfont 20 scalefont setfont
+        0 9 cm moveto
+        (Totals on process ) show
+        process 10 string cvs show (:) show
+        0 8.9 cm moveto
+        process 10 string cvs stringwidth
+        (Totals on process :) stringwidth
+        add 0 rlineto
+        stroke
+     
+        0 8 cm moveto
+        (Comm time) show
+        6.0 cm 8 cm moveto
+        (=) show
+        commtime 10 string cvs show
+        ( s) show
+
+        0 7 cm moveto
+        (Sync time) show
+        6.0 cm 7 cm moveto
+        (=) show
+        waittime 10 string cvs show
+        ( s) show
+
+        0 6 cm moveto
+        (Comp time [sstep]) show
+        6.0 cm 6 cm moveto
+        (=) show
+        scputime 10 string cvs show
+        ( s) show
+
+        0 5 cm moveto 
+        (Comp time [other]) show
+        6.0 cm 5 cm moveto
+        (=) show
+        cputime 10 string cvs show
+        ( s) show
+        stroke
+        grestore
+  end
+} def
+	
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+90 rotate
+0 pageheight neg translate
+drawborder
+drawlegend
+
+  0.5 cm $proclabel_ind add 
+  0.5 cm $key_ind add $ssteplabel_ind add 
+translate
+_END_PS_PROLOGUE_
+# 20 5.2 drawaxis
+# 0.5 0.4 0.1 0.3 drawgraph
+# showpage
+
+}
+
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d17 5
+a21 2
+% $Id$
+% $Log$
+d24 43
+d68 1
+a68 1
+$Version        = "0.1beta";
+d72 3
+d77 8
+a84 6
+$graphwidth     = $a4width - ($cmpoints + $proclabel_ind);
+$graphheight    = $a4height - ($ssteplabel_ind + 1.2*$cmpoints);
+$graph_margin   = 28;
+
+$outfile     = "";
+$execfile    = "";
+d86 3
+a88 1
+$profetime   = 0.0;
+d94 1
+d108 49
+d159 1
+d162 59
+a220 20
+  if ($#ARGV!=1) {
+    print STDERR "usage: $Pgm <executable> <postscript-file>\n";
+    exit(1);
+  } else {
+    $outfile = $ARGV[1];
+    $execfile= $ARGV[0];
+    &readProfileData($execfile);
+    if (!open(PSFILE,"> $outfile")) {
+      print STDERR "Pgm: unable to open \"$outfile\" for writing\n";
+      exit(1);
+    }
+    &psPrologue();
+    @@xs = keys %sstepnoEnv;
+    $no_ssteps = int (($#xs + 1) / $nprocs);
+    $x_size = int(($graphwidth/$no_ssteps)-$graphmargin);
+    $y_size = int(($graphheight/$nprocs)-$graphmargin);
+    print STDERR "$nprocs processors executing $no_ssteps ",
+                 "different super-steps\n";
+ 
+    
+d222 19
+a240 7
+    for($i=0;$i<$nprocs;$i++) {
+      print  PSFILE "/Helvetica findfont 10 scalefont setfont\n";
+      printf PSFILE "-25 %d  moveto\n (Process) show\n",
+                    int(($y_size*$i)+($y_size/2)+7);
+      print  PSFILE "/Helvetica findfont 30 scalefont setfont\n";
+      printf PSFILE "-17 %d moveto\n($i) show\n", 
+                    int(($y_size*$i)+($y_size/2)-20),$i;
+d242 8
+d251 12
+a262 34
+    @@xs = keys %sstep_list;
+    for($j=0;$j<$no_ssteps; $j++) {
+      $xs[$j]=~ /(\d+)\-(\d+)\-([0-9a-zA-Z\_\.]+)/;
+      print  PSFILE "/Courier findfont 10 scalefont setfont\n";
+      printf PSFILE "%d -10 moveto\n",($x_size*$j);
+      printf PSFILE "(%s, line %d) stringwidth pop\n".
+                    "%d 1 cm sub exch sub 2 div\n".
+                    "dup 0 rmoveto\n (%s, line %d) show\n"
+                    ,$3,$2,$x_size,$3,$2;
+      printf PSFILE "%d -20 moveto\n",($x_size*$j);
+      printf PSFILE "0 rmoveto (superstep %s) show\n",$1;
+    }
+                    
+                    
+    for($i=0; $i<$nprocs; $i++) {
+      for($j=0; $j<$no_ssteps; $j++) {
+        print  PSFILE "gsave\n";
+        print  PSFILE  ($j*$x_size), " ", 
+                       ($i*$y_size), " translate\n";
+        printf PSFILE "%.1f %1f scale\n",
+                       ($x_size/(14.0*$cmpoints)) , 
+                       ($y_size/(14.0*$cmpoints));
+        
+        $idx = $i . "-" . $xs[$j];
+        $width = $sstepnoEnv{$idx}/$max_sstepno;
+        ($width < 0.03) && ($width = 0.03);
+        printf PSFILE "%.3f %.3f %.3f %.3f drawgraph\n",
+                      $width ,
+                      ($cpuEnv{$idx}/$max_time),
+		      ($sstepCpuEnv{$idx}/$max_time),
+		      ($sstepCommEnv{$idx}/$max_time);
+        printf PSFILE "%d %.1f drawaxis\n",$max_sstepno,$max_time; 
+        print PSFILE  "grestore\n";
+      }
+a263 2
+    printf PSFILE "showpage\n";    
+    close(PSFILE);
+a266 1
+
+d272 2
+a273 3
+  local($filename)=$_[0];
+  local($sstepid,$sstepno,$cpu,$cpucomm,$comm,$i,$time);
+  if (!open(PROFILE,"PROF.bsp")) {
+d277 5
+a281 3
+  $profdate  = <PROFILE>;
+  $profetime = <PROFILE>;
+  chop($profdate);
+d283 1
+a283 1
+    /^(\d+)\s+(\d+)\s+(\d+)\s+([0-9a-zA-Z\_\.]+)\s+(\d+)\s+(\d+).(\d+)\s+(\d+).(\d+)\s+(\d+).(\d+)/;
+d289 2
+a290 1
+    $comm    = "$10.$11" / 1.0;
+d292 1
+a292 1
+    $time    = $cpu + $cpucomm + $comm;
+d298 1
+d329 1
+d334 2
+a335 2
+/etime     (elapsed time $profetime seconds) def
+/progname  (Oxford BSP library: $execfile) def
+d340 1
+a340 1
+%%% Stack: i,r  <-top of stack
+d342 5
+a346 2
+%%% where i = maximum number of super-steps
+%%%       r = maximum time in seconds
+d350 9
+d382 3
+a384 3
+        /Times-Roman findfont 15 scalefont setfont
+        0.1 cm 10.8 cm moveto 
+	10 string cvs show    % Show Max-seconds at the end of axis
+a387 1
+	dup
+d389 1
+a389 1
+	10 string cvs show   
+d391 2
+a392 2
+        dup
+        2 mod 0 eq
+d394 1
+a394 1
+          2 idiv 
+d400 15
+d424 2
+a425 2
+%%%       b = %age of total time in CPU
+%%%       c = %age of total time in sstep CPU
+d436 2
+a437 1
+        %%% Block for cputime
+d450 1
+a450 1
+	0.75 setgray
+d453 1
+a453 1
+        %%% Block for Super-step cputime
+d468 1
+a468 1
+	1.0 setgray
+d471 1
+d486 1
+a486 1
+	0.25 setgray
+d488 1
+d496 1
+d516 1
+a516 1
+        pagewidth 2.0 cm sub pageheight 1.0 cm sub moveto
+d520 14
+d536 102
+d642 2
+d645 1
+a645 1
+  0.5 cm $ssteplabel_ind add 
+@

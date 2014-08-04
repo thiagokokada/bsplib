@@ -1,0 +1,128 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#include "bsp.h"
+#include "bsp_level1.h"
+#include "bsp_f77_names.h"
+#include <stdio.h>
+
+#define MAX_LINE_LENGTH 1024
+
+char *bsp_parameters = "bsp_parameters.ascii";
+char *bsp_paramswww  = "http://www.bsp-worldwide.org/implmnts/"
+                       "oxtool/params_frame.html\n";
+
+static double  _bsp_s=0.0, _bsp_g=0.0, _bsp_l=0.0;
+static int   _bsp_nhalf=0;
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{C interface to SLG}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+double bsp_s()     { return(_bsp_s);}
+double bsp_g()     { return(_bsp_g);}
+double bsp_l()     { return(_bsp_l);}
+int   bsp_nhalf()  { return(_bsp_nhalf);}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Fortran interface to SLG}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+double BSPS()     { return(_bsp_s);}
+double BSPG()     { return(_bsp_g);}
+double BSPL()     { return(_bsp_l);}
+int   BSPNHALF() { return(_bsp_nhalf);}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Reading in text file containing SLG parameters}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bspparams_init() {
+  FILE *file_ptr;
+  char libtype,*ptr, line[MAX_LINE_LENGTH], 
+       mach[MAX_LINE_LENGTH], device[MAX_LINE_LENGTH];
+  int foundmach=0, found=0, level,procs, nhalf, elements;
+  float s,l,g;
+  extern char* _bsp_arch;
+  extern char* _bsp_device;
+  extern char* _bsp_include_dir;
+  extern int   _bsp_opt_flibrary_level;
+  extern char  _bsp_library_type;
+
+  if (bsp_pid()==0) {
+    strcpy(line,_bsp_include_dir);
+    strcat(line,bsp_parameters);
+    file_ptr = fopen(line,"r");
+    if (file_ptr==NULL) 
+      bsp_abort("{bsp_parameters_init} unable to open file \"%s\"",line);
+
+    ptr = line;
+    while(ptr && !found) {
+      ptr = fgets(line,MAX_LINE_LENGTH,file_ptr); 
+      elements = sscanf(line,"%s %s %c%d %d %f %f %f %d",
+			mach,device,&libtype,&level,&procs,&s,&l,&g,&nhalf);
+      if ((elements == 9)                    && 
+          (libtype==_bsp_library_type)       &&
+          (level  ==_bsp_opt_flibrary_level) &&
+          (strcmp(mach,_bsp_arch)==0)        &&
+          (strcmp(device,_bsp_device)==0)) {
+         foundmach  = 1;
+         _bsp_s     = 1000000.0 * s;
+         _bsp_l     = l;
+         _bsp_g     = g;
+         _bsp_nhalf = nhalf;
+         if (procs>=_bsp_nprocs) found =1;
+      } else {
+        found=((elements==9) && foundmach);
+      }       
+    }
+    fclose(file_ptr);
+    if (!found) {
+      fprintf(stderr,"**WARNING{bsp_begin}**\n"
+                "\tGuessing the BSP parameters for a %d processor %s machine\n"
+                "\tusing %s for communication. Please update the\n"
+                "\tfile \"%s/%s\" with\n"
+                "\tthe information produced by running bspprobe, or from\n"
+                "\tthe following web site:\n\n\t  %s\n",
+		_bsp_nprocs,_bsp_arch,_bsp_device,
+		_bsp_include_dir,bsp_parameters,bsp_paramswww);
+      _bsp_s     = 10000000.0;
+      _bsp_l     = 3000.0;
+      _bsp_g     = 12.0;
+      _bsp_nhalf = 8;
+    }
+  }
+  bsp_pushregister(&_bsp_s,    sizeof(double));
+  bsp_pushregister(&_bsp_l,    sizeof(double));
+  bsp_pushregister(&_bsp_g,    sizeof(double));
+  bsp_pushregister(&_bsp_nhalf,sizeof(int));
+  bsp_sync();
+  
+  bsp_get(0,&_bsp_s,0,    &_bsp_s,sizeof(double));
+  bsp_get(0,&_bsp_l,0,    &_bsp_l,sizeof(double));
+  bsp_get(0,&_bsp_g,0,    &_bsp_g,sizeof(double));
+  bsp_get(0,&_bsp_nhalf,0,&_bsp_nhalf,sizeof(int));
+  bsp_sync();
+  bsp_popregister(&_bsp_nhalf);
+  bsp_popregister(&_bsp_g);
+  bsp_popregister(&_bsp_l);
+  bsp_popregister(&_bsp_s);
+}
+\end{code}

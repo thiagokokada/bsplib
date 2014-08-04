@@ -1,0 +1,78 @@
+This is makeindex, portable version 2.12 [26-May-1993].
+Scanning input file root.idx.....done (1201 entries accepted, 0 rejected).
+Sorting entries.............done (13758 comparisons).
+Generating output file root.ind....
+## Warning (input = root.idx, line = 112; output = root.ind, line = 3):
+   -- Conflicting entries: multiple encaps for the same page under same key.
+
+## Warning (input = root.idx, line = 79; output = root.ind, line = 5):
+   -- Conflicting entries: multiple encaps for the same page under same key.
+
+## Warning (input = root.idx, line = 114; output = root.ind, line = 5):
+   -- Conflicting entries: multiple encaps for the same page under same key.
+
+## Warning (input = root.idx, line = 31; output = root.ind, line = 33):
+   -- Conflicting entries: multiple encaps for the same page under same key.
+
+## Warning (input = root.idx, line = 302; output = root.ind, line = 43):
+   -- Conflicting entries: multiple encaps for the same page under same key.
+
+## Warning (input = root.idx, line = 297; output = root.ind, line = 44):
+   -- Conflicting entries: multiple encaps for the same page under same key.
+
+## Warning (input = root.idx, line = 47; output = root.ind, line = 69):
+   -- Conflicting entries: multiple encaps for the same page under same key.
+
+## Warning (input = root.idx, line = 33; output = root.ind, line = 76):
+   -- Conflicting entries: multiple encaps for the same page under same key.
+
+## Warning (input = root.idx, line = 258; output = root.ind, line = 77):
+   -- Conflicting entries: multiple encaps for the same page under same key.
+
+## Warning (input = root.idx, line = 252; output = root.ind, line = 79):
+   -- Conflicting entries: multiple encaps for the same page under same key.
+
+## Warning (input = root.idx, line = 234; output = root.ind, line = 82):
+   -- Conflicting entries: multiple encaps for the same page under same key.
+
+## Warning (input = root.idx, line = 32; output = root.ind, line = 84):
+   -- Conflicting entries: multiple encaps for the same page under same key.
+
+## Warning (input = root.idx, line = 282; output = root.ind, line = 96):
+   -- Conflicting entries: multiple encaps for the same page under same key.
+
+## Warning (input = root.idx, line = 2; output = root.ind, line = 97):
+   -- Conflicting entries: multiple encaps for the same page under same key.
+
+## Warning (input = root.idx, line = 1093; output = root.ind, line = 101):
+   -- Conflicting entries: multiple encaps for the same page under same key.
+
+## Warning (input = root.idx, line = 888; output = root.ind, line = 105):
+   -- Conflicting entries: multiple encaps for the same page under same key.
+
+## Warning (input = root.idx, line = 797; output = root.ind, line = 106):
+   -- Conflicting entries: multiple encaps for the same page under same key.
+
+## Warning (input = root.idx, line = 1165; output = root.ind, line = 132):
+   -- Conflicting entries: multiple encaps for the same page under same key.
+
+## Warning (input = root.idx, line = 1174; output = root.ind, line = 142):
+   -- Conflicting entries: multiple encaps for the same page under same key.
+
+## Warning (input = root.idx, line = 4; output = root.ind, line = 143):
+   -- Conflicting entries: multiple encaps for the same page under same key.
+
+## Warning (input = root.idx, line = 310; output = root.ind, line = 161):
+   -- Conflicting entries: multiple encaps for the same page under same key.
+
+## Warning (input = root.idx, line = 311; output = root.ind, line = 162):
+   -- Conflicting entries: multiple encaps for the same page under same key.
+
+## Warning (input = root.idx, line = 309; output = root.ind, line = 163):
+   -- Conflicting entries: multiple encaps for the same page under same key.
+
+## Warning (input = root.idx, line = 883; output = root.ind, line = 182):
+   -- Conflicting entries: multiple encaps for the same page under same key.
+done (204 lines written, 24 warnings).
+Output written in root.ind.
+Transcript written in root.ilg.

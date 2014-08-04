@@ -1,0 +1,33 @@
+' $Id: boxlabel.n,v 1.4 1995/10/17 15:04:19 jfontain Exp $
+.TH pieBoxLabeller tk
+.BS
+.SH NAME
+pieBoxLabeller \- pie box style labeller class
+.SH SYNOPSIS
+\fBnew pieBoxLabeller \fIcanvasPathName ?options?\fR
+.SH DESCRIPTION
+The pie box style labeller object is used as a slice label placer for a \fBpie\fR object and is passed to the \fBpie\fR constructor through its \fB-labeller\fR option (see the \fBpie\fR manual page).
+.PP
+The labels are arranged in 2 columns below the pie graphics. Each label text is enclosed in a rectangle, the background color of which matches its corresponding slice. The slice share value is placed to the right of the label text, separated by a semi-column. Each label is actually a \fBcanvasLabel\fR object (see \fBcanlabel\fR manual page for further information).
+.PP
+There is no need to \fBdelete\fR a \fBpieBoxLabeller\fR as it is automatically handled by the \fBpie\fR class.
+.SH OPTIONS
+\fB-font\fR
+.PP
+Specifies a font for the slice labels. If not specified, the default font is system dependant.
+.PP
+\fB-justify\fR
+.PP
+Specified how to justify labels within their own column. Must be one of \fBleft\fR, \fBcenter\fR or \fBright\fR. Defaults to \fBleft\fR. For example, if justification is \fBright\fR, all column labels right edges are aligned.
+.PP
+\fB-offset\fR
+.PP
+Specifies the distance between the pie graphics and the closest slice label. This value may be specified in any of the forms described in the \fBcanvas\fR COORDINATES manual section.
+.SH TAGS
+The labeller has the following specific tag (see the \fBcanvas\fR manual page ITEM IDS AND TAGS section for more information):
+.PP
+\fBpieBoxLabeller(\fI$labellerId\fB)\fR
+.SH LIMITATIONS
+There is no configuration procedure.
+.SH KEYWORDS
+pie, canlabel, canvas, new

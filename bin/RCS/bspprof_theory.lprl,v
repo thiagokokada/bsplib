@@ -1,0 +1,384 @@
+head	1.2;
+access;
+symbols;
+locks
+	jonh:1.2; strict;
+comment	@# @;
+
+
+1.2
+date	96.03.18.14.34.57;	author jonh;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	96.01.24.16.28.34;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@Updating values used in EuroPar96 paper
+@
+text
+@%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995, University of Oxford                         %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%$Id: bspprof_theory.lprl,v 1.1 1996/01/24 16:28:34 jonh Exp jonh $
+%$Log: bspprof_theory.lprl,v $
+# Revision 1.1  1996/01/24  16:28:34  jonh
+# Initial revision
+#
+
+The following BSP cost parameters have been calculated whilst a
+program has been profiled. The values when a machine isn't profiling
+will be slightly better.
+
+
+\begin{code}
+%bsp_param_env = (
+#  Machine              S(Mflop),l,g,N_half
+
+   # Alpha Farm
+   "OSF1-2",		"9.6  32636   73.7  90",
+   "OSF1-3",		"9.6  67064   77.6 130",
+   "OSF1-4",		"9.6  92716   77.8 120",
+   
+   # Sun Workstations
+   "SunOS-2",		"0.7   60000  45.0  80",
+   "SunOS-3",		"0.7  182000  62.0 122",
+   "SunOS-4",		"0.7  198000  68.0 135",
+   "SunOS-5",		"0.7  247500  95.0 128",
+
+   # Multiprocessor suns
+   "Solaris-2",         "13.0     69  4.4  7",
+   "Solaris-3",         "13.0     96  5.4  8",
+   "Solaris-4",         "13.0    152  5.3 11",
+   
+   # SGI PowerChallenge
+   "SGICHALL64-2",	"34.4   6834  7.2  524",
+   "SGICHALL64-3",	"34.1   8620  7.7  725",
+   "SGICHALL64-4",	"32.9   9569  7.9  928",
+
+   # IBM SP2
+   "SP2-2",	 	"26.0   2386  7.5  6",
+   "SP2-4",	 	"26.0   4159  7.7  6",
+   "SP2-8",             "26.0   8340  7.8  6",
+
+   # Hitachi SR2001
+   "HITACHIMPP-2",      "
+   );
+$profiling_scale = 1.2;  # Add 20% to the cost of L
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Determine the BSP parameters}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub setBSPmachineParams {
+  local($nprocs)=$_[0];
+  local($params) = "";
+
+  $arch = `bsparch -arch` if ($arch eq "");
+  
+  while($params eq "" && $nprocs>0) {
+    if ($bsp_param_env{$arch . '-' .$nprocs}) {
+      $params = $bsp_param_env{$arch. '-' .$nprocs};
+    } else {
+      $nprocs--;
+    }
+  }
+
+  if (($bsp_s > 0.0) && ($params =~ /^(\d+).(\d+)/)) {
+    $bsp_real_s = "$1.$2"/1.0;
+  } elsif ($params =~ /^(\d+).(\d+)\s+(\d+)\s+(\d+).(\d+)\s+(\d+)$/) {
+    $bsp_real_s = "$1.$2"/1.0;
+    $bsp_s      = $bsp_real_s;
+    $bsp_l      = int($profiling_scale * int($3));
+    $bsp_g      = "$4.$5"/1.0;
+    $bsp_nhalf  = int($6);
+  } else {
+    print STDERR "I do not know the BSP parameters for a $arch\n";
+  }
+
+  if ($bsp_s != $bsp_real_s) {
+    printf STDERR 
+      "The $arch processor that the profile was generated on was running\n".
+      "at a different megaflop rate than you have suggested. The prediction\n".
+      "graph will be scaled by %.2f for  your new machine\n\n",
+      $bsp_real_s/$bsp_s;
+   }
+   printf STDERR 
+      "Using the following BSP paramaters for a $nprocs processor $arch:\n".
+      "\tS (Mflop) = %.1f\n".
+      "\tl         = %d\n".
+      "\tg         = %.1f\n".
+      "\tN_1/2     = %d\n\n", $bsp_s,$bsp_l,$bsp_g,$bsp_nhalf;
+    print STDERR 
+"Note:\tthese parameters assume that your program was compiled with\n",
+"\tthe flags \"-O -prof\". There is a considerable improvement to the\n",
+"\tBSP parameters when profiling is turned off---but then again you\n",
+"\tyou won't be able to use this tool :-).\n\n";
+
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Produce Theory Graph}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Based on strata graph....
+
+\begin{code}
+sub createTheoryGraph {
+  local($i,$inc,$xticks,$yticks,$label,$max_x,$trash,$scale);
+  local($cost_comm,$cost_comp,$real_comm);
+  local($efficiency,$eff_width,$str);
+  local(@@keys);
+  
+
+ if ($zooming) {
+   $yticks = 10;
+ } elsif ($max_time > 10 && $max_time < 16) {
+    $max_time = int($max_time)+1;
+    $yticks = $max_time; 
+  } else {
+    ($min_time,$max_time, $yticks)  = &axisScale($min_time,$max_time);
+  }
+  @@strata_list     = grep(&withinTimeZoom($_),      @@strata_list);
+
+  @@strata_hrelcost = grep(($_ =~ /^(.*)@@@@(.*)@@@@(.*)@@@@(.*)$/)&&
+                          ($2/1.0 <= $max_time),@@strata_hrelcost);
+  ($cost_comm,$cost_comp,$real_comm) = &totalTheoryCost(0.0);
+  $max_s= $cost_comm + $cost_comp;
+
+  @@strata_hrelcost = grep(($_ =~ /^(.*)@@@@(.*)@@@@(.*)@@@@(.*)$/)&&
+			  ($1/1.0 >= $min_time),@@strata_hrelcost);
+  ($cost_comm,$cost_comp,$real_comm) = &totalTheoryCost($min_time);
+  $min_s = $max_s - ($cost_comm + $cost_comp);
+
+  %sstep_list = ();
+  foreach $i (@@strata_list) {
+    $i =~ /^(\d+\-\d+\-[0-9a-zA-Z\_\.<>]+)/;
+    $sstep_list{$1} = 1;
+  }
+  &setMaximumBytesCommStrata();
+
+  $height = int(($graphheight-$strata_ind)/2);
+  $width  = int($graphwidth-((2.5*$cmpoints) + $strata_key_ind));
+  if ($StrataBytes) {
+    if ($max_bytes > (15*1024)) {
+      ($trash,$max_x,$xticks) = &axisScale(0,$max_bytes/1024);
+      $max_bytes = $max_x*1024;
+      $label = "Kbytes";
+    } else {
+      ($trash,$max_x,$xticks) = &axisScale(0,$max_bytes);
+      $max_bytes = $max_x;
+      $label = "bytes";
+    }
+  } else {
+    ($trash,$max_x,$xticks) = &axisScale(0,$max_comm);
+    $max_comm  = $max_x;
+    $label = "pkts";
+  }
+  $xticks = $max_x  if ($max_x < $xticks);
+
+  $efficiency = (($max_s-$min_s)/(($max_time - $min_time)*$bsp_s));
+  # Alter the efficiency to reflect the user giving a megaflop rate
+  # that is different from the one on which the benchmark was performed.
+  $efficiency *= $bsp_real_s/$bsp_s; 
+  printf STDERR "CREATING a theory graph.\n";
+  printf STDERR 
+     "\tAssuming that the time spent in purely parallel _computation_ runs\n".
+     "\tat 100%% effeciency, then the cost of executing the program between\n".
+     "\t%.1f and %.1f seconds is:\n\n",$min_time,$max_time;
+  if ($efficiency < 1.0) {
+    printf STDERR "\t(s,l,g) %.1f%% worse than the total theoretical cost.\n",
+                  (1-$efficiency)*100;
+  } else {
+    printf STDERR "\t(s,l,g) %.1f%% better than the total theoretical cost.\n",
+                  ($efficiency-1)*100;
+    
+  }
+  if ($cost_comm/$real_comm < 1.0) {
+    printf STDERR "\t(l,g)   %.1f%% worse than the theoretical communication costs.\n",
+                  (1-($cost_comm/$real_comm))*100;
+  } else {
+    printf STDERR "\t(l,g)   %.1f%% better than the theoretical communication costs.\n",
+                 (($cost_comm/$real_comm)-1)*100;
+  }
+
+  $eff_width  = $width;
+  $eff_width *= $efficiency if ($efficiency < 1.0);
+  $yticks     = 2           if ($efficiency < 0.5);
+
+  print PSFILE "gsave\n 0.95 cm ",($height/2),
+               " moveto 90 rotate ",
+               "/Helvetica  findfont 14 scalefont setfont ",
+               "(Prediction) stringwidth pop 2 div neg 0 rmoveto ",
+               "(Prediction) show grestore\n";
+  print PSFILE "gsave 2.2 cm 0 translate\n";
+  &drawStrataAxis($height,$eff_width,$min_s,$max_s,$yticks,
+                $max_x,$xticks,$label . " in",1);
+  &drawStrata($height,$eff_width,0,1);
+ # @@keys = &drawStrataSsteps($height,$eff_width,0);
+
+  $eff_width = $width;
+  $eff_width *= 1/$efficiency if ($efficiency > 1.0);
+  $yticks     = 2             if ($efficiency > 2.0);
+  
+  if ($efficiency < 1.0) {
+    $str = sprintf("%.1f%% worse than the total theoretical cost; ",
+                   (1-$efficiency)*100);
+  } else {
+    $str = sprintf("%.1f%% better than total theoretical cost; ",
+                   ($efficiency-1)*100);
+  }
+  if ($cost_comm/$real_comm < 1.0) {
+    $str .= sprintf("%.1f%% worse than the theoretical communication cost.",
+                    (1-($cost_comm/$real_comm))*100);
+  } else {
+    $str .= sprintf("%.1f%% better than the theoretical communication cost.",
+                    (($cost_comm/$real_comm)-1)*100);
+  }
+  printf PSFILE "grestore gsave ".
+                "/Helvetica-BoldOblique findfont 12 scalefont setfont\n".
+                "%d %d moveto (%s) stringwidth pop 2 div neg 0 rmoveto ".
+                "(%s) show\n",
+                int(($width/2)+(2.2*$cmpoints)) ,
+                int(($graphheight-$strata_ind)/2),$str,$str;
+               
+  print PSFILE "grestore gsave\n 0.95 cm ",
+               int((($graphheight-$strata_ind)/2)+$strata_ind+($height/2)),
+               " moveto 90 rotate ",
+               "/Helvetica  findfont 14 scalefont setfont ",
+               "(Practice) stringwidth pop 2 div neg 0 rmoveto ",
+               "(Practice) show\n";
+  print PSFILE "grestore gsave\n 2.2 cm  ", 
+               int((($graphheight-$strata_ind)/2)+$strata_ind), 
+               " translate\n";
+  &drawStrataAxis($height,$eff_width,$min_time,$max_time,$yticks,
+                  $max_x,$xticks,$label. " out",0);
+  &drawStrata($height,$eff_width,1,0);
+  @@keys = &drawStrataSsteps($height,$eff_width,1,0);
+  printf PSFILE "grestore %d 0 translate\n",$graphwidth - $strata_key_ind;
+  $scale = (($#keys+1)*15) + ($nprocs*40) +80;
+  if ($scale> $graphheight) {
+    $scale = $graphheight/$scale;
+    printf PSFILE "0 %d translate %f %f scale \n",
+                  int($graphheight*(1-$scale)),$scale,$scale;
+  }
+  &drawStrataKey(@@keys);
+  print PSFILE "showpage\n";
+   
+
+}
+
+sub totalTheoryCost {
+  local($last_time)=@@_;
+  local($i,$time_start,$time_end,$h_cost,$h_rel);
+  local($cost_comm,$cost_comp,$cost_comm_real);
+
+  $cost_comm = 0.0;$cost_comp=0.0;
+  $cost_comm_real = 0.0;
+  for($i=0;$i<=$#strata_hrelcost;$i++) {
+    ($time_start,$time_end,$h_cost,$h_rel)
+      =split(/\s+@@@@\s+/,$strata_hrelcost[$i]);
+    $h_cost     = int($h_cost);
+    $time_start = $time_start /1.0;
+    $time_end   = $time_end   /1.0;
+    # Computation cost in seconds
+    $cost_comp      += $time_start-$last_time;
+    # Theoretical communication cost in MegaFlops
+    $cost_comm      += ($bsp_l + $h_cost);
+    # Actual communication cost in seconds
+    $cost_comm_real += $time_end-$time_start;
+
+    $last_time = $time_end;
+  }
+  return($cost_comm/1000000,$cost_comp*$bsp_s,$cost_comm_real*$bsp_s);
+}
+\end{code}
+
+\begin{code}
+1;
+\end{code}
+
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d17 5
+a21 2
+%$Id$
+%$Log$
+d42 5
+d54 6
+a59 7
+   "SP2-2",	 	"26.0   4886  6.2  134",
+   "SP2-3",	 	"25.3   7526  6.3  177",
+   "SP2-4",	 	"25.1  11054  7.2  162",
+   "SP2-5",	 	"25.1  13294  8.2  154",
+   "SP2-6",	 	"25.1  15944  7.3  172",
+   "SP2-7",	 	"24.7  17278  8.8  151",
+   "SP2-8",             "25.0  20064  7.4  176"
+d61 1
+a69 1
+  local($arch) = `bsparch -arch`;
+d71 2
+d82 13
+a94 5
+  if ($params =~ /^(\d+).(\d+)\s+(\d+)\s+(\d+).(\d+)\s+(\d+)$/) {
+    $bsp_s     = "$1.$2"/1.0;
+    $bsp_l     = int($3);
+    $bsp_g     = "$4.$5"/1.0;
+    $bsp_nhalf = int($6);
+d96 6
+d112 1
+a112 3
+  } else {
+    print STDERR "I do not know the BSP parameters for a $arch\n";
+  }
+d139 1
+a139 1
+  @@strata_hrelcost = grep(($_ =~ /^(.*)@@@@(.*)@@@@(.*)$/)&&
+d144 1
+a144 1
+  @@strata_hrelcost = grep(($_ =~ /^(.*)@@@@(.*)@@@@(.*)$/)&&
+d176 3
+d202 1
+d210 1
+a210 1
+  &drawStrataAxis($height,$eff_width,$min_s,$max_s,5,
+d217 1
+d230 1
+a230 1
+    $str .= sprintf("%.1f%% worse than the theoretical communication cost.",
+d268 1
+a268 1
+  local($i,$time_start,$time_end,$h_cost);
+d274 2
+a275 1
+    ($time_start,$time_end,$h_cost)=split(/\s+@@@@\s+/,$strata_hrelcost[$i]);
+@

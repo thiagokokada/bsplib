@@ -1,0 +1,3024 @@
+head	1.7;
+access;
+symbols;
+locks
+	jonh:1.7; strict;
+comment	@% @;
+
+
+1.7
+date	96.06.13.10.16.53;	author jonh;	state Exp;
+branches;
+next	1.6;
+
+1.6
+date	96.04.03.10.59.02;	author jonh;	state Exp;
+branches;
+next	1.5;
+
+1.5
+date	96.02.26.10.09.43;	author jonh;	state Exp;
+branches;
+next	1.4;
+
+1.4
+date	96.01.09.16.51.26;	author jonh;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	95.11.08.09.52.50;	author jonh;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	95.08.31.16.27.45;	author jonh;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	95.08.29.14.05.54;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.7
+log
+@Preliminary BSPlib proposal
+@
+text
+@%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995, University of Oxford                         %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsp_lib_mpass.lc,v 1.6 1996/04/03 10:59:02 jonh Exp jonh $
+% $Log: bsp_lib_mpass.lc,v $
+% Revision 1.6  1996/04/03  10:59:02  jonh
+% changing over to bsp_init
+%
+% Revision 1.5  1996/02/26  10:09:43  jonh
+% going to reduce L
+%
+% Revision 1.4  1996/01/09  16:51:26  jonh
+% Removing undefined on the receive type
+%
+% Revision 1.3  1995/11/08  09:52:50  jonh
+% Solved CSS Transmit bug, and added combining puts optimisation
+%
+% Revision 1.2  1995/08/31  16:27:45  jonh
+% seems to be working on Sp2 and on top of MPI
+%
+% Revision 1.1  1995/08/29  14:05:54  jonh
+% Initial revision
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+\chapter{A BSP library built ontop of message passing}
+
+\begin{code}
+#include "bsp_lib.h"
+#include "bsp_profile.h"
+#include "bsp_contentionfree.h"
+
+static void bufferGets();
+static void bufferBSMP();
+static void dumpFifoCommTable(char*,_BSPcomm_thunk**,int*);
+static void receiveSomething(int,int);
+static void sendSomething(int*);
+static void config_contention_free_communication();
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Per-process global variables}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+int _bsp_pid;         /* An indivduals process number. */
+                      /* (different on each process)   */
+int _bsp_nprocs=0;    /* Total number of BSP processes */
+
+int _bsp_fork_nprocs; /* Number of processes at startup*/
+
+int _bsp_done_begin=0, _bsp_done_init=0;
+
+_BSPinfo _mpass;     /* Global variables required for message passing */
+\end{code}
+
+These global variables are used with the macros that I use to specify
+the message passing communication.
+\begin{code}
+comm_handle   _bspmpass_msgid;
+status_handle _bspmpass_status;
+int           _bspmpass_errno;
+int           _bspmpass_type;
+#ifdef MPASS_MPI
+status_handle *_bspmpi_status_arr;
+int            _bspmpi_next_msgid;
+MPI_Group      _bspmpi_group,_bspmpi_group_world;
+#endif
+#ifdef MPASS_MPL
+int        _bspmpl_nbytes;
+int        _bspmpl_nbuf[2];
+#endif
+#ifdef MPASS_PARIX
+RR_Message_t _bspparix_message, *_bspparix_received=NULL;
+#endif
+
+#ifdef MPASS_EXPRESS
+struct nodenv _bspexpress_params;
+int           _bspexpress_dst;
+#endif
+\end{code} 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Common code to all versions of the BSP library}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+The following is included here, and not linked into the library. The
+reason for this is efficiency, as some data-structures are static, and
+wouldnt otherwise be visable in the respective files. The efficiency
+of static arrays (e.g., the address table) is far better than
+dynamically allocated arrays on some pipelined architecures because
+the compiler can often speculatively preget information. 
+\begin{code}
+#include "bsp_lib_common.h"
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\texttt{bsp\_init}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+static void bsp_init_setup(int main_is_fortran,int argc,char **argv) {
+  int    errno;
+  
+  /* Procedure defined by the BSP compilation driver bspfront */
+  _bsp_preload_init();  
+
+  if (main_is_fortran)
+    errno  = f77whatis_nprocs_mypid(&_bsp_fork_nprocs,&_bsp_pid);
+  else
+    errno  = cwhatis_nprocs_mypid(&argc,&argv,&_bsp_fork_nprocs,&_bsp_pid);
+
+  _bsp_nprocs = _bsp_fork_nprocs; /* This may be changed by start */
+  if (_bsp_fork_nprocs > BSP_MAX_PROCS) 
+    bsp_abort("{main}: BSP_MAX_PROCS too small (=%d) . Recompile library",
+              BSP_MAX_PROCS);
+  if (errno)
+    bsp_abort("{main}: parallel program wouldn't start");
+}
+\end{code}
+
+\begin{code}
+void BSPINIT(void (*startproc)(void)) {
+  extern void _bsp_init(void (*)(void));
+
+  _bsp_done_init=1;
+  bsp_init_setup(1,0,NULL);
+  _bsp_init(startproc);
+}
+
+void bsp_init(void (*startproc)(void),int argc,char **argv) {
+  extern void _bsp_init(void (*)(void));
+
+  _bsp_done_init=1;
+  bsp_init_setup(0,argc,argv);
+  _bsp_init(startproc);
+}
+
+void _bsp_init(void (*startproc)(void)) {
+  if (_bsp_pid==0) {
+    /* If processor zero, or compiled with a semantics the same as */
+    /* Richards library (i.e., start is  the first thing executed), */
+    /* then just return from this procedure. */
+  } else {
+    
+    /* Call  the procedure that contained bsp_start. Remember that    */
+    /* bsp_finish must be called during the lifetime of the procedure */
+    (*startproc)();
+    bsp_abort("Leaving the scope of the procedure that contained "
+              "bsp_start before finding a bsp_finish.");
+    messg_exit(0);
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Starting a BSP process: \texttt{bsp\_begin}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+void BSPBEGIN(int *maxprocs) {
+  extern void _bsp_begin(int);
+  if (!_bsp_done_init) bsp_init_setup(1,0,NULL); 
+  _bsp_begin(*maxprocs);
+  _bsp_done_begin=1;
+}
+
+void bsp_begin(int maxprocs) {
+  extern void _bsp_begin(int);
+  if (!_bsp_done_init) bsp_init_setup(0,0,NULL); 
+  _bsp_begin(maxprocs);
+  _bsp_done_begin=1;
+}
+
+void _bsp_begin(int maxprocs) {
+  int *gids,i;
+
+  setup_nonblocksend_buffersize(&BSP_BUFFER_SIZE);
+  initProcessGlobals();
+
+  if (_bsp_pid==0) {
+    if      (_bsp_done_begin) bsp_abort("{bsp_begin}:already started");
+    else if (maxprocs<0)     bsp_abort("{bsp_begin}:positive number required");
+    else if (maxprocs==0)    _bsp_nprocs = _bsp_fork_nprocs;
+    else 
+      _bsp_nprocs = (maxprocs>_bsp_fork_nprocs)?_bsp_fork_nprocs:maxprocs;
+#ifdef STATISTICS
+    if (BSP_DO_STAT) createStatisticsLog();
+#endif
+#ifdef PROFILE
+    createProfileLog();
+#endif
+  }
+  messg_broadcast(_bsp_fork_nprocs,_bsp_pid,0,(char*)&_bsp_nprocs,sizeof(int));
+  
+#ifdef DEBUG
+  bsp_debug("{bsp_start} process %d starting",_bsp_pid);
+#endif
+  _bsp_done_begin = 1;
+  checkDefines();
+\end{code}
+
+Create the group communicator.
+\begin{code}
+  /* Create the group identifier for the barrier*/
+  gids = calloc(_bsp_nprocs,sizeof(int));
+  for(i=0;i<_bsp_nprocs;i++) gids[i]=i;
+
+  setup_group_before_kill_unwanted(_bsp_nprocs,gids);
+  if (_bsp_pid >= _bsp_nprocs) {
+#ifdef DEBUG
+    bsp_debug("{bsp_start}: process not needed so exiting");
+#endif
+    messg_exit(0);
+  } 
+  setup_group_after_kill_unwanted(_bsp_nprocs,gids);
+\end{code}
+
+Initialise the message passing global variable structure.
+\begin{code}
+  /* Create in and out message queues */
+  _mpass.proc_comm_out_fifo
+    = calloc(_bsp_nprocs,sizeof(_BSPcomm_thunk*));
+  _mpass.proc_comm_in_fifo
+    = calloc(_bsp_nprocs,sizeof(_BSPcomm_thunk*));
+  if (_mpass.proc_comm_out_fifo==NULL || _mpass.proc_comm_in_fifo ==NULL)
+    bsp_abort("{bsp_start}: unable to create outer comm fifo");
+
+  for(i=0;i<_bsp_nprocs;i++) {
+    _mpass.proc_comm_out_fifo[i]
+      = calloc(BSP_COMM_FIFO_SIZE,sizeof(_BSPcomm_thunk));
+    _mpass.proc_comm_in_fifo[i]
+      = calloc(BSP_COMM_FIFO_SIZE,sizeof(_BSPcomm_thunk));
+    if (_mpass.proc_comm_out_fifo[i]==NULL ||
+        _mpass.proc_comm_in_fifo[i] ==NULL)
+      bsp_abort("{bsp_start}: unable to create inner comm fifo");
+  }
+  _mpass.proc_comm_out_next=calloc(_bsp_nprocs,sizeof(int));
+  _mpass.proc_comm_in_next =calloc(_bsp_nprocs,sizeof(int));
+  if (_mpass.proc_comm_out_next==NULL || _mpass.proc_comm_in_next==NULL)
+    bsp_abort("{bsp_start} unable to create next array");
+  for(i=0;i<_bsp_nprocs;i++) {
+   _mpass.proc_comm_out_next[i]=0;
+   _mpass.proc_comm_in_next[i] =0;
+  } 
+
+#ifdef LOG_INIT_EXCHANGE
+  i = (((_bsp_nprocs)*(_bsp_nprocs))/(sizeof(int)*8))+1;
+  _mpass.proc_comm_exchange_matrix      = calloc(i,sizeof(int));
+  _mpass.proc_comm_exchange_matrix_copy = calloc(i,sizeof(int));
+  if (_mpass.proc_comm_exchange_matrix      ==NULL ||
+      _mpass.proc_comm_exchange_matrix_copy ==NULL)
+    bsp_abort("{bsp_start{ unable to create exchange matrices");
+#endif
+  config_contention_free_communication();
+  bspcombputs_init();
+
+  /* First call to timer synchronises all processors timers. */
+  for(i=0;i<100;i++) barrier_sync();
+  bsp_time();
+}
+\end{code}
+
+    
+      
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Finishing a BSP process: \texttt{bsp\_end}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_end() {
+  barrier_sync();
+
+#ifdef PROFILE
+  closeProfileLog();
+#endif
+
+#ifdef STATISTICS
+  if (BSP_DO_STAT) closeStatisticsLog();
+#endif
+  
+  if (_bsp_pid > 0) messg_exit(0);
+  /* Only process zero should get here */
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\texttt{bsp\_sync}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+void bsp_sync_cpp(int lineno,const char* filename) {
+  int i,j,k,l,temp,temp_pid,left,right,type,nbytes_recv, left_recv;
+  int no_out_messages=0, no_in_messages=0,bucket,src;
+  int fifo_chunk_size, fifo_chunk_togo,fifo_max_chunk_size,fifo_chunk_offset;
+  _BSPcomm_thunk temp_thunk;
+
+#ifndef TURBO
+  _bsp_lineno   = lineno;
+  _bsp_filename = (char*)filename;
+#endif
+#ifdef PROFILE
+  bspprof_sstep_start();
+#endif
+#ifdef STATISTICS
+  _bspstat.super_steps++;
+#endif
+  bspcombputs_flush();
+  init_contention_free_communication();
+\end{code}
+
+\begin{code}
+#ifdef DEBUG
+  barrier_sync();
+  dumpFifoCommTable("Out table",_mpass.proc_comm_out_fifo,
+                    _mpass.proc_comm_out_next);
+
+  barrier_sync();
+  dumpFifoCommTable("In table",_mpass.proc_comm_in_fifo,
+                    _mpass.proc_comm_in_next);
+    
+#endif
+\end{code}
+
+
+Make each processor exchange $out_i$ with process $i$. This ensures
+that all the processes know exactly how many packets are being sent
+out and received. The following exchange is the bulk syncronisation of
+a super-step. 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Logarithmic exchange}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#if defined(LOG_INIT_EXCHANGE) && defined(ASYNCHRONOUS_TOTAL_EXCHANGE)
+  k = _bsp_nprocs*_bsp_nprocs;
+  i = 8*sizeof(int);            /* Eight bits in a byte */
+  k = (k%i)?((k/i)+1):(k/i);
+  for(i=0;i<k;i++) _mpass.proc_comm_exchange_matrix[i]=0;
+
+  for(i=0;i<_bsp_nprocs;i++) {
+    if (_mpass.proc_comm_out_next[i]>0) 
+      messg_matrix_set((_bsp_pid*_bsp_nprocs)+i);
+  }
+
+  for(i=1;i<_bsp_nprocs;i=2*i) {
+    type  = BSP_MPASS_LAST_DEFINE+i;
+    right = _bsp_pid+i; if (right>=_bsp_nprocs) right -= _bsp_nprocs;
+    left  = _bsp_pid-i; if (left<0)             left  += _bsp_nprocs;
+    nonblock_send(_mpass.proc_comm_exchange_matrix,
+                  k*sizeof(int),right,type);
+    block_recv(_mpass.proc_comm_exchange_matrix_copy,
+               k*sizeof(int),&left,&type,&nbytes_recv);
+    for(j=0;j<k;j++)
+      _mpass.proc_comm_exchange_matrix[j] 
+        |=_mpass.proc_comm_exchange_matrix_copy[j];
+  }
+#ifdef PROFILE
+  /* Fixed point within a superstep where all timing is relative to */
+  bspprof_sstep_fix();
+#endif
+#endif
+\end{code}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Exchanging using asynchronous sends}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#if defined(ASYNCHRONOUS_TOTAL_EXCHANGE)
+  fifo_max_chunk_size = BSP_BUFFER_SIZE / sizeof(_BSPcomm_thunk);
+  for (i=1;i<_bsp_nprocs; i++) {
+    right     = next_contention_free_pid();
+#ifdef LOG_INIT_EXCHANGE
+    if (_mpass.proc_comm_out_next[right]>0) {
+#endif
+      type      = BSP_MPASS_SSTEP_EXCHANGE;
+      fifo_chunk_offset=0;
+      fifo_chunk_togo  =_mpass.proc_comm_out_next[right];
+
+      /* Make sure that if fifo_chunk_togo==fifo_max_chunk_size, two
+         messages are sent */
+      while (fifo_chunk_togo>=0) {
+        if (fifo_chunk_togo >= fifo_max_chunk_size) {
+          fifo_chunk_size  = fifo_max_chunk_size;
+          fifo_chunk_togo -= fifo_max_chunk_size;
+        } else {
+          fifo_chunk_size  = fifo_chunk_togo;
+          fifo_chunk_togo  = -1;
+        }
+        nonblock_send(&_mpass.proc_comm_out_fifo[right][fifo_chunk_offset],
+                      sizeof(_BSPcomm_thunk) *fifo_chunk_size,right,type);
+        fifo_chunk_offset += fifo_chunk_size;
+      }
+#ifdef  LOG_INIT_EXCHANGE  
+    } 
+#endif
+  }
+  for (i=1;i<_bsp_nprocs; i++) {
+    left      = next_contention_free_pid();
+    if (messg_matrix_isset((_bsp_nprocs*left)+_bsp_pid)) {
+      type      = BSP_MPASS_SSTEP_EXCHANGE;
+      fifo_chunk_size = fifo_max_chunk_size;
+      while (fifo_chunk_size == fifo_max_chunk_size) {
+        block_recv(&_mpass.proc_comm_in_fifo[left]
+                                            [_mpass.proc_comm_in_next[left]],
+                   fifo_max_chunk_size*sizeof(_BSPcomm_thunk),
+                   &left,&type,&nbytes_recv);
+        fifo_chunk_size =  nbytes_recv/sizeof(_BSPcomm_thunk);
+        _mpass.proc_comm_in_next[left] += fifo_chunk_size;
+      }
+      /* We can get a rare situation where we get a buffer overflow */
+      if (_mpass.proc_comm_in_next[left] >=  BSP_COMM_FIFO_SIZE)
+        bsp_abort("{bsp_sync}: internal buffer overflow. \n"
+                  "Recompile with -bspfifo=%d",
+                  10*BSP_COMM_FIFO_SIZE);
+    }
+  }
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Exchanging using synchronous sends}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#else
+  for(i=1;i<_bsp_nprocs; i++) {
+    /* Make sure messages don't overtake one another from different */
+    /* iterations of this loop */
+    right     = _bsp_pid+i; if (right>=_bsp_nprocs) right -= _bsp_nprocs;
+    left      = _bsp_pid-i; if (left<0)             left  += _bsp_nprocs;
+    left_recv = left;
+    type      = BSP_MPASS_LAST_DEFINE + i;
+    nonblocksend_blockrecv(_mpass.proc_comm_out_fifo[right],
+                           sizeof(_BSPcomm_thunk)*
+                             _mpass.proc_comm_out_next[right],
+                           right,
+                           type,
+                           &_mpass.proc_comm_in_fifo[left]
+                                          [_mpass.proc_comm_in_next[left]],
+                           BSP_COMM_FIFO_SIZE*sizeof(_BSPcomm_thunk),
+                           &left_recv,&nbytes_recv);
+
+    _mpass.proc_comm_in_next[left] += nbytes_recv/sizeof(_BSPcomm_thunk);
+    /* We can get a rare situation where we get a buffer overflow */
+    if (_mpass.proc_comm_in_next[left] >=  BSP_COMM_FIFO_SIZE)
+      bsp_abort("{bsp_sync}: internal buffer overflow. \n"
+                "Recompile with -bspfifo=%d",
+                10*BSP_COMM_FIFO_SIZE);
+  }
+#endif
+\end{code}
+
+Make sure that the sends really gone out. We change some of the
+buffers that are being sent.
+\begin{code}
+#ifndef LOG_INIT_EXCHANGE
+#ifdef PROFILE
+   bspprof_sstep_fix();
+#endif
+#endif
+  wait_sends(); 
+
+#ifdef DEBUG
+  barrier_sync();
+  dumpFifoCommTable("exchanged in table",_mpass.proc_comm_in_fifo,
+                      _mpass.proc_comm_in_next);
+#endif 
+\end{code}
+
+Squeeze out any gets from the out buffer.
+\begin{code}
+  for(i=0;i<_bsp_nprocs;i++) {
+    temp = _mpass.proc_comm_out_next[i];
+    k=0;
+    for(j=0;j<temp;j++) {
+      if (COMM_IS_PUTLIKE(_mpass.proc_comm_out_fifo[i][j].comm_pid)) {
+        if(j!=k) 
+          _mpass.proc_comm_out_fifo[i][k] = _mpass.proc_comm_out_fifo[i][j];
+        k++;
+      } else 
+        _mpass.proc_comm_out_next[i]--;
+    }
+  }
+\end{code}
+
+Move any \emph{newly sent} gets from the in buffer into the out
+buffer. Any gets that are in the in buffer as a receiving pair of
+a get should be left alone.
+\begin{code}
+  for(i=0;i<_bsp_nprocs;i++) {
+    k=0;
+    temp=_mpass.proc_comm_in_next[i];
+    for(j=0;j<temp;j++) {
+      temp_pid = _mpass.proc_comm_in_fifo[i][j].comm_pid;
+      if (COMM_IS_GETLIKE(temp_pid) && (COMM_GET_PID(temp_pid)==_bsp_pid)){
+        _mpass.proc_comm_out_fifo[i][_mpass.proc_comm_out_next[i]++] =
+          _mpass.proc_comm_in_fifo[i][j];
+        _mpass.proc_comm_in_next[i]--;
+      } else {
+        if(j!=k) 
+          _mpass.proc_comm_in_fifo[i][k] = _mpass.proc_comm_in_fifo[i][j];
+        
+        k++;
+      }      
+    }
+  }
+#ifdef DEBUG
+  barrier_sync();
+  dumpFifoCommTable("Munged out table",_mpass.proc_comm_out_fifo,
+                    _mpass.proc_comm_out_next);
+#endif
+\end{code}
+
+And finally make sure that all the get statements are at the end of
+the in table. This will mean that all the puts will be at the start
+of the in and out table, and the gets at the end. This will make it
+extremely easy to ``clock'' each message into the processor when
+communication starts. All you will have to do is have a look where it
+came from, and it can be looked up in the in table where the message
+should go in local memory. 
+\begin{code}
+  for(i=0;i<_bsp_nprocs;i++) {
+    temp=_mpass.proc_comm_in_next[i]; /* Size of the queue */
+    l=0;
+    for(j=0;j<temp;j++) {
+      if (COMM_IS_PUTLIKE(_mpass.proc_comm_in_fifo[i][l].comm_pid)) l++;
+      else {
+        temp_thunk = _mpass.proc_comm_in_fifo[i][l];
+
+        /* Shift everything down by one place */
+        for(k=l+1;k<temp;k++) {
+          _mpass.proc_comm_in_fifo[i][k-1]=_mpass.proc_comm_in_fifo[i][k];
+        }
+        _mpass.proc_comm_in_fifo[i][temp-1]=temp_thunk;
+      }   
+    }
+  }
+\end{code}
+
+\begin{code}
+  bufferGets();
+  bufferBSMP();
+#ifdef DEBUG
+  barrier_sync();
+  dumpFifoCommTable("Sorted in table",_mpass.proc_comm_in_fifo,
+                    _mpass.proc_comm_in_next);
+#endif
+\end{code}
+
+\begin{code}
+  for(i=0;i<_bsp_nprocs;i++) {
+    no_out_messages += _mpass.proc_comm_out_next[i];
+    no_in_messages  += _mpass.proc_comm_in_next[i];
+  }
+\end{code}
+
+Messages either coming in or going out.
+\begin{code}
+  bucket=next_contention_free_pid();
+  while (no_out_messages>0  &&  no_in_messages>0) {
+#ifdef DEBUG
+    bsp_debug("%d messages to go; %d messages to come in",
+              no_out_messages,no_in_messages);
+#endif
+    /* Check if a put hasn't come in*/
+    src = PID_DONTCARE;
+    type= BSP_MPASS_SSTEP_COMM;
+    if (nonblock_probe(&src,&type)) {
+#ifdef DEBUG
+      bsp_debug("send-recv: a %d is coming in from %d [%d to go]",
+                type,src,no_in_messages-1);
+#endif
+      receiveSomething(src,type);
+      no_in_messages--;
+    } else {
+      /* Nothing coming in. Send something out */
+      sendSomething(&bucket);
+      no_out_messages--;
+    }
+  }
+\end{code}
+
+Either messages are just going out...
+\begin{code}
+  while (no_out_messages >0) {
+    sendSomething(&bucket);
+    no_out_messages--;
+  }
+\end{code}
+
+..or they are just coming in. If only one bucket has something in it,
+  then there is no need to probe.
+\begin{code}
+  if (no_in_messages >0) {
+    src=-1;
+    for(i=0;i<_bsp_nprocs;i++)
+      if (_mpass.proc_comm_in_next[i]==no_in_messages) 
+        src=i;
+    if (src>=0) {
+      type   = BSP_MPASS_SSTEP_COMM;
+      while(no_in_messages  >0) {
+        receiveSomething(src,type);
+        no_in_messages--; 
+      }
+    } else {
+      while (no_in_messages  >0) {
+        src    = PID_DONTCARE;
+        type   = BSP_MPASS_SSTEP_COMM;
+        block_probe(&src,&type);
+#ifdef DEBUG
+        bsp_debug("recv: a %d is coming in from %d [%d to go]",
+                   type,src,no_in_messages-1);
+#endif
+        receiveSomething(src,type);
+        no_in_messages--;  
+      } 
+    }             
+  }
+  wait_sends();
+\end{code}
+
+\begin{code}
+#ifdef DEBUG
+  bsp_debug("{sstep_end}:Finished communication");
+#endif
+  bspcombputs_finalise();
+  deallocateFreeList();
+  for(i=0;i<_bsp_nprocs;i++) {
+    _mpass.proc_comm_in_next[i] =0;
+    _mpass.proc_comm_out_next[i]=0;
+  }
+ 
+#ifdef PROFILE
+  /* Use the line number from the start of the super-step */
+  bspprof_sstep_end();
+#endif
+}
+\end{code}
+
+\begin{code}
+static void receiveSomething(int src, int type) {
+  _BSPcomm_thunk *comm_thunk;
+  int nbytes_recv;
+
+  if (COMM_IS_PUTLIKE(_mpass.proc_comm_in_fifo[src]
+                    [--_mpass.proc_comm_in_next[src]].comm_pid)) {
+    comm_thunk=&_mpass.proc_comm_in_fifo[src][_mpass.proc_comm_in_next[src]];
+#ifdef DEBUG
+    bsp_debug("{bsp_sync} receiving a put from %d",src);
+#endif
+#ifdef SANITY_CHECK
+    if (bsp_register_nbytes(comm_thunk->addr_global) -
+        comm_thunk->offset < comm_thunk->nbytes)
+      bsp_error_reg_small(comm_thunk->addr_global,
+                          comm_thunk->nbytes,
+                          comm_thunk->offset);
+#endif
+    block_recv(bsp_register_global_to_local(comm_thunk->addr_global)+
+               comm_thunk->offset,
+               comm_thunk->nbytes,&src,&type,&nbytes_recv);
+#ifdef SANITY_CHECK
+    if (nbytes_recv !=comm_thunk->nbytes)
+      bsp_abort("{bsp_sync} put communication does not tally"
+                "received nbytes=%d; expected nbytes=%d",
+                src,nbytes_recv,comm_thunk->nbytes);
+#endif
+  } else {
+    comm_thunk=&_mpass.proc_comm_in_fifo[src][_mpass.proc_comm_in_next[src]];
+#ifdef DEBUG
+    bsp_debug("{bsp_sync} receiving a get from %d",src);
+#endif
+    block_recv(comm_thunk->addr_real,
+               comm_thunk->nbytes,&src,&type,&nbytes_recv);
+#ifdef SANITY_CHECK
+    if (nbytes_recv !=comm_thunk->nbytes)
+         bsp_abort("{bsp_sync} get communication does not tally");
+#endif
+  }
+#ifdef STATISTICS
+  _bspstat.packet_puts_dst++;
+  _bspstat.packet_puts_dstnbytes +=nbytes_recv; 
+#endif
+}
+\end{code}
+
+\begin{code}
+static void sendSomething(int *bucket) {
+  _BSPcomm_thunk *comm_thunk;
+
+  /* Find a bucket which has something going out */
+  while(_mpass.proc_comm_out_next[*bucket]==0) 
+    *bucket = next_contention_free_pid();
+
+  comm_thunk=&_mpass.proc_comm_out_fifo[*bucket]
+               [--_mpass.proc_comm_out_next[*bucket]];
+  if (COMM_IS_PUTLIKE(comm_thunk->comm_pid)) {
+#ifdef DEBUG
+    bsp_debug("{bsp_sync} send a put to %d",*bucket);
+#endif
+    nonblock_send(comm_thunk->addr_real,comm_thunk->nbytes,
+                  *bucket,BSP_MPASS_SSTEP_COMM);
+  } else {
+#ifdef DEBUG
+    bsp_debug("{bsp_sync} sending a get to %d",*bucket);
+#endif
+    nonblock_send(bsp_register_global_to_local(comm_thunk->addr_global)+
+                         comm_thunk->offset,
+                  comm_thunk->nbytes,*bucket,BSP_MPASS_SSTEP_COMM);
+  } 
+#ifdef STATISTICS
+  _bspstat.packet_puts_src++;
+  _bspstat.packet_puts_srcnbytes +=comm_thunk->nbytes; 
+#endif
+}
+\end{code}
+
+\begin{code}
+static void dumpFifoCommTable(char* str,_BSPcomm_thunk** fifo,int *sizes) {
+#ifdef DEBUG
+  int i,j;
+  bsp_debug_start(str);
+  bsp_debug_block("Super-step on pid %d",_bsp_pid);
+  bsp_debug_block("%5s | %6s | %8s |%8s |%8s | %6s",
+                  "Type","Bucket","With pid","Source","Dest.","Nbytes");
+  bsp_debug_block("-----------------------------------------------------------");
+  for(i=0;i<_bsp_nprocs;i++) {
+    for(j=0;j<sizes[i];j++) 
+    if (COMM_IS_PUTLIKE(fifo[i][j].comm_pid))
+       bsp_debug_block("%5s | %6d | %8d |%8x |%2d[%4d] |%6d",
+                 "put",i,
+                 COMM_GET_PID(fifo[i][j].comm_pid),
+                 fifo[i][j].addr_real,
+                 fifo[i][j].addr_global,
+                 fifo[i][j].offset,
+                 fifo[i][j].nbytes);
+    else
+       bsp_debug_block("%5s | %6d | %8d |%2d[%4d] |%8x |%6d",
+                 "get",i,
+                 COMM_GET_PID(fifo[i][j].comm_pid),
+                 fifo[i][j].addr_global,
+                 fifo[i][j].offset,
+                 fifo[i][j].addr_real,
+                 fifo[i][j].nbytes);
+   bsp_debug_end("bsp_sync");
+  }
+#endif
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Buffer gets}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+static void bufferGets() {
+  int i,j;
+  _BSPcomm_thunk *comm_thunk;
+  BSPfreelist  *cons;
+
+  for(i=0;i<_bsp_nprocs;i++) {
+    for(j=0;j<_mpass.proc_comm_out_next[i];j++) {
+      comm_thunk = &_mpass.proc_comm_out_fifo[i][j];
+      if (COMM_IS_GET(comm_thunk->comm_pid)) {
+        cons = malloc(sizeof(BSPfreelist));
+        if (cons==NULL) 
+          bsp_abort("{bsp_get} failed to allocate storage for free list");
+        cons->head = malloc(comm_thunk->nbytes);
+        if (cons->head==NULL) 
+          bsp_abort("{bsp_get} failed to malloc %d bytes ",
+                    comm_thunk->nbytes);
+        cons->tail=_bsp_free_list;
+        _bsp_free_list = cons;
+#ifdef DEBUG
+        bsp_debug("{bufferGet} %d bytes at offset %d from hash(%d)=0x%x",
+                  comm_thunk->nbytes,comm_thunk->offset,
+                  comm_thunk->addr_global,
+                  bsp_register_global_to_local(comm_thunk->addr_global));
+#endif
+        MEMCPY(cons->head,
+               bsp_register_global_to_local(comm_thunk->addr_global) + 
+                 comm_thunk->offset,
+               comm_thunk->nbytes);
+\end{code}
+
+We rewrite the comm thunk with the newly allocated data structure. A
+pre-registered area called \texttt{\_bsp\_buffget\_reference} is used
+as a point of reference against which the allocated data is referenced
+with respect to.
+\begin{code}
+        comm_thunk->addr_global
+          =bsp_register_local_to_global(&_bsp_buffget_reference);
+        comm_thunk->offset = (char*)cons->head - &_bsp_buffget_reference;
+      }
+    }
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Buffer BSMP}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+static void bufferBSMP() {
+  int i,j;
+  _BSPcomm_thunk *comm_thunk;
+  BSPfreelist  *cons;
+
+  for(i=0;i<_bsp_nprocs;i++) {
+    _bsmp.incoming_messages_size[i]=0;
+    for(j=0;j<_mpass.proc_comm_in_next[i];j++) {
+      comm_thunk = &_mpass.proc_comm_in_fifo[i][j];
+      if (COMM_IS_SEND(comm_thunk->comm_pid)) 
+        _bsmp.incoming_messages_size[i] += comm_thunk->nbytes;
+    }
+  }
+  bsmp_flush();    
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\texttt{bsp\_hpget}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void _bsp_get(int type_and_pid, const void *src, int offset,
+              void *dst, int nbytes){
+  int             pid,src_addr,togo_nbytes,chunk_nbytes,chunk_offset;
+  void           *chunk_dst;
+  char           *src_plus_offset;
+  _BSPcomm_thunk *comm_thunk;
+
+  pid = COMM_GET_PID(type_and_pid);
+#ifdef SANITY_CHECK
+  if (pid < 0 || pid >= _bsp_nprocs) 
+    bsp_abort("{bsp_get}: processor %d is trying to get "
+              "from no-existant processor %d.",_bsp_pid,pid);
+#endif
+
+  togo_nbytes  = nbytes;
+  chunk_dst    = dst;
+  chunk_offset = offset;
+  src_addr     = bsp_register_local_to_global(src);
+
+
+  if (nbytes<=0) {
+    /* do nothing */
+  } else if (pid == _bsp_pid) {
+    src_plus_offset = (char*)src + offset;
+    if (src_plus_offset != (char*)dst) 
+      MEMCPY((char *)dst,src_plus_offset,nbytes); 
+
+  } else {
+#ifdef STATISTICS
+  if (_bspstat.buffer_high_water_mark < nbytes)
+    _bspstat.buffer_high_water_mark = nbytes;      
+#endif
+    while(togo_nbytes>0) {
+      if (togo_nbytes > BSP_BUFFER_SIZE) {
+        togo_nbytes -= BSP_BUFFER_SIZE;
+        chunk_nbytes = BSP_BUFFER_SIZE;
+      } else {
+        chunk_nbytes = togo_nbytes;
+        togo_nbytes  = 0;
+      }
+      /* Put get in the in and out queues because we will */
+      /* receive a message back                             */
+      comm_thunk=&_mpass.proc_comm_out_fifo[pid]
+                                            [_mpass.proc_comm_out_next[pid]];
+      comm_thunk->comm_pid   = type_and_pid;
+      comm_thunk->addr_global = src_addr;
+      comm_thunk->offset     = chunk_offset;
+      comm_thunk->addr_real  = chunk_dst;
+      comm_thunk->nbytes     = chunk_nbytes;
+      /* Put a copy in the in buffer */
+      _mpass.proc_comm_in_fifo[pid][_mpass.proc_comm_in_next[pid]]=*comm_thunk;
+      _mpass.proc_comm_out_next[pid]++;
+      _mpass.proc_comm_in_next[pid]++;
+      if ((_mpass.proc_comm_in_next[pid] >= BSP_COMM_FIFO_SIZE) ||
+          (_mpass.proc_comm_out_next[pid] >= BSP_COMM_FIFO_SIZE))
+        bsp_abort("{bsp_get}: internal buffer overflow. \n"
+                  "Recompile with -bspfifo=%d",
+                  10*BSP_COMM_FIFO_SIZE);
+
+      chunk_offset += chunk_nbytes;
+      chunk_dst     = (char *)chunk_dst + chunk_nbytes;
+    } 
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{The real code for \texttt{bsp\_put}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+This is where we really do the put. 
+\begin{code}
+void _bsp_put(int type_and_pid, const void *src, 
+              int dst_addr, int offset, int nbytes) {
+  int             pid,togo_nbytes,chunk_nbytes,chunk_offset;
+  void           *chunk_src;
+  _BSPcomm_thunk *comm_thunk;
+
+  pid          = COMM_GET_PID(type_and_pid);
+  togo_nbytes  = nbytes;
+  chunk_src    = (void*) src;
+  chunk_offset = offset;
+
+#ifdef STATISTICS
+  if (_bspstat.buffer_high_water_mark < nbytes)
+    _bspstat.buffer_high_water_mark = nbytes;      
+#endif
+  while (togo_nbytes>0) {
+    if (togo_nbytes > BSP_BUFFER_SIZE) {
+      togo_nbytes -= BSP_BUFFER_SIZE;
+      chunk_nbytes = BSP_BUFFER_SIZE;
+    } else {
+      chunk_nbytes = togo_nbytes;
+      togo_nbytes  = 0;  
+    }
+    comm_thunk=&_mpass.proc_comm_out_fifo[pid]
+                                          [_mpass.proc_comm_out_next[pid]];
+    comm_thunk->comm_pid   = type_and_pid;
+    comm_thunk->addr_global= dst_addr;
+    comm_thunk->offset     = chunk_offset;
+    comm_thunk->addr_real  = chunk_src;
+    comm_thunk->nbytes     = chunk_nbytes;
+    _mpass.proc_comm_out_next[pid]++;
+    
+ 
+    if (_mpass.proc_comm_out_next[pid] >= BSP_COMM_FIFO_SIZE)
+      bsp_abort("{bsp_put} internal buffer overflow. \n"
+                "Recompile with -bspfifo=%d",
+                10*BSP_COMM_FIFO_SIZE);
+    chunk_offset += chunk_nbytes;
+    chunk_src     = ((char *)chunk_src) + chunk_nbytes;
+  }
+}
+\end{code}
+@
+
+
+1.6
+log
+@changing over to bsp_init
+@
+text
+@d17 1
+a17 1
+% $Id: bsp_lib_mpass.lc,v 1.5 1996/02/26 10:09:43 jonh Exp jonh $
+d19 3
+d29 1
+a29 1
+% Solved CSS Transmit bug, and added combining stores optimisation
+d38 1
+a38 2
+\chapter{A BSP library using the native message passing library on the SP2} 
+\label{sect:bspsp2}
+d43 1
+d45 3
+a47 1
+static void dumpFifoCommTable(char*,int,_BSPcomm_thunk**,int*);
+d60 1
+a60 1
+int _bsp_nprocs;      /* Total number of BSP processes */
+d64 1
+a64 12
+char *_bsp_scratch_buffer; /* General scratch buffer used by anyone */
+
+int _bsp_insstep=0;
+int _bsp_sstepno;
+int _bsp_sstep_lineno;
+int _bsp_instart=0;
+
+static void *_bsp_addr_table[BSP_ADDR_TABLE_SIZE];
+static int _bsp_addr_table_limit;
+static int _bsp_addr_table_miller;
+static char _bsp_miller_reference;  /* Only used for compat with */
+                                    /* Richard Millers library   */
+d103 1
+a103 1
+the compiler can often speculatively prefetch information. 
+d109 1
+a109 1
+\section{Main program}
+d111 1
+a111 4
+The users main program is rewritten to a stub that calls the following
+routine.  The routine makes all processors except zero wait until zero
+can ``fork'' them off one at a time. We therefore provide a fork-type
+mechanism in software.
+d113 3
+a115 3
+void BSP_LIBMAIN(int argc,char** argv) {
+  int errno;
+
+d119 5
+a123 1
+  errno  = whatis_nprocs_mypid(&argc,&argv,&_bsp_fork_nprocs,&_bsp_pid);
+d126 1
+a126 1
+    bsp_error("{main}: BSP_MAX_PROCS too small (=%d) . Recompile library",
+d129 23
+a151 2
+    bsp_error("{main}: parallel program wouldn't start");
+  if (_bsp_pid==0 || BSP_COMPILED_MILLER) {
+d154 1
+a154 2
+    /* then just call main. */
+    bspusermain_(argc,argv);
+d156 1
+d159 2
+a160 2
+    bspstart_stub_();
+    bsp_error("Leaving the scope of the procedure that contained "
+d162 1
+a163 1
+  messg_exit(0);
+d168 1
+a168 1
+\section{Starting a BSP process: \texttt{bsp\_start}}
+d172 16
+a187 2
+void bsp_start(int maxprocs, int *nprocs, int *mypid) {
+  int errno,*gids,i;
+d193 3
+a195 3
+    if      (_bsp_instart) bsp_error("{bsp_start}: already started");
+    else if (maxprocs<0)   bsp_error("{bsp_start}: positive number required");
+    else if (maxprocs==0)            _bsp_nprocs = _bsp_fork_nprocs;
+d210 1
+a210 3
+  *nprocs     = _bsp_nprocs;
+  *mypid      = _bsp_pid;
+  _bsp_instart= 1;
+d217 2
+a218 2
+  gids = calloc(*nprocs,sizeof(int));
+  for(i=0;i<*nprocs;i++) gids[i]=i;
+d220 1
+a220 1
+  setup_group_before_kill_unwanted(*nprocs,gids);
+d227 1
+a227 1
+  setup_group_after_kill_unwanted(*nprocs,gids);
+d234 1
+a234 1
+    = calloc(*nprocs,sizeof(_BSPcomm_thunk*));
+d236 1
+a236 1
+    = calloc(*nprocs,sizeof(_BSPcomm_thunk*));
+d238 1
+a238 1
+    bsp_error("{bsp_start}: unable to create outer comm fifo");
+d240 1
+a240 1
+  for(i=0;i<*nprocs;i++) {
+d247 1
+a247 1
+      bsp_error("{bsp_start}: unable to create inner comm fifo");
+d249 2
+a250 2
+  _mpass.proc_comm_out_next=calloc(*nprocs,sizeof(int));
+  _mpass.proc_comm_in_next =calloc(*nprocs,sizeof(int));
+d252 2
+a253 2
+    bsp_error("{bsp_start} unable to create next array");
+  for(i=0;i<*nprocs;i++) {
+d259 1
+a259 1
+  i = (((*nprocs)*(*nprocs))/(sizeof(int)*8))+1;
+d264 1
+a264 1
+    bsp_error("{bsp_start{ unable to create exchange matrices");
+d267 1
+a267 2
+  bspcombstores_init();
+  if (BSP_OPT_FSTORE_INTERFERENCE) deallocateFreeList();
+d278 1
+a278 1
+\section{Finishing a BSP process: \texttt{bsp\_finish}}
+d281 1
+a281 1
+void bsp_finish() {
+d292 1
+a292 1
+  if (_bsp_pid > 0 || BSP_COMPILED_MILLER) messg_exit(0);
+d298 1
+a298 1
+\section{\texttt{bsp\_sstep}}
+d300 1
+d302 5
+a306 2
+void _bsp_sstep(int sstepno,char* filename, int lineno) {
+  int i;
+d308 4
+d318 1
+a318 42
+#ifdef SANITY_CHECK
+  if (_bsp_insstep) 
+    bsp_error("{bsp_sstep} \"%s\" line %d, nested super-steps\n\t" 
+                " super-step %d is nested within super-step %d",     
+                filename,lineno,sstepno,_bsp_sstepno);
+
+  if (!bsp_constantI(lineno | (sstepno << 16)))
+      bsp_error("{bsp_sstep} \"%s\" line %d, supersteps not consistent",
+                filename,lineno);
+  _bsp_insstep      = 1;
+#endif
+#if defined(SANITY_CHECK) || defined(PROFILE)
+  _bsp_sstepno      = sstepno;
+  _bsp_sstep_lineno = lineno;
+#endif
+  for(i=0;i<_bsp_nprocs;i++) {
+    _mpass.proc_comm_in_next[i] =0;
+    _mpass.proc_comm_out_next[i]=0;
+  }
+}
+\end{code}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\texttt{bsp\_sstep\_end}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+void _bsp_sstep_end(int stepno,char* filename,int lineno) {
+  int i,j,k,l,temp,temp_pid,left,right,type,nbytes_recv, left_recv;
+  int no_out_messages=0, no_in_messages=0,bucket,src;
+  int fifo_chunk_size, fifo_chunk_togo,fifo_max_chunk_size,fifo_chunk_offset;
+  _BSPcomm_thunk temp_thunk;
+
+  bspcombstores_flush();
+#ifdef SANITY_CHECK
+  if      (!_bsp_insstep) 
+    bsp_error("{bsp_sstep_end} \"%s\" line %d, not started a super-step",
+              filename,lineno);
+  if (_bsp_sstepno != stepno) 
+    bsp_error("{bsp_sstep_end} \"%s\" line %d, super steps do not match\n\t"
+              "opening is numbered %d, whilst closing is numbered %d",
+              filename,lineno,_bsp_sstepno,stepno);
+#endif
+d325 1
+a325 1
+  dumpFifoCommTable("Out table",stepno,_mpass.proc_comm_out_fifo,
+d329 1
+a329 1
+  dumpFifoCommTable("In table",stepno,_mpass.proc_comm_in_fifo,
+d347 1
+a347 1
+  i = 8*sizeof(int);
+d369 1
+d422 1
+a422 1
+        bsp_error("{bsp_sstep}: internal buffer overflow. \n"
+d454 1
+a454 1
+      bsp_error("{bsp_sstep}: internal buffer overflow. \n"
+d473 1
+a473 1
+  dumpFifoCommTable("exchanged in table",stepno,_mpass.proc_comm_in_fifo,
+d478 1
+a478 1
+Squeeze out any fetches from the out buffer.
+d484 1
+a484 1
+      if (COMM_IS_STORE(_mpass.proc_comm_out_fifo[i][j].comm_pid)) {
+d494 3
+a496 3
+Move any \emph{newly sent} fetches from the in buffer into the out
+buffer. Any fetches that are in the in buffer as a receiving pair of
+a fetch should be left alone.
+d503 1
+a503 1
+      if ((!COMM_IS_STORE(temp_pid)) && (COMM_GET_PID(temp_pid)==_bsp_pid)){
+d517 1
+a517 1
+  dumpFifoCommTable("Munged out table",stepno,_mpass.proc_comm_out_fifo,
+d522 3
+a524 3
+And finally make sure that all the fetch statements are at the end of
+the in table. This will mean that all the stores will be at the start
+of the in and out table, and the fetches at the end. This will make it
+d534 1
+a534 1
+      if (COMM_IS_STORE(_mpass.proc_comm_in_fifo[i][l].comm_pid)) l++;
+d549 2
+d553 1
+a553 1
+  dumpFifoCommTable("Sorted in table",stepno,_mpass.proc_comm_in_fifo,
+d573 1
+a573 1
+    /* Check if a store hasn't come in*/
+a614 2
+        /* ToDo: if only one bucket has something in it. Then there is no */
+        /* need to busy wait. */
+d634 7
+a640 4
+#ifdef SANITY_CHECK
+  _bsp_insstep        =0; 
+#endif
+  bspcombstores_finalise();
+d643 1
+a643 1
+  bspprof_sstep_end(stepno,_bsp_sstep_lineno,filename);
+d651 1
+a651 1
+  int errno,nbytes_recv;
+d653 1
+a653 1
+  if (COMM_IS_STORE(_mpass.proc_comm_in_fifo[src]
+d657 8
+a664 1
+    bsp_debug("{bsp_sstep_end} receiving a store from %d",src);
+d666 1
+a666 1
+    block_recv((char*)_bsp_addr_table[comm_thunk->addr_table]+
+d671 1
+a671 1
+      bsp_error("{bsp_sstep_end} store communication does not tally"
+d678 1
+a678 1
+    bsp_debug("{bsp_sstep_end} receiving a fetch from %d",src);
+d684 1
+a684 1
+         bsp_error("{bsp_sstep_end} fetch communication does not tally");
+d688 2
+a689 2
+  _bspstat.packet_stores_dst++;
+  _bspstat.packet_stores_dstnbytes +=nbytes_recv; 
+a696 1
+  int errno;
+d704 1
+a704 1
+  if (COMM_IS_STORE(comm_thunk->comm_pid)) {
+d706 1
+a706 1
+    bsp_debug("{bsp_sstep_end} send a store to %d",*bucket);
+d712 1
+a712 1
+    bsp_debug("{bsp_sstep_end} sending a fetch to %d",*bucket);
+d714 1
+a714 1
+    nonblock_send((char*)_bsp_addr_table[comm_thunk->addr_table]+
+d719 2
+a720 2
+  _bspstat.packet_stores_src++;
+  _bspstat.packet_stores_srcnbytes +=comm_thunk->nbytes; 
+d726 1
+a726 2
+static void dumpFifoCommTable(char* str,int stepno,
+                              _BSPcomm_thunk** fifo,int *sizes) {
+d730 1
+a730 1
+  bsp_debug_block("Super-step %d on pid %d",stepno,_bsp_pid);
+d736 1
+a736 1
+    if (COMM_IS_STORE(fifo[i][j].comm_pid))
+d738 1
+a738 1
+                 "store",i,
+d741 1
+a741 1
+                 fifo[i][j].addr_table,
+d746 1
+a746 1
+                 "fetch",i,
+d748 1
+a748 1
+                 fifo[i][j].addr_table,
+d752 1
+a752 1
+   bsp_debug_end("bsp_sstep_end");
+d758 1
+d760 1
+a760 1
+\section{\texttt{bsp\_fetch}}
+d763 50
+a812 6
+void bsp_addr_fetch(int pid, int src_addr, int offset, void *dst, int nbytes){
+  int             togo_nbytes  = nbytes;
+  int             chunk_nbytes;
+  void           *chunk_dst    = dst;
+  int             chunk_offset = offset;
+  char           *src;
+d814 1
+d816 24
+a839 1
+  
+d842 1
+a842 1
+    bsp_error("{bsp_fetch}: processor %d is trying to fetch "
+d846 13
+a858 5
+  if (pid == _bsp_pid) {
+    src = (char*)_bsp_addr_table[src_addr] + offset;
+    if (src!=dst) {
+      MEMCPY((char *)dst,src,nbytes); 
+    }
+d872 1
+a872 1
+      /* Put fetch in the in and out queues because we will */
+d876 2
+a877 2
+      comm_thunk->comm_pid   = COMM_SET_FETCH(pid);
+      comm_thunk->addr_table = src_addr;
+d887 1
+a887 1
+        bsp_error("{bsp_fetch}: internal buffer overflow. \n"
+d899 1
+a899 1
+\section{The real code for \texttt{bsp\_store}}
+d901 1
+a901 1
+This is where we really do the store. 
+d903 4
+a906 5
+void _bsp_addr_store(int pid, void *src, int dst_addr, int offset, int nbytes){
+  int             togo_nbytes  = nbytes;
+  int             chunk_nbytes;
+  void           *chunk_src    = src;
+  int             chunk_offset = offset;
+d909 5
+d928 2
+a929 2
+    comm_thunk->comm_pid   = COMM_SET_STORE(pid);
+    comm_thunk->addr_table = dst_addr;
+d937 1
+a937 1
+      bsp_error("{bsp_store} internal buffer overflow. \n"
+a944 62
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Contention free communication}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Use a magic square of size $p-1$ as the basis for contention free
+routing. Randomly generate a number of squares.
+\begin{code}
+void config_contention_free_communication() {
+  int i,j,k,size,temp;
+
+  size = CONTENTION_FREE_INIT_FREQ + CONTENTION_FREE_RANDOM_SIZE;
+
+  _mpass.contention_free_size=(_bsp_nprocs > 1)?(size*(_bsp_nprocs-1)):size;
+  _mpass.contention_free_next=0;
+  _mpass.contention_free_last=0;
+
+  _mpass.contention_free_randoms 
+    = calloc(_mpass.contention_free_size,sizeof(int));
+  if (_mpass.contention_free_randoms==NULL)
+    bsp_error("{config_contention_free} failed to alloc %d bytes",
+              _mpass.contention_free_size);
+  
+  _mpass.contention_free_size -= (_bsp_nprocs-1)*CONTENTION_FREE_INIT_FREQ;
+
+#ifdef MAKE_CONTENTION
+  i=0;
+  for(j=0;j<size;j++) {
+    for(k=0;k<_bsp_nprocs;k++) {
+      if (k!=_bsp_pid)
+        _mpass.contention_free_randoms[i++]=k;
+    }
+  }
+  
+#else
+  /* generate a repetitive contention free permutation */
+  i=0;
+  for(j=0;j<size;j++) {
+    for(k=1;k<_bsp_nprocs;k++) {
+      _mpass.contention_free_randoms[i++]=(_bsp_pid+k)%_bsp_nprocs;
+    }
+  }
+
+ 
+  /* Use a fixed seed so all processors generate the same sequence*/
+  RAND_SEED(0);  
+  for(j=0;j<size;j++) {
+    for(k=0;k<(_bsp_nprocs-1);k++) {
+      i = RAND() % (_bsp_nprocs-1);
+      temp = _mpass.contention_free_randoms[(j*(_bsp_nprocs-1))+i];
+      _mpass.contention_free_randoms[(j*(_bsp_nprocs-1))+i] 
+        = _mpass.contention_free_randoms[(j*(_bsp_nprocs-1))+k];
+      _mpass.contention_free_randoms[(j*(_bsp_nprocs-1))+k]=temp;
+    }  
+  }
+#endif
+}
+\end{code}
+  
+      
+    
+
+  
+@
+
+
+1.5
+log
+@going to reduce L
+@
+text
+@d17 1
+a17 1
+% $Id: bsp_lib_mpass.lc,v 1.4 1996/01/09 16:51:26 jonh Exp jonh $
+d19 3
+d42 4
+a45 3
+void dumpFifoCommTable(char*,int,_BSPcomm_thunk**,int*);
+void receiveSomething(int,int);
+void sendSomething(int*);
+d73 1
+d75 3
+a77 2
+/* These global variables are used with the macros that I use to */
+/* specify the message passing communication */
+d81 1
+d95 4
+a98 2
+int    _bsp_argc;
+char **_bsp_argv;
+a127 7
+#ifdef MPASS_MPI
+  /* MPI also squirrels some stuff through */
+  _bsp_argc = argc-3;
+#else
+  _bsp_argc = argc-1;
+#endif
+  _bsp_argv = argv;
+d133 1
+a133 1
+  if (errno!=0)
+a162 1
+    checkDefines();
+d175 1
+a175 1
+  messg_broadcast(&_bsp_nprocs,sizeof(int),0);
+d183 1
+d230 9
+d241 4
+d276 4
+a282 3
+#ifdef PROFILE
+  bspprof_sstep_start(sstepno,lineno,filename);
+#endif
+d288 4
+d310 3
+a312 4
+  int i,j,k,l,temp,temp_pid,left,right,type,nbytes_recv;
+  int fifo_chunk_offset, fifo_chunk_size, fifo_max_chunk_size,fifo_chunk_togo;
+  int no_out_messages=0, no_in_messages=0,bucket;
+  int src;
+a315 3
+#ifdef PROFILE
+  bspprof_sstep_comm();
+#endif
+d325 1
+d341 1
+d345 37
+a381 2
+a super-step. All the sends are done first, and then the synchronous
+receives.
+d383 1
+a383 1
+  /* Send in multiples of buffer size */ 
+d385 6
+a390 11
+  for(i=1;i<_bsp_nprocs; i++) {
+    /* Make sure messages don't overtake one another from different */
+    /* iterations of this loop */
+    right = (_bsp_pid+i) % _bsp_nprocs;
+    type = BSP_MPASS_LAST_DEFINE + (fifo_max_chunk_size*i);
+    if (_mpass.proc_comm_out_next[right] <= fifo_max_chunk_size) {
+      nonblock_send(_mpass.proc_comm_out_fifo[right],
+                    sizeof(_BSPcomm_thunk) * 
+                    _mpass.proc_comm_out_next[right],
+                    right,type);
+    } else {
+d398 2
+a399 2
+           fifo_chunk_size  = fifo_max_chunk_size;
+           fifo_chunk_togo -= fifo_max_chunk_size;
+d401 2
+a402 2
+           fifo_chunk_size  = fifo_chunk_togo;
+           fifo_chunk_togo  = -1;
+a403 4
+#ifdef DEBUG
+        bsp_debug("Sending %d elements to %d [%d]",
+                 fifo_chunk_size,right,fifo_chunk_togo);
+#endif
+d405 1
+a405 1
+                      sizeof(_BSPcomm_thunk) *fifo_chunk_size,right,type++);
+d407 23
+a429 1
+      }       
+d432 7
+a438 1
+  
+d440 17
+a456 20
+    type = BSP_MPASS_LAST_DEFINE + (fifo_max_chunk_size*i);
+    left = PID_DONTCARE;
+    block_probe(&left,&type);
+    /* left  = (_bsp_pid>=i)?(_bsp_pid-i):(_bsp_nprocs+(_bsp_pid-i)); */
+
+    fifo_chunk_size = fifo_max_chunk_size;
+    while (fifo_chunk_size == fifo_max_chunk_size) {
+      block_recv(&_mpass.proc_comm_in_fifo[left]
+                                           [_mpass.proc_comm_in_next[left]],
+                 sizeof(_BSPcomm_thunk) * fifo_max_chunk_size,
+                 &left,&type,&nbytes_recv);
+#ifdef DEBUG
+      bsp_debug("Received [type=%d] %d bytes from %d [%d %s %d]",
+                type,nbytes_recv,left,stepno,filename,lineno); 
+#endif
+      fifo_chunk_size =  nbytes_recv/sizeof(_BSPcomm_thunk);
+      _mpass.proc_comm_in_next[left] += fifo_chunk_size;
+      type++;
+    }
+      
+d463 13
+a475 4
+  /* Make sure that the sends really gone out. We change some of the
+     buffers that are being sent
+  */
+  wait_sends();
+a480 3
+#ifdef PROFILE
+  bspprof_sstep_wait();
+#endif
+d490 2
+a491 5
+        if(j!=k) {
+          MEMCPY(&_mpass.proc_comm_out_fifo[i][k],
+                 &_mpass.proc_comm_out_fifo[i][j],
+                 sizeof(_BSPcomm_thunk));
+        }
+d509 2
+a510 4
+        MEMCPY(&_mpass.proc_comm_out_fifo[i]
+                                          [_mpass.proc_comm_out_next[i]++],
+               &_mpass.proc_comm_in_fifo[i][j],
+               sizeof(_BSPcomm_thunk));
+d513 3
+a515 5
+        if(j!=k) {
+          MEMCPY(&_mpass.proc_comm_in_fifo[i][k],
+                 &_mpass.proc_comm_in_fifo[i][j],
+                 sizeof(_BSPcomm_thunk));
+        }
+d541 1
+a541 2
+        MEMCPY(&temp_thunk,&_mpass.proc_comm_in_fifo[i][l],
+               sizeof(_BSPcomm_thunk));
+d545 1
+a545 3
+          MEMCPY(&_mpass.proc_comm_in_fifo[i][k-1],
+                 &_mpass.proc_comm_in_fifo[i][k],
+                 sizeof(_BSPcomm_thunk));
+d547 1
+a547 2
+        MEMCPY(&_mpass.proc_comm_in_fifo[i][temp-1],&temp_thunk,
+               sizeof(_BSPcomm_thunk));
+d568 1
+d570 2
+a571 2
+  bucket=(_bsp_pid+1)%_bsp_nprocs;
+  while (no_out_messages>0  || no_in_messages>0) {
+d576 4
+a579 5
+    if (no_out_messages>0 && no_in_messages>0) {
+      /* Check if a store hasn't come in*/
+      src = PID_DONTCARE;
+      type= BSP_MPASS_SSTEP_COMM;
+      if (nonblock_probe(&src,&type)) {
+d581 2
+a582 2
+        bsp_debug("send-recv: a %d is coming in from %d [%d to go]",
+                  type,src,no_in_messages-1);
+d584 4
+a587 8
+        receiveSomething(src,type);
+        no_in_messages--;
+      } else {
+        /* Nothing coming in. Send something out */
+        sendSomething(&bucket);
+        no_out_messages--;
+      }
+    } else if (no_out_messages >0) {
+d590 21
+a610 4
+    } else if (no_in_messages  >0) {
+      /* ToDo: if only one bucket has something in it. Then there is no */
+      /* need to busy wait. */
+      src    = PID_DONTCARE;
+d612 11
+a622 1
+      block_probe(&src,&type);
+d624 1
+a624 1
+      bsp_debug("recv: (a %d is coming in from %d [%d to go]",
+d627 4
+a630 3
+      receiveSomething(src,type);
+      no_in_messages--;
+    }                
+d633 3
+d642 1
+a643 1
+  bspprof_sstep_comm();
+d645 1
+a645 5
+  bspprof_sstep_inout_comm(stepno,_bsp_sstep_lineno,filename);
+#endif
+  bspcombstores_finalise();
+#ifdef PROFILE
+  bspprof_sstep_end();
+d651 1
+a651 1
+void receiveSomething(int src, int type) {
+d690 1
+a690 1
+void sendSomething(int *bucket) {
+d696 1
+a696 1
+    *bucket = ((*bucket)+1)%_bsp_nprocs;
+d722 2
+a723 1
+void dumpFifoCommTable(char* str,int stepno,_BSPcomm_thunk** fifo,int *sizes) {
+d802 1
+a802 3
+      MEMCPY(&_mpass.proc_comm_in_fifo[pid]
+                                       [_mpass.proc_comm_in_next[pid]],
+             comm_thunk,sizeof(_BSPcomm_thunk));
+d862 61
+@
+
+
+1.4
+log
+@Removing undefined on the receive type
+@
+text
+@d17 1
+a17 1
+% $Id: bsp_lib_mpass.lc,v 1.3 1995/11/08 09:52:50 jonh Exp jonh $
+d19 3
+d41 1
+a41 1
+void sendSomething(int*,comm_handle*);
+d68 1
+a68 1
+_BSPinfo *_mpass;     /* Global variables required for message passing */
+d72 3
+d76 3
+a78 3
+MPI_Status _bspmpi_status;
+int        _bspmpi_errno;
+MPI_Group  _bspmpi_group,_bspmpi_group_world;
+a80 1
+int        _bspmpl_errno;
+a81 1
+int        _bspmpl_msgid;
+d84 3
+a105 39
+\section{Fortran argument manipulation}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef UNDERSCORE
+#define GETARG getarg_
+#define IARGC  iargc_
+#define LEN    len_
+#else
+#define GETARG getarg
+#define IARGC  iargc
+#define LEN    len
+#endif
+
+/* Fortran passes extra argument for charcter functions */
+void GETARG(int* i,char* arg,int len) {
+  int argv_len;
+
+  if (*i>_bsp_argc)
+    bsp_error("{getarg}: trying to get option %d when there are only %d",
+              *i,_bsp_argc);
+  else {
+    argv_len = strlen(_bsp_argv[*i]);
+    if (argv_len > len) 
+      bsp_error("{getarg} CHARACTER*%d not large enough to hold \"%s\"",
+                len,_bsp_argv[*i]);
+    else {
+      memcpy(arg,_bsp_argv[*i],argv_len);
+      memset(arg+argv_len,' ',len-argv_len);
+    }
+  }
+}
+
+int IARGC() {
+  return(_bsp_argc);
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+d108 3
+a110 4
+The users main program is rewritten to the procedure \texttt{bspmain},
+and this is the routine that is entered by all the processors at startup.
+The routine makes all processors except zero wait until zero can
+``fork'' them off one at a time. We therefore provide a fork-type
+d113 1
+a113 1
+void main(int argc,char** argv) {
+a125 1
+  _mpass = malloc(sizeof(_BSPinfo));
+d127 1
+d137 1
+a137 1
+    bspmain_(argc,argv);
+d157 1
+a197 1
+  setup_nonblocksend_buffersize(BSP_BUFFER_SIZE);
+d203 1
+a203 1
+  _mpass->proc_comm_out_fifo
+d205 1
+a205 1
+  _mpass->proc_comm_in_fifo
+d207 1
+a207 1
+  if (_mpass->proc_comm_out_fifo==NULL || _mpass->proc_comm_in_fifo ==NULL)
+d211 1
+a211 1
+    _mpass->proc_comm_out_fifo[i]
+d213 1
+a213 1
+    _mpass->proc_comm_in_fifo[i]
+d215 2
+a216 2
+    if (_mpass->proc_comm_out_fifo[i]==NULL ||
+        _mpass->proc_comm_in_fifo[i] ==NULL)
+d219 3
+a221 3
+  _mpass->proc_comm_out_next=calloc(*nprocs,sizeof(int));
+  _mpass->proc_comm_in_next =calloc(*nprocs,sizeof(int));
+  if (_mpass->proc_comm_out_next==NULL || _mpass->proc_comm_in_next==NULL)
+d224 2
+a225 2
+   _mpass->proc_comm_out_next[i]=0;
+   _mpass->proc_comm_in_next[i] =0;
+d227 3
+a229 7
+  
+  _mpass->proc_next_fetch=calloc(*nprocs,sizeof(int));
+  _mpass->proc_next_store=calloc(*nprocs,sizeof(int));
+  if (_mpass->proc_next_fetch==NULL||_mpass->proc_next_fetch==NULL) 
+    bsp_error("{bsp_start} unable to create store fetch tally array");
+  
+  if (BSP_OPT_FCOMBINE_STORES) bspcombstores_init();
+d267 1
+a267 1
+#ifndef SANITY_CHECK
+d272 4
+a275 1
+  _bsp_sstepno      = sstepno;    
+a276 1
+  _bsp_insstep      = 1;
+d279 2
+a280 2
+    _mpass->proc_comm_in_next[i] =0;
+    _mpass->proc_comm_out_next[i]=0;
+a281 1
+  if (BSP_OPT_FCOMBINE_STORES) bspcombstores_reset();
+d290 4
+a293 8
+#ifdef MPASS_MPL
+  comm_handle msgid=0;   /* For work-around with CSS transit */
+#else
+  comm_handle msgid;
+#endif
+  int i,j,k,l,temp,temp_pid,errno,left,right,type,nbytes_recv;
+  int no_out_messages=0, no_in_messages=0,bucket=0;
+  int src,status;
+d296 1
+a296 7
+  if (BSP_OPT_FCOMBINE_STORES) bspcombstores_flush();
+#ifndef PROFILE  
+  /* If profiling have the sync at the end of end-super-step.     */
+  /* (so the profiler can determine communication time correctly) */
+  /* Otherwise put it at the beginning                            */
+  barrier_sync();
+#endif
+d300 1
+a300 1
+#ifndef SANITY_CHECK
+d314 2
+a315 2
+  dumpFifoCommTable("Out table",stepno,_mpass->proc_comm_out_fifo,
+                    _mpass->proc_comm_out_next);
+d318 2
+a319 2
+  dumpFifoCommTable("In table",stepno,_mpass->proc_comm_in_fifo,
+                    _mpass->proc_comm_in_next);
+d327 2
+a328 1
+a super-step.
+d330 2
+a334 2
+    type = BSP_MPASS_EXCHANGE_COMM_FIFO  + i;
+    left  = (_bsp_pid>=i)?(_bsp_pid-i):(_bsp_nprocs+(_bsp_pid-i));
+d336 23
+a358 6
+    errno = nonblock_send(_mpass->proc_comm_out_fifo[right],
+                          sizeof(_BSPcomm_thunk) * 
+                          _mpass->proc_comm_out_next[right],
+                          right,type,&msgid);
+#ifdef SANITY_CHECK
+    if (errno) bsp_error("{bsp_sstep_end} failed to exchange fifo S%d",i);
+d360 28
+a387 16
+
+    /* A fetch may already be in the in buffer, so start writing    */
+    /* after the previous entry. We have to be careful however that */
+    /* we don't overflow the in buffer                              */
+    errno = block_recv(&_mpass->proc_comm_in_fifo[left]
+                       [_mpass->proc_comm_in_next[left]],
+                       sizeof(_BSPcomm_thunk) * BSP_COMM_FIFO_SIZE,
+                       &left,&type,&nbytes_recv);
+#ifdef SANITY_CHECK
+    if  (errno) 
+      bsp_error("{bsp_sstep_end} failed to exchange fifo F%d",i);
+    else if (type != BSP_MPASS_EXCHANGE_COMM_FIFO+i)
+      bsp_error("{bsp_sstep_end} received wrong type of message");
+#endif
+    _mpass->proc_comm_in_next[left] += nbytes_recv/sizeof(_BSPcomm_thunk);
+
+d389 2
+a390 2
+    if (_mpass->proc_comm_in_next[left] >=  BSP_COMM_FIFO_SIZE)
+      bsp_error("{bsp_fetch}: internal buffer overflow. \n"
+a392 1
+
+d394 4
+d400 2
+a401 2
+  dumpFifoCommTable("exchanged in table",stepno,_mpass->proc_comm_in_fifo,
+                      _mpass->proc_comm_in_next);
+d411 1
+a411 1
+    temp = _mpass->proc_comm_out_next[i];
+d414 1
+a414 1
+      if (COMM_IS_STORE(_mpass->proc_comm_out_fifo[i][j].comm_pid)) {
+d416 2
+a417 2
+          memcpy(&_mpass->proc_comm_out_fifo[i][k],
+                 &_mpass->proc_comm_out_fifo[i][j],
+d422 1
+a422 1
+        _mpass->proc_comm_out_next[i]--;
+a431 19
+    for(j=0;j<_mpass->proc_comm_in_next[i];j++) {
+      temp = _mpass->proc_comm_in_fifo[i][j].comm_pid;
+      if (!COMM_IS_STORE(temp) && COMM_GET_PID(temp)==_bsp_pid) 
+        memcpy(&_mpass->proc_comm_out_fifo[i]
+                                          [_mpass->proc_comm_out_next[i]++],
+               &_mpass->proc_comm_in_fifo[i][j],
+               sizeof(_BSPcomm_thunk));
+    }
+  }
+#ifdef DEBUG
+  barrier_sync();
+  dumpFifoCommTable("Munged out table",stepno,_mpass->proc_comm_out_fifo,
+                    _mpass->proc_comm_out_next);
+#endif
+\end{code}
+
+Squeeze the newly sent fetches from the in buffer.
+\begin{code}
+  for(i=0;i<_bsp_nprocs;i++) {
+d433 1
+a433 1
+    temp=_mpass->proc_comm_in_next[i];
+d435 8
+a442 4
+      temp_pid = _mpass->proc_comm_in_fifo[i][j].comm_pid;
+      if (!COMM_IS_STORE(temp_pid) && COMM_GET_PID(temp_pid)==_bsp_pid)
+          _mpass->proc_comm_in_next[i]--;
+      else {
+d444 2
+a445 2
+          memcpy(&_mpass->proc_comm_in_fifo[i][k],
+                 &_mpass->proc_comm_in_fifo[i][j],
+d449 1
+a449 1
+      }   
+d454 2
+a455 2
+  dumpFifoCommTable("Munged in table",stepno,_mpass->proc_comm_in_fifo,
+                    _mpass->proc_comm_in_next);
+d468 1
+a468 1
+    temp=_mpass->proc_comm_in_next[i]; /* Size of the queue */
+d471 1
+a471 1
+      if (COMM_IS_STORE(_mpass->proc_comm_in_fifo[i][l].comm_pid)) l++;
+d473 1
+a473 2
+        bsp_debug("Copying %d.%d [%d]",i,l,temp);
+        memcpy(&temp_thunk,&_mpass->proc_comm_in_fifo[i][l],
+d478 2
+a479 3
+          bsp_debug("Squeezing %d %d %d",i,l,k);
+          memcpy(&_mpass->proc_comm_in_fifo[i][k-1],
+                 &_mpass->proc_comm_in_fifo[i][k],
+d482 1
+a482 1
+        memcpy(&_mpass->proc_comm_in_fifo[i][temp-1],&temp_thunk,
+d492 2
+a493 2
+  dumpFifoCommTable("Sorted in table",stepno,_mpass->proc_comm_in_fifo,
+                    _mpass->proc_comm_in_next);
+d499 2
+a500 2
+    no_out_messages += _mpass->proc_comm_out_next[i];
+    no_in_messages  += _mpass->proc_comm_in_next[i];
+d505 1
+a505 5
+  bucket=0;
+  for(i=0;i<_bsp_nprocs;i++) {
+    _mpass->proc_next_fetch[i]=_mpass->proc_comm_in_next[i]-1;
+    _mpass->proc_next_store[i]=_mpass->proc_comm_in_next[i]-1;
+  }
+d514 2
+a515 5
+      type= TYPE_DONTCARE;
+      errno = nonblock_probe(&src,&type,&status);
+      if (errno) 
+        bsp_error("{bsp_sstep_end}: probing asynchronous store failed");
+      if (status != -1) {
+d524 1
+a524 1
+        sendSomething(&bucket,&msgid);
+d528 1
+a528 1
+      sendSomething(&bucket,&msgid);
+d531 1
+a531 1
+      /* If only one bucket has something in it. Then there is no */
+d534 2
+a535 5
+      type   = TYPE_DONTCARE;
+      block_probe(&src,&type,errno);
+      if (errno)
+        bsp_error("{bsp_sstep_end} synchronous probe failed");
+        
+d544 1
+d548 1
+d550 1
+d556 1
+a556 6
+#ifdef PROFILE
+  /* If profiling have the sync at the end of end-super-step. */
+  /* Otherwise put it at the beginning */
+  barrier_sync();
+#endif
+  if (BSP_OPT_FCOMBINE_STORES) bspcombstores_finalise();
+d568 3
+a570 7
+  if (type==BSP_MPASS_PERFORM_STORE) {
+  /* Store coming in from src. Find in the in log, which is the */
+  /* first store expected to come in */
+    while (!(COMM_IS_STORE(_mpass->proc_comm_in_fifo[src]
+                           [_mpass->proc_next_store[src]].comm_pid)))
+      _mpass->proc_next_store[src]--;
+    comm_thunk=&_mpass->proc_comm_in_fifo[src][_mpass->proc_next_store[src]];
+d574 3
+a576 3
+    errno = block_recv((char*)_bsp_addr_table[comm_thunk->addr_table]+
+                      comm_thunk->offset,
+                      comm_thunk->nbytes,&src,&type,&nbytes_recv);
+d578 1
+a578 1
+    if ( errno || (nbytes_recv !=comm_thunk->nbytes))
+d583 2
+a584 6
+    _mpass->proc_next_store[src]--;
+  } else if (type==BSP_MPASS_PERFORM_FETCH) {
+    while (COMM_IS_STORE(_mpass->proc_comm_in_fifo[src]
+                         [_mpass->proc_next_fetch[src]].comm_pid)) 
+      _mpass->proc_next_fetch[src]--;
+    comm_thunk=&_mpass->proc_comm_in_fifo[src][_mpass->proc_next_fetch[src]];
+d588 2
+a589 2
+    errno = block_recv(comm_thunk->addr_real,
+                      comm_thunk->nbytes,&src,&type,&nbytes_recv);
+d591 1
+a591 1
+    if ( errno || (nbytes_recv !=comm_thunk->nbytes))
+d594 1
+a594 4
+   _mpass->proc_next_fetch[src]--;
+  } else
+    bsp_error("{bsp_sstep_end}: received neither store or fetch; "
+              "type=%d",type);
+d603 1
+a603 1
+void sendSomething(int *bucket,comm_handle *msgid) {
+d608 5
+a612 3
+  while(_mpass->proc_comm_out_next[*bucket]==0) (*bucket)++;
+  comm_thunk=&_mpass->proc_comm_out_fifo[*bucket]
+               [--_mpass->proc_comm_out_next[*bucket]];
+d617 2
+a618 9
+    errno = nonblock_send(comm_thunk->addr_real,
+                          comm_thunk->nbytes,
+                          *bucket,
+                          BSP_MPASS_PERFORM_STORE,msgid);
+#ifdef SANITY_CHECK
+    if (errno) 
+      bsp_error("{bsp_sstep_end} send of store 0x%x failed",
+                comm_thunk->addr_real);
+#endif
+d623 3
+a625 10
+    errno= nonblock_send((char*)_bsp_addr_table[comm_thunk->addr_table]+
+                                comm_thunk->offset,
+                         comm_thunk->nbytes,
+                         *bucket,
+                         BSP_MPASS_PERFORM_FETCH,msgid);
+#ifdef SANITY_CHECK
+    if (errno) 
+      bsp_error("{bsp_sstep_end} async send fetch 0x%x+%dfailed",
+                _bsp_addr_table[comm_thunk->addr_table],comm_thunk->offset);
+#endif
+d672 5
+d687 4
+a690 4
+    memcpy((char *)dst,((char*)_bsp_addr_table[src_addr] + offset),nbytes); 
+#ifdef PROFILE
+    bspprof_sstep_self_comm(nbytes);
+#endif
+d696 32
+a727 20
+    /* Put fetch in the in and out queues because we will */
+    /* receive a message back                             */
+    comm_thunk=&_mpass->proc_comm_out_fifo[pid]
+                                          [_mpass->proc_comm_out_next[pid]];
+    comm_thunk->comm_pid   = COMM_SET_FETCH(pid);
+    comm_thunk->addr_table = src_addr;
+    comm_thunk->offset     = offset;
+    comm_thunk->addr_real  = dst;
+    comm_thunk->nbytes     = nbytes;
+    /* Put a copy in the in buffer */
+    memcpy(&_mpass->proc_comm_in_fifo[pid]
+                                     [_mpass->proc_comm_in_next[pid]],
+           comm_thunk,sizeof(_BSPcomm_thunk));
+    _mpass->proc_comm_out_next[pid]++;
+    _mpass->proc_comm_in_next[pid]++;
+    if ((_mpass->proc_comm_in_next[pid] >= BSP_COMM_FIFO_SIZE) ||
+        (_mpass->proc_comm_out_next[_bsp_pid] >= BSP_COMM_FIFO_SIZE))
+      bsp_error("{bsp_fetch}: internal buffer overflow. \n"
+                "Recompile with -bspfifo=%d",
+                10*BSP_COMM_FIFO_SIZE);
+d738 4
+d748 17
+a764 8
+  comm_thunk=&_mpass->proc_comm_out_fifo[pid]
+                                        [_mpass->proc_comm_out_next[pid]];
+  comm_thunk->comm_pid   = COMM_SET_STORE(pid);
+  comm_thunk->addr_table = dst_addr;
+  comm_thunk->offset     = offset;
+  comm_thunk->addr_real  = src;
+  comm_thunk->nbytes     = nbytes;
+  _mpass->proc_comm_out_next[pid]++;
+d766 7
+a772 4
+  if (_mpass->proc_comm_out_next[pid] >= BSP_COMM_FIFO_SIZE)
+    bsp_error("{bsp_store} internal buffer overflow. \n"
+              "Recompile with -bspfifo=%d",
+              10*BSP_COMM_FIFO_SIZE);
+@
+
+
+1.3
+log
+@Solved CSS Transmit bug, and added combining stores optimisation
+@
+text
+@d17 1
+a17 1
+% $Id: bsp_lib_mpass.lc,v 1.2 1995/08/31 16:27:45 jonh Exp jonh $
+d19 3
+d38 1
+a38 1
+void sendSomething(int,int*,comm_handle*);
+d59 3
+a61 3
+void **_bsp_addr_table;
+int _bsp_addr_table_limit;
+int _bsp_addr_table_miller;
+d72 1
+d78 1
+a84 1
+
+d86 1
+a86 1
+\section{What's my process number}
+d88 6
+d95 2
+a96 3
+int bsp_pid() {
+  return (_bsp_pid);
+}
+a97 4
+int bsp_nprocs() {
+  return (_bsp_nprocs);
+}
+\end{code}
+a135 48
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Initialise an individual processes global variables}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void initProcessGlobals() {
+   _bsp_addr_table= (void **) calloc(BSP_ADDR_TABLE_SIZE,
+		                     sizeof(void*));
+   if (_bsp_addr_table==NULL)
+      bsp_error("{calloc} unable to alloc per process addr table");
+
+   _bsp_addr_table_miller = BSP_ADDR_TABLE_SIZE-1;
+   _bsp_addr_table_limit  = BSP_ADDR_TABLE_SIZE-2;
+   _bsp_addr_table[_bsp_addr_table_miller] = (char*)&_bsp_miller_reference;
+   _bsp_scratch_buffer = malloc(BSP_BUFFER_SIZE);
+   if (_bsp_scratch_buffer==NULL)
+     bsp_error("{bsp_start}: unable to allocate scratch buffer");
+#ifdef STATISTICS
+   initStatistics();
+#endif
+#ifdef PROFILE
+   initProfile();
+#endif
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Check the defines are correct}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Check to see that various restrictions on the conforms are true
+\begin{code}
+void checkDefines() {
+   if (BSP_BUFFER_SIZE % 4 != 0)
+      bsp_error("{BSP_BUFFER_SIZE} has to be divisable by 4.");
+
+   if (BSP_MAX_PROCS < 0)
+      bsp_error("{BSP_MAX_PROCS=%d} has to be positive",BSP_BUFFER_SIZE);
+
+   if (BSP_BUFFER_SIZE < (BSP_MAX_PROCS*sizeof(int)))
+      bsp_error("{BSP_BUFFER_SIZE=%d}: is too small. "
+             "It is required to be at least %d bytes for the\n"
+             "internal workings of the library.\n"
+             "Recompile your code with the -bspbuffer option",
+             BSP_BUFFER_SIZE,(BSP_MAX_PROCS*sizeof(int)));
+   if (BSP_COMM_FIFO_SIZE < 1)
+      bsp_error("{BSP_COMM_FIFO_SIZE} has to be greater than 1");
+}
+
+\end{code}
+d160 4
+a163 8
+#ifdef MPASS_MPL
+  errno = mpc_environ(&_bsp_fork_nprocs,&_bsp_pid);
+#else
+  errno =          MPI_Init(&argc,&argv);
+  errno = errno || MPI_Comm_rank(MPI_COMM_WORLD,&_bsp_pid);
+  errno = errno || MPI_Comm_size(MPI_COMM_WORLD,&_bsp_fork_nprocs);
+  _mpass->group = MPI_COMM_WORLD;
+#endif
+a188 7
+#ifdef MPASS_MPL
+  int nbuf[2];
+#else
+#ifdef MPASS_MPI
+  MPI_Group mpi_group,mpi_group_world;
+#endif
+#endif
+a190 1
+  if (BSP_OPT_FCOMBINE_STORES) bspcombstores_init();
+d222 1
+a222 2
+#ifdef MPASS_MPL
+  /* Kill off unwanted processess off **before** setting task group */
+d229 2
+a230 37
+  errno = mpc_group(*nprocs,gids,1,&_mpass->group);
+  if (errno)
+    bsp_error("{bsp_start}: unable to create communication group");
+#else
+#ifdef MPASS_MPI
+  barrier_sync();
+  errno = MPI_Comm_group(MPI_COMM_WORLD,&mpi_group_world);
+  if (errno)
+    bsp_error("{bsp_start} failed to create an MPI communication group");
+  
+  errno = MPI_Group_incl(mpi_group_world,*nprocs,gids,&mpi_group);
+  if (errno)
+    bsp_error("{bsp_start} failed to add to an MPI communication group");
+
+  errno = MPI_Comm_create(MPI_COMM_WORLD,mpi_group,&_mpass->group);
+  if (errno)
+    bsp_error("{bsp_start}: unable to create communication group");
+  /* Kill off unwanted processess off **after** setting task group */
+  if (_bsp_pid >= _bsp_nprocs) {
+#ifdef DEBUG
+    bsp_debug("{bsp_start}: process not needed so exiting");
+#endif
+    messg_exit(1);
+  }  
+#endif
+#endif
+\end{code}
+
+
+\begin{code}
+#ifdef MPASS_MPL
+  nbuf[0] = BSP_BUFFER_SIZE;
+  nbuf[1] = 1;
+  errno   = mpc_task_set(nbuf,3);
+  if (errno)
+    bsp_error("{bsp_start}: cannot set buffer size for Sp2");
+#endif
+d266 1
+d297 1
+d304 1
+a304 1
+#ifndef TURBO
+d313 4
+d331 1
+a331 1
+  int i,j,k,temp,temp_pid,errno,left,right,type,nbytes_recv;
+d334 1
+d337 6
+d346 1
+a346 1
+#ifndef TURBO
+d352 1
+a352 1
+	      "opening is numbered %d, whilst closing is numbered %d",
+d461 1
+a461 1
+Finally squeeze the newly sent fetches from the in buffer.
+d480 37
+d522 1
+a522 1
+  dumpFifoCommTable("Munged in table",stepno,_mpass->proc_comm_in_fifo,
+d524 1
+a524 1
+#endif 
+d561 1
+a561 1
+        sendSomething(1,&bucket,&msgid);
+d565 1
+a565 1
+      sendSomething(0,&bucket,&msgid);
+d593 3
+d597 1
+a647 1
+  _mpass->proc_comm_in_next[src]--;
+d656 1
+a656 1
+void sendSomething(int isasync,int *bucket,comm_handle *msgid) {
+d666 1
+a666 1
+    bsp_debug("{bsp_sstep_end} send(%d) a store to %d",isasync,*bucket);
+d668 5
+a672 8
+    errno = isasync?(nonblock_send(comm_thunk->addr_real,
+                                   comm_thunk->nbytes,
+                                   *bucket,
+                                   BSP_MPASS_PERFORM_STORE,msgid)):
+                    (block_send(comm_thunk->addr_real,
+                                comm_thunk->nbytes,
+                                *bucket,
+                                BSP_MPASS_PERFORM_STORE));
+d676 1
+d679 1
+a679 1
+    bsp_debug("{bsp_sstep_end} sending(%d) a fetch to %d",isasync,*bucket);
+d681 6
+a686 10
+    errno= isasync?(nonblock_send((char*)_bsp_addr_table[comm_thunk->addr_table]+
+                                      comm_thunk->offset,
+                               comm_thunk->nbytes,
+                               *bucket,
+                               BSP_MPASS_PERFORM_FETCH,msgid)):
+                   (block_send((char*)_bsp_addr_table[comm_thunk->addr_table]+
+                                   comm_thunk->offset,
+                               comm_thunk->nbytes,
+                               *bucket,
+                               BSP_MPASS_PERFORM_FETCH));
+d689 2
+a690 1
+	      	_bsp_addr_table[comm_thunk->addr_table],comm_thunk->offset);
+d712 2
+a713 2
+	         "store",i,
+	         COMM_GET_PID(fifo[i][j].comm_pid),
+d720 2
+a721 2
+	         "fetch",i,
+		 COMM_GET_PID(fifo[i][j].comm_pid),
+a732 28
+\section{\texttt{bsp\_addr}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_addr(int offset, void *addr) {
+#ifdef SANITY_CHECK
+    if (offset >= _bsp_addr_table_limit)
+      bsp_error("{bsp_sstep}: internal table overflow");
+#endif
+
+   _bsp_addr_table[offset] = addr;   
+
+}
+
+char *bsp_addr_get(int i) {
+  return (_bsp_addr_table[i]);
+}
+\end{code}
+
+\begin{code}
+int bsp_addr_new_global(void *addr) {
+  if (_bsp_addr_table_limit<=0)
+    bsp_error("{bsp_addr_get_global} address table underflow");
+  _bsp_addr_table[_bsp_addr_table_limit]=addr;
+  return (_bsp_addr_table_limit--);
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+a779 9
+Compatibility mode with Richards library:
+\begin{code}
+void bsp_fetch(int pid, char *src, void *dst, int nbytes) {
+  bsp_addr_fetch(pid,_bsp_addr_table_miller,
+                 src-(char*)&_bsp_miller_reference,
+                 dst,nbytes);
+}
+\end{code}
+
+d781 1
+a781 1
+\section{\texttt{bsp\_store}}
+d783 1
+d785 1
+a785 1
+void bsp_addr_store(int pid, void *src, int dst_addr, int offset, int nbytes){
+a787 14
+#ifdef SANITY_CHECK
+  if (pid < 0 || pid >= _bsp_nprocs) 
+    bsp_error("{bsp_store}: processor %d is trying to store "
+              "to no-existant processor %d.",_bsp_pid,pid);
+#endif
+
+  if (pid == _bsp_pid) {
+    memcpy(((char *)_bsp_addr_table[dst_addr] + offset),(char *)src,nbytes); 
+#ifdef PROFILE
+    bspprof_sstep_self_comm(nbytes);
+#endif
+  } else if (BSP_OPT_FCOMBINE_STORES && bspcombstores_applicable(pid,nbytes)){
+    bspcombstores_store(pid,src,dst_addr,offset,nbytes);
+  } else {
+d789 2
+a790 2
+    if (_bspstat.buffer_high_water_mark < nbytes)
+      _bspstat.buffer_high_water_mark = nbytes;      
+d792 8
+a799 8
+    comm_thunk=&_mpass->proc_comm_out_fifo[pid]
+                                          [_mpass->proc_comm_out_next[pid]];
+    comm_thunk->comm_pid   = COMM_SET_STORE(pid);
+    comm_thunk->addr_table = dst_addr;
+    comm_thunk->offset     = offset;
+    comm_thunk->addr_real  = src;
+    comm_thunk->nbytes     = nbytes;
+    _mpass->proc_comm_out_next[pid]++;
+d801 4
+a804 5
+    if (_mpass->proc_comm_out_next[pid] >= BSP_COMM_FIFO_SIZE)
+      bsp_error("{bsp_fetch} internal buffer overflow. \n"
+                "Recompile with -bspfifo=%d",
+                10*BSP_COMM_FIFO_SIZE);
+  }
+a807 9
+
+Compatibility mode with Richards library:
+\begin{code}
+void bsp_store(int pid, void *src, char *dst, int nbytes) {
+  bsp_addr_store(pid,src,_bsp_addr_table_miller,
+                dst - (char*)&_bsp_miller_reference,
+                nbytes);
+}
+\end{code}
+@
+
+
+1.2
+log
+@seems to be working on Sp2 and on top of MPI
+@
+text
+@d17 1
+a17 1
+% $Id: bsp_lib_mpass.lc,v 1.1 1995/08/29 14:05:54 jonh Exp jonh $
+d19 3
+d35 1
+a35 1
+void sendSomething(int,int*,async_handle*);
+d49 2
+d53 1
+d58 1
+d70 8
+d80 51
+d141 9
+a149 2
+   _bsp_addr_table_limit   = BSP_ADDR_TABLE_SIZE-1;
+   _bsp_addr_table[_bsp_addr_table_limit] = (char*)&_bsp_miller_reference;
+d192 10
+d213 5
+a217 2
+  if (_bsp_pid==0) {
+    bspmain(argc,argv);
+d219 3
+a221 1
+    _bsp_start_stub();
+d225 1
+a225 1
+  exit(0);
+a243 2
+  /* Procedure defined by the BSP compilation driver bspfront */
+  _bsp_preload_init();  
+d245 1
+d254 3
+d283 1
+a283 1
+    exit(0);
+d307 1
+a307 1
+    exit(1);
+d317 1
+a317 1
+  nbuf[1] = _bsp_nprocs;
+d319 2
+a325 5
+  /* Create the message buffer */
+  _mpass->proc_buffer = calloc(BSP_BUFFER_SIZE,sizeof(char));
+  if (_mpass->proc_buffer==NULL)
+    bsp_error("{bsp_start}: unable to malloc message buffer");
+ 
+d372 6
+a377 1
+  if (_bsp_pid > 0) exit(0);
+d387 3
+d391 1
+a391 1
+  _bspprof.super_steps++;
+d393 1
+d398 5
+a402 4
+  else {
+    _bsp_sstepno = sstepno;
+    _bsp_insstep = 1;
+  }
+d411 5
+a415 1
+  async_handle msgid;
+d418 1
+a418 1
+  int src,status,sent_something;
+d420 5
+d428 1
+a428 1
+  else if (_bsp_sstepno != stepno) 
+d432 4
+a435 1
+  else {
+d437 3
+a439 3
+    barrier_sync();
+    dumpFifoCommTable("Out table",stepno,_mpass->proc_comm_out_fifo,
+                      _mpass->proc_comm_out_next);
+d441 3
+a443 3
+    barrier_sync();
+    dumpFifoCommTable("In table",stepno,_mpass->proc_comm_in_fifo,
+                      _mpass->proc_comm_in_next);
+d453 10
+a462 10
+    for(i=1;i<_bsp_nprocs; i++) {
+      /* Make sure messages don't overtake one another from different */
+      /* iterations of this loop */
+      type = BSP_MPASS_EXCHANGE_COMM_FIFO  + i;
+      left  = (_bsp_pid>=i)?(_bsp_pid-i):(_bsp_nprocs+(_bsp_pid-i));
+      right = (_bsp_pid+i) % _bsp_nprocs;
+      errno = async_send(_mpass->proc_comm_out_fifo[right],
+                       sizeof(_BSPcomm_thunk) * 
+                       _mpass->proc_comm_out_next[right],
+                       right,type,&msgid);
+d464 1
+a464 1
+      if (errno) bsp_error("{bsp_sstep_end} failed to exchange fifo S%d",i);
+d467 7
+a473 7
+      /* A fetch may already be in the in buffer, so start writing    */
+      /* after the previous entry. We have to be careful however that */
+      /* we don't overflow the in buffer                              */
+      errno = sync_recv(&_mpass->proc_comm_in_fifo[left]
+                           [_mpass->proc_comm_in_next[left]],
+                        sizeof(_BSPcomm_thunk) * BSP_COMM_FIFO_SIZE,
+                        &left,&type,&nbytes_recv);
+d475 12
+a486 12
+      if  (errno) 
+        bsp_error("{bsp_sstep_end} failed to exchange fifo F%d",i);
+      else if (type != BSP_MPASS_EXCHANGE_COMM_FIFO+i)
+        bsp_error("{bsp_sstep_end} received wrong type of message");
+#endif
+      _mpass->proc_comm_in_next[left] += nbytes_recv/sizeof(_BSPcomm_thunk);
+
+      /* We can get a rare situation where we get a buffer overflow */
+      if (_mpass->proc_comm_in_next[left] >=  BSP_COMM_FIFO_SIZE)
+        bsp_error("{bsp_fetch}: internal buffer overflow. \n"
+                  "Recompile with -bspfifo=%d",
+                  10*BSP_COMM_FIFO_SIZE);
+d488 1
+a488 1
+    }
+d490 2
+a491 2
+    barrier_sync();
+    dumpFifoCommTable("exchanged in table",stepno,_mpass->proc_comm_in_fifo,
+d494 3
+d501 13
+a513 14
+    for(i=0;i<_bsp_nprocs;i++) {
+      temp = _mpass->proc_comm_out_next[i];
+      k=0;
+      for(j=0;j<temp;j++) {
+        if (COMM_IS_STORE(_mpass->proc_comm_out_fifo[i][j].comm_pid)) {
+          if(j!=k) {
+            memcpy(&_mpass->proc_comm_out_fifo[i][k],
+                   &_mpass->proc_comm_out_fifo[i][j],
+                   sizeof(_BSPcomm_thunk));
+          }
+          k++;
+        } else 
+          _mpass->proc_comm_out_next[i]--;
+      }
+d515 1
+d522 14
+a535 14
+   for(i=0;i<_bsp_nprocs;i++) {
+     for(j=0;j<_mpass->proc_comm_in_next[i];j++) {
+       temp = _mpass->proc_comm_in_fifo[i][j].comm_pid;
+       if (!COMM_IS_STORE(temp) && COMM_GET_PID(temp)==_bsp_pid) 
+         memcpy(&_mpass->proc_comm_out_fifo[i]
+                                           [_mpass->proc_comm_out_next[i]++],
+                &_mpass->proc_comm_in_fifo[i][j],
+                sizeof(_BSPcomm_thunk));
+     }
+   }
+#ifdef DEBUG
+    barrier_sync();
+    dumpFifoCommTable("Munged out table",stepno,_mpass->proc_comm_out_fifo,
+                      _mpass->proc_comm_out_next);
+d541 6
+a546 6
+    for(i=0;i<_bsp_nprocs;i++) {
+      k=0;
+      temp=_mpass->proc_comm_in_next[i];
+      for(j=0;j<temp;j++) {
+        temp_pid = _mpass->proc_comm_in_fifo[i][j].comm_pid;
+        if (!COMM_IS_STORE(temp_pid) && COMM_GET_PID(temp_pid)==_bsp_pid)
+d548 8
+a555 9
+        else {
+          if(j!=k) {
+            memcpy(&_mpass->proc_comm_in_fifo[i][k],
+                   &_mpass->proc_comm_in_fifo[i][j],
+                   sizeof(_BSPcomm_thunk));
+          }
+          k++;
+        }   
+      }
+d557 1
+d562 3
+a564 3
+    barrier_sync();
+    dumpFifoCommTable("Munged in table",stepno,_mpass->proc_comm_in_fifo,
+                      _mpass->proc_comm_in_next);
+d569 4
+a572 4
+    for(i=0;i<_bsp_nprocs;i++) {
+      no_out_messages += _mpass->proc_comm_out_next[i];
+      no_in_messages  += _mpass->proc_comm_in_next[i];
+    }
+d576 18
+a593 7
+    bucket=0;
+    for(i=0;i<_bsp_nprocs;i++) {
+      _mpass->proc_next_fetch[i]=_mpass->proc_comm_in_next[i]-1;
+      _mpass->proc_next_store[i]=_mpass->proc_comm_in_next[i]-1;
+    }
+    sent_something = 0;
+    while (no_out_messages>0  || no_in_messages>0) {
+d595 2
+a596 2
+      bsp_debug("%d messages to go; %d messages to come in",
+                no_out_messages,no_in_messages);
+d598 5
+a602 30
+      if (no_out_messages>0 && no_in_messages>0) {
+        /* Check if a store hasn't come in*/
+        src = PID_DONTCARE;
+        type= TYPE_DONTCARE;
+        errno = async_probe(&src,&type,&status);
+        if (errno) 
+          bsp_error("{bsp_sstep_end}: probing asynchronous store failed");
+        if (status != -1) {
+#ifdef DEBUG
+          bsp_debug("send-recv: a %d is coming in from %d [%d to go]",
+                    type,src,no_in_messages-1);
+#endif
+          receiveSomething(src,type);
+          no_in_messages--;
+        } else {
+          /* Nothing coming in. Send something out */
+
+          if (sent_something) {
+            /* Wait until previous send has gone, otherwise messages */
+	    /* may overtake one another */
+            errno = messg_wait(&msgid,&nbytes_recv);
+            if (errno)
+              bsp_error("{bsp_sstep_end} wait for sent message failed");
+          }
+          sent_something = 1;
+          sendSomething(1,&bucket,&msgid);
+          no_out_messages--;
+        }
+      } else if (no_out_messages >0) {
+        sendSomething(0,&bucket,&msgid);
+d604 12
+a615 8
+      } else if (no_in_messages  >0) {
+        /* If only one bucket has something in it. Then there is no */
+	/* need to busy wait. */
+        src    = PID_DONTCARE;
+        type   = TYPE_DONTCARE;
+        sync_probe(&src,&type,errno);
+        if (errno)
+          bsp_error("{bsp_sstep_end} synchronous probe failed");
+a616 1
+
+d618 1
+a618 1
+        bsp_debug("recv: (a %d is coming in from %d [%d to go]",
+d621 4
+a624 4
+        receiveSomething(src,type);
+        no_in_messages--;
+      }                
+    }
+d626 12
+a637 1
+    bsp_debug("{sstep_end}:Finished communication");
+a638 3
+    _bsp_insstep        =0; 
+    barrier_sync();
+  }
+d657 1
+a657 1
+    errno = sync_recv((char*)_bsp_addr_table[comm_thunk->addr_table]+
+d675 1
+a675 1
+    errno = sync_recv(comm_thunk->addr_real,
+d686 3
+a688 3
+#ifdef PROFILE
+  _bspprof.packet_stores_dst++;
+  _bspprof.packet_stores_dstnbytes +=nbytes_recv; 
+d694 1
+a694 1
+void sendSomething(int isasync,int *bucket,async_handle *msgid) {
+d704 1
+a704 1
+    bsp_debug("{bsp_sstep_end} async sending a store to %d",*bucket);
+d706 5
+a710 1
+    errno = isasync?(async_send(comm_thunk->addr_real,
+d713 1
+a713 5
+                                BSP_MPASS_PERFORM_STORE,msgid)):
+                    (sync_send(comm_thunk->addr_real,
+                               comm_thunk->nbytes,
+                               *bucket,
+                               BSP_MPASS_PERFORM_STORE));
+d715 1
+a715 1
+      bsp_error("{bsp_sstep_end} async send of store 0x%x failed",
+d719 1
+a719 1
+    bsp_debug("{bsp_sstep_end} async sending a fetch to %d",*bucket);
+d721 1
+a721 1
+    errno= isasync?(async_send((char*)_bsp_addr_table[comm_thunk->addr_table]+
+d726 2
+a727 2
+                   (sync_send((char*)_bsp_addr_table[comm_thunk->addr_table]+
+                                     comm_thunk->offset,
+d735 3
+a737 3
+#ifdef PROFILE
+  _bspprof.packet_stores_src++;
+  _bspprof.packet_stores_srcnbytes +=comm_thunk->nbytes; 
+d788 13
+d807 1
+a807 1
+void _bsp_fetch(int pid, int src_addr, int offset, void *dst, int nbytes) {
+d819 3
+d823 3
+a825 3
+#ifdef PROFILE
+  if (_bspprof.buffer_high_water_mark < nbytes)
+    _bspprof.buffer_high_water_mark = nbytes;      
+d854 3
+a856 3
+  _bsp_fetch(pid,_bsp_addr_table_limit,
+             src-(char*)&_bsp_miller_reference,
+             dst,nbytes);
+d864 1
+a864 1
+void _bsp_store(int pid, void *src, int dst_addr, int offset, int nbytes) {
+d875 5
+d881 3
+a883 3
+#ifdef PROFILE
+    if (_bspprof.buffer_high_water_mark < nbytes)
+      _bspprof.buffer_high_water_mark = nbytes;      
+d906 3
+a908 3
+  _bsp_store(pid,src,_bsp_addr_table_limit,
+             dst - (char*)&_bsp_miller_reference,
+             nbytes);
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 21
+a21 2
+% $Id$
+% $Log$
+d32 1
+a32 1
+void sendSomething(int,int*,int*);
+d60 2
+a61 2
+MPI_Status _mpi_status;
+int        _mpi_errno;
+d117 1
+a117 1
+  int errno, message,src,type,nbytes;
+d119 2
+d122 6
+a132 12
+    type  = BSP_MPASS_FORK;
+    src   = 0; /* Master process zero */
+#ifdef DEBUG 
+    bsp_debug("{main} process %d waiting to be forked",_bsp_pid);
+#endif
+    errno = sync_recv(&_bsp_nprocs,sizeof(int),&src,&type,&nbytes);
+    if (errno) 
+      bsp_error("{main}: process %d wouldn't fork",_bsp_pid);
+    if (_bsp_nprocs==(-9)) exit(0); /* Terminated idle process */
+#ifdef DEBUG
+    bsp_debug("{main} process %d forked",_bsp_pid);
+#endif
+d147 8
+a154 1
+  int pid,errno,kill=-9,*gids,i,nbuf[2];
+a166 1
+  
+d170 3
+a172 3
+
+    /* Fork off _bsp_nprocs processes */
+    for(pid=1;pid<_bsp_nprocs;pid++) {
+d174 1
+a174 1
+      bsp_debug("{bsp_start} process %d forking off process %d",_bsp_pid,pid);
+d176 14
+a189 7
+      errno = sync_send(&_bsp_nprocs,sizeof(int),pid,BSP_MPASS_FORK);
+      if (errno)
+        bsp_error("{bsp_start}: unable to fork process %d",pid);
+    }
+      
+    /* Kill any unwanted processes */
+    for(pid=_bsp_nprocs; pid < _bsp_fork_nprocs;pid++) {
+d191 1
+a191 1
+      bsp_debug("{bsp_start} killing process %d",pid);
+d193 1
+a193 4
+      errno = sync_send(&kill,sizeof(int),pid,BSP_MPASS_FORK);
+      if (errno)
+        bsp_error("{bsp_start}: unable to kill process %d",pid);
+    }
+d195 13
+d209 5
+d215 5
+a219 1
+  bsp_debug("{bsp_start} process %d starting",_bsp_pid);
+a220 3
+  *nprocs     = _bsp_nprocs;
+  *mypid      = _bsp_pid;
+  _bsp_instart= 1;
+d223 1
+d225 1
+d229 1
+a233 8
+  _mpass = malloc(sizeof(_BSPinfo));
+  /* Create the group identifier for the barrier*/
+  gids = calloc(*nprocs,sizeof(int));
+  for(i=0;i<*nprocs;i++) gids[i]=i;
+  errno = mpc_group(*nprocs,gids,1,&_mpass->group);
+  if (errno)
+    bsp_error("{bsp_start}: unable to create synchronisation barrier");
+
+d286 1
+a286 1
+  /* Only process zero should get here */ 
+a313 3
+  int next_store;
+  int stores_to_other;
+  int pid_copy_to;
+d316 1
+a316 1
+  int no_out_messages=0, no_in_messages=0,bucket=0,squeeze=0;
+d477 3
+a479 3
+        src = DONTCARE;
+        type= DONTCARE;
+        errno = messg_probe(&src,&type,&status);
+d509 7
+a515 9
+        src    = DONTCARE;
+        type   = DONTCARE;
+        status = -1;
+        while (status == -1) {
+          errno = messg_probe(&src,&type,&status);
+#ifdef PROFILE
+          _bspprof.empty_waits++;
+#endif
+        }
+d585 1
+a585 1
+void sendSomething(int isasync,int *bucket,int *msgid) {
+d600 1
+a600 1
+                                BSP_MPASS_PERFORM_STORE,&msgid)):
+d616 1
+a616 1
+                               BSP_MPASS_PERFORM_FETCH,&msgid)):
+a685 4
+  int             togo_nbytes  = nbytes;
+  int             chunk_nbytes;
+  void           *chunk_dst    = dst;
+  int             chunk_offset = offset;
+d690 3
+a692 3
+    if (pid < 0 || pid >= _bsp_nprocs) 
+      bsp_error("{bsp_fetch}: processor %d is trying to fetch "
+                "from no-existant processor %d.",_bsp_pid,pid);
+d702 20
+a721 33
+    while (togo_nbytes>0) {
+      if (togo_nbytes > BSP_BUFFER_SIZE) {
+        togo_nbytes -= BSP_BUFFER_SIZE;
+        chunk_nbytes = BSP_BUFFER_SIZE;
+      } else {
+        chunk_nbytes = togo_nbytes;
+        togo_nbytes  = 0;
+      }
+      
+      /* Put fetch in the in and out queues because we will */
+      /* receive a message back                             */
+      comm_thunk=&_mpass->proc_comm_out_fifo[pid]
+                                            [_mpass->proc_comm_out_next[pid]];
+      comm_thunk->comm_pid   = COMM_SET_FETCH(pid);
+      comm_thunk->addr_table = src_addr;
+      comm_thunk->offset     = chunk_offset;
+      comm_thunk->addr_real  = chunk_dst;
+      comm_thunk->nbytes     = chunk_nbytes;
+      /* Put a copy in the in buffer */
+      memcpy(&_mpass->proc_comm_in_fifo[pid]
+                                       [_mpass->proc_comm_in_next[pid]],
+             comm_thunk,sizeof(_BSPcomm_thunk));
+      _mpass->proc_comm_out_next[pid]++;
+      _mpass->proc_comm_in_next[pid]++;
+      if ((_mpass->proc_comm_in_next[pid] >= BSP_COMM_FIFO_SIZE) ||
+          (_mpass->proc_comm_out_next[_bsp_pid] >= BSP_COMM_FIFO_SIZE))
+        bsp_error("{bsp_fetch}: internal buffer overflow. \n"
+                  "Recompile with -bspfifo=%d",
+                  10*BSP_COMM_FIFO_SIZE);
+    
+      chunk_offset += chunk_nbytes;
+      chunk_dst     = (char *)chunk_dst + chunk_nbytes;
+    }
+a739 4
+  int             togo_nbytes  = nbytes;
+  int             chunk_nbytes;
+  void           *chunk_src    = src;
+  int             chunk_offset = offset;
+d743 3
+a745 3
+    if (pid < 0 || pid >= _bsp_nprocs) 
+      bsp_error("{bsp_store}: processor %d is trying to store "
+                "to no-existant processor %d.",_bsp_pid,pid);
+d752 2
+a753 2
+  if (_bspprof.buffer_high_water_mark < nbytes)
+    _bspprof.buffer_high_water_mark = nbytes;      
+d755 8
+a762 17
+    while (togo_nbytes>0) {
+      if (togo_nbytes > BSP_BUFFER_SIZE) {
+         togo_nbytes -= BSP_BUFFER_SIZE;
+         chunk_nbytes = BSP_BUFFER_SIZE;
+      } else {
+         chunk_nbytes = togo_nbytes;
+         togo_nbytes  = 0;
+       
+      }
+      comm_thunk=&_mpass->proc_comm_out_fifo[pid]
+                                            [_mpass->proc_comm_out_next[pid]];
+      comm_thunk->comm_pid   = COMM_SET_STORE(pid);
+      comm_thunk->addr_table = dst_addr;
+      comm_thunk->offset     = chunk_offset;
+      comm_thunk->addr_real  = chunk_src;
+      comm_thunk->nbytes     = chunk_nbytes;
+      _mpass->proc_comm_out_next[pid]++;
+d764 4
+a767 8
+      if (_mpass->proc_comm_out_next[pid] >= BSP_COMM_FIFO_SIZE)
+        bsp_error("{bsp_fetch} internal buffer overflow. \n"
+                  "Recompile with -bspfifo=%d",
+                  10*BSP_COMM_FIFO_SIZE);
+
+      chunk_offset += chunk_nbytes;
+      chunk_src     = ((char *)chunk_src) + chunk_nbytes;
+   }
+@

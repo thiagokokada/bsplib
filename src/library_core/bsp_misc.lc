@@ -1,0 +1,197 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997,1998 University of Oxford           %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id$
+% $Log$
+\begin{code}
+#include "bsp_lib.h"
+#include <stdlib.h>
+#include <string.h>
+#ifdef CRAYMPP
+#include <fortran.h>
+#endif
+\end{code}
+The following two routines are used by the BSP debugger.
+\begin{code}
+void bsp_sync_end() {
+}
+
+
+
+void bsp_begin_end() {
+int p;
+if (bsp_pid()==0)
+   p=1;
+}
+\end{code}
+
+\begin{code}
+char *bsp_pprbytes(int x) {
+  char *buffer;
+  buffer = CALLOC(10,SIZEOF(char));
+  if (buffer==NULL)
+    bsp_abort("{bsp_pprbytes}: failed to allocate print buffer");
+
+  if (x > 1048576)   sprintf(buffer,"%6.1fMb",((double) x)/1048576.0);
+  else if (x > 1024) sprintf(buffer,"%7.1fK", ((double) x)/1024.0);
+  else               sprintf(buffer,"%8d",x);
+  return buffer;
+}
+\end{code}
+
+\begin{code}
+char *bsp_strdup(const char *str) {
+  char *ptr;
+  int len;
+
+  len = 1+strlen(str);
+  ptr = MALLOC(len);
+  if (ptr==NULL) bsp_abort("bsp_strdup} failed to allocate string");
+  MEMCPY(ptr,str,len);
+  return(ptr);
+}
+\end{code}
+
+
+\begin{code}
+#ifdef CRAYMPP
+char *bsp_craystr_cstr(_fcd craystr) {
+  char *str,*cstr;
+  int   i;
+  
+  cstr = _fcdtocp(craystr);
+  i = (cstr==NULL)?0:_fcdlen(craystr);
+  str = malloc(i+1);
+  if (str==NULL)
+    bsp_abort("{bsp_craystr_cstr} failed to allocate %d bytes of storage",
+              i+1);
+
+  strncpy(str,cstr,i);
+  str[i] = '\0';
+  return str;
+}
+
+#else
+char *bsp_f77str_cstr(const char* f77string, int len) {
+  char *str;
+  int   i;
+
+  for(i=0;((i<len) && (f77string[i]!=' ') && (f77string[i]!='\0'));i++);
+  str = malloc(i+1);
+  if (str==NULL)
+    bsp_abort("{bsp_f77str_cstr} failed to allocate %d bytes of storage",
+              i+1);
+
+  strncpy(str,f77string,i);
+  str[i] = '\0';
+  return str;
+}
+#endif
+\end{code}
+
+\begin{code}
+int hashpjw(const char *s) {
+  char *p;
+  unsigned int h=0, g;
+  for(p=(char*) s;*p != '\0'; p++) {
+    h = (h << 4) + (*p);
+    if (g = h &0xf0000000) {
+      h = h ^ (g >> 24);
+      h = h ^ g;
+    }
+  }
+  return h;
+}
+\end{code}
+
+\begin{code}
+void bsp_abort_fifo_too_small(char * routine) {
+  bsp_abort("{%s} line %d of \"%s\"\n"
+            "\tA fixed sized buffer used in the implementation of "
+            "BSPlib has overflowed\n"
+            "\tYou can either re-link your program using:\n"
+            "\t1) a value of -bspfifo              greater than %d\n"
+            "\t2) a value of -bspbuffer            greater than %dk\n"
+            "\t3) a value of -fcombine-puts-buffer greater than %dk\n",
+            routine,
+            _bsp_lineno,
+            _bsp_filename,
+            _bsp_comm_fifo_size,
+            _bsp_buffer_size/1024,
+            _bsp_opt_fcombine_puts/1024);
+}
+\end{code}
+
+This routine is called within \texttt{bsp\_sync}. As this routine uses
+\texttt{bsp\_sync} we have to make sure we don't go into a infinite recursion.
+\begin{code}
+#define FILENAME_SIZE 80
+void bsp_error_sync_out_of_phase(int lineno, char *filename) {
+  int  i,*linenos, length;
+  char *filenames, *buff, *errstring=NULL;
+
+  _bsp_throttle_procs=0;
+  _bsp_check_syncs   =0;
+
+  linenos   = CALLOC(bsp_nprocs(),SIZEOF(int));
+  filenames = CALLOC(bsp_nprocs()*FILENAME_SIZE,SIZEOF(char));
+  if (linenos==NULL || filenames==NULL)
+    bsp_abort("{bsp_sync} line %d of \"%s\"\n"
+              "\tInconsistent supersteps",lineno,filename); 
+
+  length = 1+strlen(filename);
+
+  /* Work around for BSPlib bug on Cray about word sizes */
+  if (length%SIZEOF(void*))
+    length += SIZEOF(void*)-(length%SIZEOF(void*));
+
+  if (length>=FILENAME_SIZE)
+    length = FILENAME_SIZE-1;
+
+  bsp_pushregister(linenos,bsp_nprocs()*SIZEOF(int));
+  bsp_pushregister(filenames,bsp_nprocs()*FILENAME_SIZE*SIZEOF(char));
+  bsp_sync();
+
+  bsp_hpput(0,&lineno,linenos,bsp_pid()*SIZEOF(int),SIZEOF(int));
+  bsp_hpput(0,filename,filenames,bsp_pid()*FILENAME_SIZE*SIZEOF(char),
+            length);
+  bsp_sync();
+
+  if (bsp_pid()==0) {
+    buff = (char*) MALLOC(FILENAME_SIZE+60);/*Long enough for string below*/
+    errstring = (char*) MALLOC(2);
+    if (buff==NULL || errstring==NULL)
+      bsp_abort("{bsp_sync} line %d of \"%s\"\n"
+              "\tInconsistent supersteps",lineno,filename);
+    errstring[0]='\0';
+    for(i=1;i<bsp_nprocs();i++)
+      filenames[(i*FILENAME_SIZE)-1]='\0';
+    for(i=0;i<bsp_nprocs();i++) {
+      sprintf(buff,"\t  Process %d entered superstep at line %d of \"%s\"\n",
+              i,linenos[i],&filenames[i*FILENAME_SIZE]);
+      errstring = realloc(errstring,1+strlen(errstring)+strlen(buff));
+      if (errstring==NULL)
+        bsp_abort("{bsp_sync} line %d of \"%s\"\n"
+              "\tInconsistent supersteps",lineno,filename);
+      strcat(errstring,buff);
+    
+    }
+    bsp_abort("{bsp_sync} [turn off checking with -fnocheck-syncs]\n"
+              "\tInconsistent supersteps between processes:\n%s",
+              errstring);
+  }
+}
+\end{code}

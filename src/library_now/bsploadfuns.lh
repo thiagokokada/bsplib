@@ -1,0 +1,85 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+#include <limits.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <signal.h>
+
+#include <sys/wait.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#if defined(RS6000) || defined(SP2)
+#include <sys/select.h>
+#endif
+#include <netinet/in.h>
+#ifndef TCP_NODELAY
+#include <netinet/tcp.h>
+#endif
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <pwd.h>
+
+#ifndef CLOCKS_PER_SEC
+#define CLOCKS_PER_SEC 1000000
+#endif
+
+#define MALLOC(size) (calloc(size,sizeof(char)))
+
+#define INIT_RANDOM()                           \
+  do {                                          \
+    struct timeval rseed;                       \
+    gettimeofday(&rseed,NULL);                  \
+    srandom(rseed.tv_sec + ((int) getpid()));   \
+  } while(0)
+
+#define RANDOM(range) (random()%(range))
+\end{code}
+
+\begin{code}
+int    time_oldest_load_average();
+double load_average();
+char  *load_average_info();
+void   ppr_load_averages(const char*,int,const char*);
+void   pr_load_averages(const char*);
+void   update_load_average(const char*,double,long int,double);
+void   update_load_averages(const char*);
+int    open_connection_load_daemon(const char*);
+char  *lookup_remote_load_recv(int,bsptcp_msghdr_t);
+char  *random_host_name();
+double getMflopRating();
+int    bspnow_isin_topp_globalload(int,double);
+void   bspnow_write_hostlist(char *);
+\end{code}
+
+\begin{code}
+extern unsigned short bsp_loadport;
+extern char           bsp_enq_hostname[];
+extern char           bsp_reload_hostname[];
+extern int            bsp_remote_csock;
+extern int            bsp_time_out;
+extern int            bsp_time_out_recv; 
+extern char           bsp_time_out_hostname[];
+extern char           bsp_time_out_hostname_recv[];
+extern int            bsp_formated_output;
+\end{code}

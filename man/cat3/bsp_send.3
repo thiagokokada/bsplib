@@ -1,0 +1,132 @@
+
+
+
+bsp_send(3)             BSPlib FUNCTIONS              bsp_send(3)
+
+
+
+NAME
+     bsp_send - transmit a BSMP packet to a remote process.
+
+
+C SYNOPSIS
+     #include "bsp.h"
+
+     void bsp_send(int _p_i_d,const void *_t_a_g,
+                   const void * _p_a_y_l_o_a_d,int _p_a_y_l_o_a_d__b_y_t_e_s);
+
+FORTRAN SYNOPSIS
+     SUBROUTINE  bspsend(_p_i_d,_t_a_g,_p_a_y_l_o_a_d,_p_a_y_l_o_a_d__b_y_t_e_s)
+        INTEGER, intent(IN) :: _p_i_d
+        <TYPE>,  intent(IN) :: _t_a_g
+        <TYPE>,  intent(IN) :: _p_a_y_l_o_a_d
+        INTEGER, intent(IN) :: _p_a_y_l_o_a_d__b_y_t_e_s
+
+
+DESCRIPTION
+     The bsp_send(3) operation is used to  send  a  message  that
+     consists  of  a tag and a payload to a specified destination
+     process.  The destination process will be able to access the
+     message  during  the  subsequent  superstep. The bsp_send(3)
+     operation copies both the tag and the payload of the message
+     before  returning.  The _t_a_g and _p_a_y_l_o_a_d variables can there-
+     fore  be  changed  by  the  user   immediately   after   the
+     bsp_send(3).    Messages   sent   by   bsp_send(3)  are  _n_o_t
+     guaranteed to be received in any  particular  order  by  the
+     destination  process.   This is the case even for successive
+     calls of bsp_send(3) from one process with  the  same  value
+     for _p_i_d.
+
+
+SEE ALSO
+     bsmp(3), bsp_set_tagsize(3),  bsp_qsize(3),  bsp_get_tag(3),
+     bsp_move(3)
+
+     ``_B_S_P_l_i_b: _T_h_e _B_S_P _P_r_o_g_r_a_m_m_i_n_g _L_i_b_r_a_r_y'' Jonathan M. D. Hill,
+     Bill  McColl,  Dan  C.  Stefanescu,  Mark W. Goudreau, Kevin
+     Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and
+     Rob  Bisseling.  Parallel  Computing,  to  appear  1998. See
+     _h_t_t_p://_w_w_w._b_s_p-_w_o_r_l_d_w_i_d_e._o_r_g for more details.
+
+
+NOTES
+     i    The size of the tag used  in  bsp_send(3)  will  depend
+          upon either the size of tag that was active in the pre-
+          vious superstep, or the  size  specified  by  the  last
+          bsp_set_tagsize(3) _i_s_s_u_e_d _i_n _t_h_e _p_r_e_v_i_o_u_s _s_u_p_e_r_s_t_e_p.
+
+
+     ii   If the payload size is zero, then a message  that  only
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    1
+
+
+
+
+
+
+bsp_send(3)             BSPlib FUNCTIONS              bsp_send(3)
+
+
+
+          contains  the  tag  will be sent. Similarly, if the tag
+          size is zero, then a message just containing  the  pay-
+          load  will  be  sent.  If  both the tag and payload are
+          zero, a message that contains neither tag  nor  payload
+          _w_i_l_l _b_e _s_e_n_t.
+
+
+     iii  If the tag size is zero, then the _t_a_g argument  may  be
+          NULL.  Similarly, if the payload size is zero, then the
+          _p_a_y_l_o_a_d argument may be NULL.
+
+
+BUGS
+     Problems  and  bug  reports  should  be  mailed  to  _b_s_p_l_i_b-
+     _b_u_g_s@_c_o_m_l_a_b._o_x._a_c._u_k
+
+
+AUTHORS
+     The Oxford BSP Toolset implementation of BSPlib was  written
+     by Jonathan.Hill@comlab.ox.ac.uk
+     http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    2
+
+
+

@@ -1,0 +1,421 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1997, 1998 Stephen Donaldson                       %%
+%%                      &  The University of Oxford                      %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it into other software, is hereby granted          %%
+%% without fee, provided that                                            %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+ 
+%%%%%%%%%%%%%%%%%%%%%
+\section{Send a pending ack}
+%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#define anypendingacks(p) (bspudp_sess[p].ack_pending && p!=bspudp_pid)
+
+#define flushpendingacks()                                    \
+  do {                                                        \
+    int i;                                                    \
+    for(i=bspudp_anchor->pendingack_min;                      \
+        i<=bspudp_anchor->pendingack_max;i++)                 \
+       if (anypendingacks(i)) sendpendingacks(i,iscontrol);   \
+    bspudp_anchor->pendingack_max=0;                          \
+    bspudp_anchor->pendingack_min=bspudp_nprocs;              \
+  } while(0)
+\end{code}
+
+\begin{code}
+static void sendpendingacks(int dpid,int iscontrol)
+   {
+   int src,free_buffers;
+   bspudp_msghdr_t *ack_hdr;
+  
+   if (anypendingacks(dpid)) 
+      {
+      bspudp_sess[dpid].nopiggy++;
+      bspudp_sess[dpid].ack_pending=0;
+
+      ack_hdr=USER_TO_PHYS(bspudp_msghdr_t,
+	         bspudp_anchor->control_buff[bspudp_anchor->control_next]);
+      bspudp_anchor->control_next=(bspudp_anchor->control_next+1)%
+				  MAX_CONTROL_PACKETS;
+#ifdef MPASS_3C905B
+      /* If the previous packet hasn't gone out, silently drop this
+	 control packet. */
+      if (!bspkern_pktsent(ack_hdr)) return;
+#endif
+#ifdef BSPTCP_TRACE 
+      ack_hdr->marker  = 0xffffffff;
+#endif
+      ack_hdr->msgprot = BSPUDP_PROT_ACK;
+      ack_hdr->msgtype = bspudp_sess[dpid].ack_reason;
+      ack_hdr->msglen  = 0;
+      ack_hdr->msgdpid = dpid;
+      ack_hdr->msgspid = bspudp_pid;
+      ack_hdr->msgseq  = BSPUDP_PROT_ACK;
+      ack_hdr->msgack  = recvq_high_in_seq(dpid);
+      ack_hdr->msghigh = recvq_highest_seen(dpid);
+          
+      bspudp_sess[dpid].last_ack = ack_hdr->msgack;
+#ifndef __KERNEL__
+      if (iscontrol>=0) wait_free_slot_with_high_probability(iscontrol,0);
+#endif
+
+      src = sendto(bspudp_dsock,
+         (char*)ack_hdr,
+	 sizeof(bspudp_msghdr_t)-sizeof(bspudp_payload_t),0,
+         (struct sockaddr *)&bspudp_sess[dpid].peer,
+         bspudp_sess[dpid].peer_len);
+
+#ifndef MPASS_3C905B
+      if (src < 0 && errno != EAGAIN && errno != EINTR 
+         && errno != ECONNREFUSED)
+         GUARDNN(errno,"sendto(socketio)");
+      if (src < 0 && errno == ECONNREFUSED)
+         bspudp_sess[dpid].state = BSPUDP_STATE_INACTIVE;
+#endif
+      }
+   } /* sendpindingacks */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%
+\section{Asynchronous socket I/O processing}
+%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+#include "../library_udpip/bspudpdefs.h"
+
+#if !defined(MPASS_3C905B) || defined(__KERNEL__)
+
+#if defined(__KERNEL__)
+#include "../library_kernel/bspkernell.h"
+#define sig dev
+
+void socketio_botIRQ(bspdev_t *dev)
+#else
+void socketio(int sig)
+#endif
+   {
+   int rrc, src;
+   bspudp_msghdr_t *buff_buffer, *this_buffer;
+   bspudp_buff_t  *this;
+   bspudp_buff_t  *klink, *ulink;
+   struct sockaddr from;
+   int fromlen;
+   int dpid;
+   int type;
+   int ackof;
+   int replies;
+   int duplicate;
+   int old_errno;
+   int count;
+   int nopiggys;
+   bspudp_sess_t *sess_incoming_pkt;
+#ifdef __KERNEL__
+   struct timeval marktime;
+   long int recv_usecs;
+#endif
+
+   bspudp_anchor->sigio_called=1;
+
+  /* 
+   * If a message queue operation is already in progress then 
+   * mark this operation as pending and return without processing 
+   * any data.
+   */
+   if (bspudp_anchor->glock_q || (bspudp_anchor->llock_q && sig))
+      {
+      bspudp_anchor->stats.pending_count++;
+      bspudp_anchor->io_pending = 1;
+      return;
+      }
+   bspudp_anchor->io_pending = 0;
+
+   bspudp_anchor->glock_q = 1;
+
+  /*
+   * Receive all data arrived on the socket:
+   */
+   fromlen = sizeof(from);
+#ifndef __KERNEL__
+   old_errno = errno;
+#endif
+   if (!bspudp_anchor->sio_buff)
+      {
+      dequeue_freeq(bspudp_anchor->sio_buff);
+#ifdef __KERNEL__
+      if (!bspudp_anchor->sio_buff) 
+         {
+         printk(MSG_PFX "socketio(E R R O R(1): no packet for receive)\n");
+         if (dev) send_sig(SIGKILL,dev->bsptask,1);
+         }
+#else
+      if (!bspudp_anchor->sio_buff)
+         { /* no free buffers --- expand pool */
+         bspudp_anchor->sio_buff=GUARDNZP(malloc(sizeof(bspudp_buff_t)),
+			       "malloc(spare buffer header - socketio)");
+	 bspudp_anchor->sio_buff->buffer=GUARDNZP(malloc(bspudp_max_frame
+				                  -sizeof(bspudp_msghdr_t)),
+			       "malloc(spare buffer header - socketio)");
+         bspudp_anchor->stats.expands++;
+         }
+#endif
+      }
+   count=0;
+   while (bspudp_anchor->sio_buff && 
+          (rrc = recvfrom(bspudp_dsock,(char*)bspudp_anchor->sio_buff->buffer,
+                          bspudp_max_frame,0,
+                          (struct sockaddr *)&from,&fromlen)) > 0)
+      {
+      count++;
+      replies = 0;
+      buff_buffer = USER_TO_PHYS(bspudp_msghdr_t,
+                                 bspudp_anchor->sio_buff->buffer);
+      if (rrc < sizeof(bspudp_msghdr_t)-sizeof(bspudp_payload_t) 
+         || (rrc != buff_buffer->msglen+
+                    sizeof(bspudp_msghdr_t)-sizeof(bspudp_payload_t)))
+	 {
+#if defined(__KERNEL__) && BSP_DEBUG >= 1
+         printk(MSG_PFX "socketio(incomplete message of %d bytes)\n",rrc);
+#endif
+         continue; /* ignore incomplete messages */
+         }
+
+      if (bspudp_sess[buff_buffer->msgspid].state != BSPUDP_STATE_ACTIVE)
+         continue; /* ignore messages on closed sessions */
+
+      sess_incoming_pkt=&bspudp_sess[buff_buffer->msgspid];
+      for (this = USER_TO_PHYS(bspudp_buff_t,sess_incoming_pkt->send.head); 
+	   this; 
+           this = klink)
+         {
+         ulink       = this->link;
+         klink       = USER_TO_PHYS(bspudp_buff_t,ulink);
+	 this_buffer = USER_TO_PHYS(bspudp_msghdr_t,this->buffer);
+         if (this_buffer->msgseq <= buff_buffer->msgack)
+            {
+#ifdef __KERNEL__
+	    bspkern_pktremove(this_buffer);
+#endif
+            /* all ack'ed buffers on send queue can be freed */
+            sess_incoming_pkt->send.head = ulink;
+            sess_incoming_pkt->send.dequeue_count++;
+            enqueue_freeq(PHYS_TO_USER(bspudp_buff_t,this)); 
+            bspudp_anchor->delta_socketio++;
+            }
+         else
+	    {
+            if (buff_buffer->msgprot == BSPUDP_PROT_ACK &&
+                !buff_buffer->msgseq)
+               {
+#ifdef __KERNEL__
+               if (bspkern_pktsent(this_buffer))
+		  {
+#endif
+               
+                  /* resend hole in un-ack'ed messages */
+                  this_buffer->msgack 
+                     = recvq_high_in_seq(this_buffer->msgdpid);
+                  this_buffer->msghigh
+                     = recvq_highest_seen(this_buffer->msgdpid);
+                  this_buffer->msgprot=BSPUDP_PROT_SDATA;
+#ifndef __KERNEL__            
+                  wait_free_slot_with_high_probability(0,this_buffer->msglen);
+#endif
+                  src = sendto(bspudp_dsock,
+		     (char*)this_buffer,
+                     sizeof(bspudp_msghdr_t)+this_buffer->msglen-
+		     sizeof(bspudp_payload_t),0,
+                     (struct sockaddr*)&bspudp_sess[this_buffer->msgdpid].peer,
+                     bspudp_sess[this_buffer->msgdpid].peer_len);
+                  bspudp_sess[this_buffer->msgdpid].sio_retransmits++;
+                  replies++;
+#ifndef __KERNEL__
+                  if (src < 0 && errno != EAGAIN && errno != EINTR 
+                     && errno != ECONNREFUSED)
+                     GUARDNN(errno,"sendto(socketio-resend)");
+                  if (src < 0 && errno == ECONNREFUSED)
+                     bspudp_sess[this_buffer->msgdpid].state 
+                        = BSPUDP_STATE_INACTIVE;
+#endif
+#ifdef __KERNEL__
+                  }
+#endif
+               /* also send end of chain if no end of hole */
+               if ((buff_buffer->msghigh==buff_buffer->msgack) &&
+                   (buff_buffer->msgack < sess_incoming_pkt->seq_out) &&
+		   this->link)
+		  klink = USER_TO_PHYS(bspudp_buff_t,
+				       sess_incoming_pkt->send.tail);
+	       else if (this_buffer->msgseq >= buff_buffer->msghigh-1)
+                  break;  /* Stop at end of hole */
+               } 
+            }
+         }
+
+      /* record window for possible recovery in next call to send */
+      if (buff_buffer->msgack > sess_incoming_pkt->acked)
+         {
+         sess_incoming_pkt->acked = buff_buffer->msgack;
+         bspudp_anchor->delta_socketio++;
+         }
+      if (buff_buffer->msghigh > sess_incoming_pkt->high)
+         {
+         sess_incoming_pkt->high = buff_buffer->msghigh;
+         bspudp_anchor->delta_socketio++;
+         }
+
+      dpid  = buff_buffer->msgspid;
+      type  = buff_buffer->msgprot;
+      ackof = buff_buffer->msgseq;
+
+      /* partner must be lagging behind, increase flow_stem factor */
+      if (type == BSPUDP_PROT_ACK && ackof)
+         sess_incoming_pkt->stem_flow++;
+
+      duplicate = 0;
+      if (type != BSPUDP_PROT_ACK)
+         {
+         /* partner sending data then it cannot be behind */
+         sess_incoming_pkt->stem_flow = 0;
+\end{code}
+
+In the kernel version of socketio, we cannot malloc new buffers if
+they all become used. If there are less than $p$ (where
+\verb!BSPUDP_RECV_HIGHWATER! $\ge p$) buffers available, then we drop
+those incoming packets that are not the next expected incoming packet.
+
+\begin{code}
+#ifdef __KERNEL__
+         if (queue_lessthan(bspudp_anchor->freeq,
+                            BSPUDP_RECV_LOWWATER) &&
+             (buff_buffer->msgseq != sess_incoming_pkt->seq_in) )
+	    {
+#if BSPETH_STATS >= 2
+            if (dev) dev->eth_starved++;
+#endif
+            }
+	 else
+	    {
+#endif
+            duplicate = enqueue(&sess_incoming_pkt->recv,
+			        PHYS_TO_USER(bspudp_buff_t,
+					     bspudp_anchor->sio_buff));
+            bspudp_anchor->sio_buff      = NULL;
+#ifdef __KERNEL__
+            }
+#endif
+         }
+
+      if (duplicate)
+         bspudp_sess[dpid].duplicates++;
+#ifdef __KERNEL__
+      else
+         bspudp_anchor->delta_socketio++;
+#endif
+
+      nopiggys = ( (ackof-bspudp_sess[dpid].last_ack) > 
+                   BSPUDP_PKTS_BEFORE_NONPIGGY_ACK)
+         &&      ( (ackof-bspudp_sess[dpid].last_npack) > 
+                   BSPUDP_PKTS_BEFORE_NONPIGGY_ACK);
+
+      if (nopiggys && type==BSPUDP_PROT_ADATA)
+         {
+         bspudp_sess[dpid].last_npack = ackof;
+         bspudp_sess[dpid].ack_pending= 1;
+         bspudp_sess[dpid].ack_reason = 42;
+	 if (dpid<bspudp_anchor->pendingack_min) 
+	    bspudp_anchor->pendingack_min=dpid;
+	 if (dpid>bspudp_anchor->pendingack_max) 
+            bspudp_anchor->pendingack_max=dpid;
+         }
+
+      if (duplicate  
+         || (type == BSPUDP_PROT_ACK && !replies && !ackof)
+	 || (type == BSPUDP_PROT_RDATA))
+	 {
+         bspudp_sess[dpid].ack_pending= 1;
+         bspudp_sess[dpid].ack_reason = type;
+         if (duplicate) bspudp_sess[dpid].ack_reason = 11;
+         sendpendingacks(dpid,-1);
+         }
+      fromlen = sizeof(from);
+      if (!bspudp_anchor->sio_buff) dequeue_freeq(bspudp_anchor->sio_buff);
+      if (!bspudp_anchor->sio_buff)
+         {
+#ifdef __KERNEL__
+         /* an invarient on the kernel version of socketio, is that 
+            socketio will always have one packet in hand (it drops
+            packets to ensure this). We should never find that we
+            don't have one in hand.
+         */
+         printk(MSG_PFX "socketio(E R R O R(2): no packet for receive %d)\n",
+		queue_size(bspudp_anchor->freeq));
+         if (dev) send_sig(SIGKILL,dev->bsptask,1);
+#else
+         /* no free buffers --- expand pool */
+         bspudp_anchor->sio_buff=GUARDNZP(malloc(sizeof(bspudp_buff_t)),
+			        "malloc(spare buffer header - socketio)");
+	 bspudp_anchor->sio_buff->buffer=GUARDNZP(malloc(bspudp_max_frame-
+				sizeof(bspudp_msghdr_t)),
+			        "malloc(spare buffer header - socketio)");
+         bspudp_anchor->stats.expands++;
+#endif
+         }
+      }
+
+#if defined(__KERNEL__) && BSP_DEBUG >= 2
+  printk(MSG_PFX "socketio(received %d packets)\n",count);
+#endif
+
+#ifndef __KERNEL__
+   if (bspudp_anchor->sio_buff && rrc < 0 && errno != EAGAIN && errno != EINTR 
+      && errno != ECONNREFUSED)
+      GUARDNN(errno,"recvfrom(socketio)");
+#endif
+
+   bspudp_anchor->glock_q = 0;
+#ifndef __KERNEL__
+   if (!sig && bspudp_anchor->io_pending)
+      socketio(0);
+#endif
+  
+#ifdef __KERNEL__
+#if BSPETH_STATS >= 3
+   do_gettimeofday(&marktime);
+   bspudp_anchor->stats.sio_packets += count;
+   recv_usecs = 
+      (  (long int)marktime.tv_sec- 
+         (long int)bspudp_anchor->recv_time.tv_sec)*1000000+
+      (  (long int)marktime.tv_usec-
+         (long int)bspudp_anchor->recv_time.tv_usec);
+
+   if (recv_usecs > 0) 
+      {
+      bspudp_anchor->stats.sum_recv_usecs += recv_usecs;
+      if (recv_usecs > bspudp_anchor->stats.max_recv_usecs)
+         bspudp_anchor->stats.max_recv_usecs  = recv_usecs;
+      if (recv_usecs < bspudp_anchor->stats.min_recv_usecs)
+         bspudp_anchor->stats.min_recv_usecs  = recv_usecs;
+      }
+   bspudp_anchor->recv_time_set=0;
+#endif
+#endif
+   if (!count)  bspudp_anchor->stats.empty_sio_count++;
+   if (count>1) bspudp_anchor->stats.multi_sio_count++;
+#ifndef __KERNEL__
+   errno = old_errno; 
+#endif
+   } /* socketio */
+#endif 
+\end{code}
+

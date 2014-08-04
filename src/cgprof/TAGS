@@ -1,0 +1,26 @@
+
+cgprof.lc,227
+void enlargeRawProfile(40,1672
+void add_costs(64,2378
+void readRawProfile(80,2871
+void printRawProfile(156,5516
+void createConnectivityMatrix(184,6164
+void printConnectivityMatrix(217,7127
+int *findCriticalPath(237,7654
+
+daVinci.lc,25
+Function that 335,10986
+
+main.lc,19
+void main(39,1632
+
+matrix.lc,66
+Matrix newMat(27,1406
+void *_Mat(43,1739
+int Mat_dense(77,2625
+
+symbol.lc,136
+void enlargeSymbolTable(39,1594
+name_id lookupSymbolTable(62,2233
+int cmp_symbol_entry(89,3128
+void printSymbolTable_entry(109,3608

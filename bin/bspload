@@ -1,0 +1,196 @@
+#! /users/jonh/bin/perl
+$bindir        = "//amd/tmp_mnt/garnet/fs25/jonh/BSP/bin/";
+$includedir    = "//amd/tmp_mnt/garnet/fs25/jonh/BSP/bin/../include/";
+$libdir        = "//amd/tmp_mnt/garnet/fs25/jonh/BSP/bin/../lib/";
+$mandir        = "/amd/tmp_mnt/garnet/fs25/jonh/BSP/man";
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+push(@INC,$includedir);
+push(@INC,$bindir);
+require "bsputil";
+
+select(STDERR); $| = 1; select(STDOUT); # no STDERR buffering, please.
+($Pgm = $0) =~ s|.*/||;
+$Version        = "1.3, 25th Nov 1997";
+$bug_reports_to = 'bsplib-bugs@comlab.ox.ac.uk';
+
+$ShortUsage = "\n$Pgm usage: for basic information, try the `-help' option\n";
+
+
+
+$Arch   = &backtick("$bindir/bsparch -arch");
+$Arch   = &backtick("bsparch -arch")  if ($Arch eq "");
+$Verbose     = 0;
+$Portnumber  = 4447;
+$WhichServer = "localhost";
+$ReloadServer= "";
+$Start       = 0;
+$Closedown   = 0;
+$Forallhosts = 0;
+$FormatedIO  = 1;
+$Hostnames   = ".bsptcphosts";
+$ReloadAll   = 0;
+@Hostames_list=();
+
+$BSPTCP_MSG_EXIT      = 7;
+$BSPTCP_MSG_LD_ENQ    = 10;
+$BSPTCP_MSG_LD_DATA   = 11;
+
+
+
+$AF_INET    = 2;
+$SOCK_STREAM= 1;
+$SIG{'INT'} = 'dokill';
+
+sub dokill {
+  kill 9, $child if $child;
+}
+
+
+
+
+
+  arg: while ($_ = $ARGV[0]) {
+  shift(@ARGV);
+  #--------HELP------------------------------------------------
+  /^-(help|man)$/     && do {&FormatManual("bspload.1");exit(0);};
+
+  /^-v$/              && do {$Verbose = 1; next arg;};
+
+  /^-start$/          && do {$Start      =1; next arg;};
+  /^-end$/            && do {$Closedown  =1; next arg;};
+  /^-all$/            && do {$Forallhosts=1; next arg;};
+  /^-reloadlocal$/    && do {$ReloadAll  =1; next arg;};
+  /^-reloadglobal$/   && do {$ReloadAll  =2; next arg;};
+  /^-u$/              && do {$FormatedIO =0; next arg;};
+
+  /^-s$/              && do {$WhichServer= &grab_next_arg("-s");
+                             next arg;};
+
+  /^-r$/              && do {$ReloadServer= &grab_next_arg("-r");
+                             next arg;};
+
+  /^-f$/              && do {$Hostnames= &grab_next_arg("-f");
+                             next arg;};
+
+  /^-p$/              && do {$Portnumber = &grab_next_arg("-p");
+			     if (!($Portnumber =~ /^\d+$/)) {
+			       printf STDERR "%s: invalid port \"%s\"\n",
+					     $Pgm,$Portnumber;
+			       $Status++;
+			     }
+			     next arg;
+			     };		
+
+  print STDERR "$Pgm: unrecognised option \"",$_,"\"\n";
+  $Status++;
+  }
+  if ($Status>0) {
+    print STDERR $ShortUsage;
+    exit(1);
+  }
+  print STDERR "$Pgm: ($Version)\n" if $Verbose;
+  if ($Forallhosts || $ReloadAll>0) {
+     @Hostnames_list = &readHostNames($Hostnames);
+  }
+
+  $cmd  = "$bindir/$Arch/bsploadd ";
+  $cmd .= " -p $Portnumber" if ($Portnumber>=0); 
+  if ($Closedown) {
+    $cmd .= " -i 3";
+    if (!$Forallhosts) {
+	$cmd .= " -s $WhichServer";
+	&run_something($cmd,"load server shutdown");
+    } else {
+      foreach $i (@Hostnames_list) {
+        &run_something($cmd." -s $i &","remote load server shutdown");
+      }
+    }
+
+  } elsif ($Start) {
+    $cmd .= " -f $Hostnames";
+    if (!$Forallhosts) {
+       &run_something($cmd,"Local server startup");
+       $i=5+$#Hostnames_list;
+       print STDERR "$Pgm: Started daemon, sleeping for $i seconds before ",
+	            "preloading the daemon\n";
+       sleep($i);
+       &reloadLocal();
+    } else {
+      foreach $i (@Hostnames_list) {
+        &run_something("rsh $i -n '$cmd &' &",
+			"Remote load server startup");
+      }
+      $i=5+$#Hostnames_list;
+      print STDERR "$Pgm: Started daemons, sleeping for $i seconds before ",
+	           "preloading the daemons\n";
+      sleep($i);
+      &reloadGlobal();
+    }
+
+  } elsif ($ReloadAll==1) {
+    &reloadLocal();
+  } elsif ($ReloadAll==2) {
+    &reloadGlobal();
+  } elsif ($ReloadServer ne "") {
+    $cmd .= " -i 2";
+    $cmd .= " -r $ReloadServer";
+    $cmd .= " -s $WhichServer ";
+    &run_something($cmd,"reload $WhichServer from $ReloadServer");
+  } else {
+    $cmd .= " -i 1";
+    $cmd .= " -s $WhichServer ";
+    $cmd .= " -u 1" if !$FormatedIO;
+    &run_something($cmd,"enquire load from $WhichServer");
+  }
+  exit(1);
+
+
+
+sub reloadLocal {
+  local($cmd,$i);
+
+  $cmd  = "$bindir/$Arch/bsploadd ";
+  $cmd .= " -f $Hostnames";
+  $cmd .= " -p $Portnumber" if ($Portnumber>=0);
+  foreach $i (@Hostnames_list) {
+     &run_something($cmd . " -i 2 -r $i","Update local server from $i");
+  }
+}
+
+sub reloadGlobal {
+  local($cmd,$i,$name);
+
+  &reloadLocal();
+  $cmd  = "$bindir/$Arch/bsploadd ";
+  $cmd .= " -f $Hostnames";
+  $cmd .= " -p $Portnumber" if ($Portnumber>=0);
+  chop($name = &backtick("hostname"));
+  if ($name ne "") {
+     foreach $i (@Hostnames_list) {
+        &run_something($cmd . " -i 2 -s $i -r $name",
+	               "Update $i from $name");
+     }
+  }
+}
+

@@ -1,0 +1,64 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1997, 1998 Stephen Donaldson                       %%
+%%                      &  The University of Oxford                      %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it into other software, is hereby granted          %%
+%% without fee, provided that                                            %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+#ifndef BSPQUEUE_H
+#define BSPQUEUE_H
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Queue management structures}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+typedef struct bspudp_buff bspudp_buff_t;
+struct bspudp_buff
+   {
+   bspudp_buff_t   *link;       /* next buffer in buffer chain */
+   bspudp_msghdr_t *buffer;     /* transmitted or received data buffer */
+   };
+
+typedef struct bspudp_queue bspudp_queue_t;   /* queue data type */
+struct bspudp_queue
+   {
+   int flags;                   /* queue operation flags     */
+   unsigned long pid;           /* pid of associated session */
+
+   bspudp_buff_t *head;         /* first item on queue */
+   bspudp_buff_t *tail;         /* last item of queue  */
+   
+   /* queue state summary */
+   unsigned long high_in_seq;   /* highest in-sequence number   */
+   unsigned long highest_seen;  /* highest sequence number seen */
+   unsigned long enqueue_count; /* number of items enqueued     */
+   unsigned long dequeue_count; /* number of items dequeued     */
+   long headtype;               /* msgtype and head of queue    */
+   };
+
+/* value for queue flags field */
+
+#define QUEUE_ORDERED  1        /* Queue is maintained in order */
+#define QUEUE_ORDDEQ    2       /* Elements must be dequeued in order */
+
+static int enqueue(bspudp_queue_t *queue, bspudp_buff_t *element);
+static bspudp_buff_t *dequeue(bspudp_queue_t *queue);
+static int queue_count(bspudp_queue_t queue);
+#endif 
+\end{code}
+
+
+

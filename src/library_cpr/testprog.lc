@@ -1,0 +1,72 @@
+\begin{code}
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "chkprest.h"
+
+FILE *prt;
+FILE saved_stdout;
+
+extern char * _sp_register;
+extern char * _bp_register;
+
+void levels(int x, int i, char *name) 
+   {
+   char newname[FILENAME_MAX];
+
+   sprintf(newname,"%s.%d",name,i);
+   if (x==0) 
+      {
+      cpr_prepare(newname,name);
+      fclose(prt);
+      fflush(stdout);
+      cpr_take();
+      prt = fopen("prt_file","a");
+      fprintf(prt,"Returned from checkpoint (%s)\n",newname); 
+      printf("Returned from checkpoint (%s)\n",newname); 
+      }
+   else
+      {
+      fprintf(prt,"Going up %d\n",x); 
+      printf("Going up %d\n",x); 
+      levels(x-1,i,name);
+      fprintf(prt,"Going down %d, iteration %d\n",x,i);
+      printf("Going down %d, iteration %d\n",x,i);
+     }
+  }
+  
+void main(int argc, char* argv[]) 
+   {
+   char newname[FILENAME_MAX];
+   int i;
+   int counter = 0;
+   char big_buf[2000];
+   extern char *cprl_start_stack;
+
+   if (!cpr_restart_ind) cpr_init(1);
+   printf("Start stack=0x%08x\n",cprl_start_stack);
+
+   if (cpr_restart_ind)
+      memcpy(stdout,&saved_stdout,sizeof(FILE));
+   else
+      memcpy(&saved_stdout,stdout,sizeof(FILE));
+      
+   prt = fopen("prt_file","w");
+   if (cpr_restart_ind) cpr_restart();
+  
+   for (i = 0; i < 15; i++) 
+      {
+      levels(10,i,"testprog");
+      counter++;
+      fprintf(prt,"Counter = %d\n",counter);
+#if 0
+      fortprint_(&counter);
+#endif
+      printf("Counter = %d\n",counter);
+      }
+   fprintf(prt,"end of run\n");
+   fclose(prt);
+   }
+
+\end{code}

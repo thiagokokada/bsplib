@@ -1,0 +1,490 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Benchmarks to calculate the BSP cost parameters}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsp_probe.lc,v 1.3 1996/03/05 16:29:59 jonh Exp jonh $
+% $Log: bsp_probe.lc,v $
+# Revision 1.3  1996/03/05  16:29:59  jonh
+# adding all-to-all and neighbour exchanges
+#
+# Revision 1.2  1995/10/13  15:07:56  jonh
+# Total change...
+#
+# Revision 1.1  1995/06/20  15:56:11  jonh
+# Initial revision
+#
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Imports, global variables, and forward references}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef _BSPFRONT_
+#include "bsp.h"
+#include "bsp_level1.h"
+#else
+extern double bsp_time();
+extern double bsp_dtime();
+#endif
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/utsname.h>
+#include <math.h>
+
+#define MIN_SAMPLE          10     /*    10 */
+#define S_DOT_OVERSAMPLE    20     /*    20 */
+#define S_MAT_OVERSAMPLE    10     /*    10 */
+#define L_OVERSAMPLE        160000 /*160000 */
+#define G_OVERSAMPLE        30     /*    30 */
+
+#define DOT_PRODUCT_SIZE 1048570 /* 1048570 */
+#define MATRIX_SIZE          100 /* 100, s.t n^2 not power of 2 */
+#define MAX_H               8192 /*  8192 */
+#define MAX_HP             65536 /* 65536 */
+#define MIN_BLOCK_SIZE         4 /*     2 */
+\end{code}
+
+\begin{code} 
+int      my_pid;
+int      bsp_p; 
+float    oversample_scale;
+long int bspparam_s, bspparam_l;
+double   time_clockA, time_clockB;
+\end{code}
+
+\begin{code}
+extern long int measureDotBSPcostS();
+extern long int measureMatBSPcostS();
+extern long int measureBSPcostL_low();
+extern long int measureBSPcostL_high();
+extern double   measureBSPcostG_local(int,int);
+extern double   measureBSPcostG_global(int,int);
+extern void     double_max(double*,double*,double*,int*);
+extern void     double_min(double*,double*,double*,int*);
+\end{code}
+
+\begin{code}
+#ifndef _BSPFRONT_
+void bsp_abort(char *format,...) {
+  printf("ERROR: %s\n",format);
+  exit(1);
+}
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{\texttt{main} program}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void main(int argc, char **argv) {
+   int i,k,commsize,initcommsize,max_g_blocksize, dot_s, mat_s;
+   double min_g,max_g;
+   char filename[30];
+   double temp_g_local[64],temp_g_global[64];
+   int    temp_g_blocksize[64];
+   char   hostname[512];
+
+
+   bsp_begin(bsp_nprocs());
+   bsp_p  = bsp_nprocs();
+   my_pid = bsp_pid();
+
+   gethostname(hostname,sizeof(hostname));
+   for(i=0;i<bsp_p;i++) {
+     if (i==my_pid)
+       printf("Probe started on process %d of %d [%s]\n",
+	      my_pid,bsp_p,hostname);
+     fflush(stdout);
+     bsp_sync();
+   }
+	    
+   if (my_pid==0) {
+     printf("For p=%d, BSPlib's default values for the BSP parameters are:\n"
+            "\tS=%9.1f Mflops\n"
+            "\tL=%9.1f flops/word (%9.3f usec)\n"
+            "\tg=%9.1f flops/word (%9.3f usec/word)\n\n"
+            "The calculated values are:\n",
+            bsp_nprocs(),bsp_s()/1000000.0,
+            bsp_l(),bsp_l()/(bsp_s()/1000000.0),
+            bsp_g(),bsp_g()/(bsp_s()/1000000.0));
+     fflush(stdout);
+   }
+
+   bsp_pushregister(&bspparam_s,sizeof(long int));
+   bsp_pushregister(&bspparam_l,sizeof(long int));
+   bsp_pushregister(&time_clockA,sizeof(double));
+   bsp_pushregister(&time_clockB,sizeof(double));
+   bsp_sync();
+
+   bsp_dtime();
+   for(i=0;i<500;i++) bsp_sync();
+   time_clockA = bsp_dtime();
+   bsp_fold((void (*)(void *, void *, void *, int)) double_max,
+            &time_clockA,&time_clockB,sizeof(double));
+   oversample_scale = (1.0/time_clockB)/(L_OVERSAMPLE/500);
+    if (my_pid==0) {
+     printf("Oversample     = %4.3f\n",oversample_scale);
+     fflush(stdout);
+    }
+
+   dot_s = measureDotBSPcostS();
+   if (my_pid==0)  {
+     printf("S (dot product)= %4.3f Mflop/s\n",(dot_s/1000)/1000.0);
+     fflush(stdout);
+   }
+
+   mat_s = measureMatBSPcostS();
+   if (my_pid==0) {
+     printf("S (matrix mult)= %4.3f Mflop/s\n",(mat_s/1000)/1000.0);
+     fflush(stdout);
+   }
+
+   bspparam_s = (mat_s +dot_s)/2;
+   if (my_pid==0) {
+     printf("S (average)    = %4.3f Mflop/s\n",(bspparam_s/1000)/1000.0);
+     fflush(stdout);
+   }
+
+   
+   bspparam_l       = measureBSPcostL_low();
+   if (my_pid==0) {
+     printf("L (low)        = %d (%f usec)\n",bspparam_l,
+            (double)(bspparam_l*1000)/(double)(bspparam_s/1000));
+     fflush(stdout);
+   }
+
+
+   bspparam_l       = measureBSPcostL_high();
+   if (my_pid==0) {
+     printf("L (high)       = %d (%f usec)\n\n",bspparam_l,
+            (double)(bspparam_l*1000)/(double)(bspparam_s/1000));
+     fflush(stdout);
+   }
+
+
+ 
+   /* Perform local permution */
+   commsize     = MAX_H*((bsp_p==1)?1:(bsp_p-1));
+   initcommsize = MAX_H;
+   if (commsize > MAX_HP) {
+     initcommsize = MAX_HP;
+     commsize     = MAX_HP;
+   }
+   for((k=0,i=initcommsize);i>=MIN_BLOCK_SIZE;(i = i/ 2, k++)) {
+     temp_g_local[k]    = measureBSPcostG_local(i,commsize);
+     temp_g_blocksize[k]= i * (sizeof(int)/4);
+     if (my_pid==0) { 
+       printf("(local shift) g=%6.2f  block size =%-7d 32bit words\n",
+              temp_g_local[k],temp_g_blocksize[k]);
+       fflush(stdout);
+     }
+   }
+   min_g           = temp_g_local[0];
+   max_g           = 0.0;
+   max_g_blocksize = temp_g_blocksize[0];
+   for(i=0;i<k;i++) {
+     if (temp_g_local[i]<min_g) min_g = temp_g_local[i];
+     if (temp_g_local[i]>max_g) {
+       max_g           = temp_g_local[i];
+       max_g_blocksize = temp_g_blocksize[i];
+     }
+   }  
+   if (my_pid==0) {
+     printf("G_infty = %.2f (%.2f usec) Nhalf = %f 32bit words\n\n",
+            min_g,(min_g*1000.0)/(bspparam_s/1000),
+            ((max_g/min_g)-1.0)*max_g_blocksize);
+     fflush(stdout);
+   }
+   
+
+
+   /* Perform global exchange */
+   commsize = MAX_H;
+   for((k=0,i=commsize);i>=MIN_BLOCK_SIZE;(i = i/ 2,k++)) {
+     temp_g_global[k]   = measureBSPcostG_global(i,commsize);
+     temp_g_blocksize[k]= i * (sizeof(int)/4);
+     if (my_pid==0) { 
+       printf("(all-to-all)  g=%6.2f  block size=%-7d 32bit words\n",
+              temp_g_global[k],temp_g_blocksize[k]);
+       fflush(stdout);
+     }
+   }
+   min_g           = temp_g_global[0];
+   max_g           = 0.0;
+   max_g_blocksize = temp_g_blocksize[0];
+   for(i=0;i<k;i++) {
+     if (temp_g_global[i]<min_g) min_g = temp_g_global[i];
+     if (temp_g_global[i]>max_g) {
+       max_g           = temp_g_global[i];
+       max_g_blocksize = temp_g_blocksize[i];
+     }
+   }
+   if (my_pid==0) {
+     printf("G_infty = %.2f (%.2f usec) Nhalf = %f 32bit words\n\n",
+            min_g,(min_g*1000.0)/(bspparam_s/1000),
+            ((max_g/min_g)-1.0)*max_g_blocksize);
+     fflush(stdout);
+   }
+   bsp_end(); 
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Calculute the value of S}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void double_max(double *res, double *x, double *y, int *nbytes) {
+  *res = (*x>*y)?(*x):(*y);
+}
+
+void double_min(double *res, double *x, double *y, int *nbytes) {
+  *res = (*x<*y)?(*x):(*y);
+}
+
+
+long int measureDotBSPcostS() 
+{
+  int i,j,up=1,dummy=0;
+  float dot_product = 0.0;
+  float *vecA;
+  float *vecB;
+
+  vecA = calloc(DOT_PRODUCT_SIZE,sizeof(float));
+  vecB = calloc(DOT_PRODUCT_SIZE,sizeof(float));
+  if (vecA==NULL || vecB==NULL)
+    bsp_abort("Failed to allocate vector for dot product used in S");
+
+  for (i=0; i < DOT_PRODUCT_SIZE; i++) {
+     vecA[i] = 0.01;
+     vecB[i] = 0.02;
+  }
+  bsp_sync();
+  time_clockA = bsp_time();
+  for (i=0;i<S_DOT_OVERSAMPLE;i++) {
+    if (up) {
+      for (j=0; j < DOT_PRODUCT_SIZE; j++) 
+        dot_product += vecA[j] * vecB[j]; 
+      up = 0;
+    } else {
+      for (j=DOT_PRODUCT_SIZE-1; j>=0;j--)
+        dot_product += vecA[j] * vecB[j]; 
+      up = 1;
+    }
+  }
+  if (dot_product>0) {
+     /* Need this conditional, otherwise the optimiser removes the
+        dot-product as it isnt used in the code from here on */
+     time_clockA = bsp_dtime();
+  }
+  bsp_fold((void (*)(void *, void *, void *, int)) double_max,
+            &time_clockA,&time_clockB,sizeof(double));
+  
+  free(vecA); free(vecB);
+
+  /* 2 flops * over_sample * scale factor of 5 * dot_product_size */
+  return ((int) ((double) (2*S_DOT_OVERSAMPLE*DOT_PRODUCT_SIZE) / 
+                 time_clockB));
+}
+\end{code}
+ 
+\begin{code}
+long int measureMatBSPcostS() 
+{
+  int i,j,k,o;
+  float **matA, **matB, **matC, **tempmat, *vec, s,fool_optimiser;
+
+  matA = calloc(MATRIX_SIZE,sizeof(float*));
+  matB = calloc(MATRIX_SIZE,sizeof(float*));
+  matC = calloc(MATRIX_SIZE,sizeof(float*));
+  if (matA==NULL || matB==NULL || matC==NULL)
+    bsp_abort("Failed to allocate matrix");
+
+  matA[0] = calloc(MATRIX_SIZE*MATRIX_SIZE,sizeof(float));
+  matB[0] = calloc(MATRIX_SIZE*MATRIX_SIZE,sizeof(float));
+  matC[0] = calloc(MATRIX_SIZE*MATRIX_SIZE,sizeof(float));
+  if (matA[0]==NULL || matB[0]==NULL || matC[0]==NULL)
+    bsp_abort("Failed to allocate matrix vector");
+  for(i=1;i<MATRIX_SIZE;i++) {
+    matA[i]=matA[0]+(MATRIX_SIZE*i);
+    matB[i]=matB[0]+(MATRIX_SIZE*i);
+    matC[i]=matC[0]+(MATRIX_SIZE*i);
+  }
+  for(i=0;i<MATRIX_SIZE;i++) {
+    for(j=0;j<MATRIX_SIZE;j++) {
+      matA[i][j] = (float) (j+1);
+      matB[i][j] = (float) (i+1);
+      matC[i][j] = 0.0;
+    }
+  }
+  bsp_sync();
+  fool_optimiser=0.0;
+  bsp_dtime();
+  for (o=0;o<S_MAT_OVERSAMPLE;o++) {
+    for(j=0;j<MATRIX_SIZE;j++) {
+      for(i=0;i<MATRIX_SIZE;i++) {
+        s=0.0;
+        for(k=0;k<MATRIX_SIZE;k++) {
+          s += matA[i][k] * matB[j][k];
+        }
+        matC[j][i] = s;
+      }
+    }
+    fool_optimiser+=matC[0][0];
+  }
+#ifdef DEBUG
+  for(i=0;i<MATRIX_SIZE;i++) {
+    for(j=0;j<MATRIX_SIZE;j++) {
+      printf("A[%d][%d]=%f B[%d][%d]=%f C[%d][%d]=%f\n",
+             i,j,matA[i][j],i,j,matB[i][j],i,j,matC[i][j]);
+    }
+  }
+#endif
+  if (fool_optimiser<=0.0) bsp_abort("Optimiser being too clever");
+  time_clockA = bsp_dtime();
+  bsp_fold((void (*)(void *, void *, void *, int)) double_max,
+            &time_clockA,&time_clockB,sizeof(double));
+  
+  free(matA[0]); free(matB[0]);free(matC[0]);
+  free(matA);    free(matB);   free(matC);
+
+  /* 2 flops * over_sample * scale factor of 5 * dot_product_size */
+  return ((int) ((double) 
+                 (2*S_MAT_OVERSAMPLE*MATRIX_SIZE) / time_clockB)*
+                 (MATRIX_SIZE*MATRIX_SIZE));
+ }
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Calculute the value of L}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+long int measureBSPcostL_low() 
+{
+  int i,oversample;
+
+  for (i=0; i<10;i++) bsp_sync(); /* Warm things up ;-) */
+
+  oversample = (int) (L_OVERSAMPLE * oversample_scale);
+  if (oversample<MIN_SAMPLE) oversample=MIN_SAMPLE;
+  time_clockA = bsp_dtime();
+  for (i=0; i < oversample; i++) {
+    bsp_sync();  
+  }
+  time_clockA = bsp_dtime();
+  bsp_fold((void (*)(void *, void *, void *, int)) double_min,
+            &time_clockA,&time_clockB,sizeof(double));
+ 
+  return ((time_clockB*bspparam_s) / oversample);
+ }
+
+long int measureBSPcostL_high() 
+{
+  int i,right, oversample;
+  int junk;
+
+  bsp_pushregister(&junk,sizeof(int));
+  bsp_sync();
+
+  for (i=0; i<10;i++) bsp_sync(); /* Warm things up ;-) */
+  oversample = (int) (L_OVERSAMPLE * oversample_scale);
+  if (oversample<MIN_SAMPLE) oversample=MIN_SAMPLE;
+  
+  right = (bsp_pid()+1)%bsp_nprocs();
+  time_clockA = bsp_dtime();
+  for (i=0; i < oversample; i++) {
+    bsp_hpput(right,&junk,&junk,0,sizeof(int));
+    bsp_sync();  
+  }
+  time_clockA = bsp_dtime();
+  bsp_fold((void (*)(void *, void *, void *, int)) double_min,
+            &time_clockA,&time_clockB,sizeof(double));
+ 
+  bsp_popregister(&junk);
+  return ((time_clockB*bspparam_s) / oversample);
+ }
+\end{code}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Calculute the value of G for a cyclic shift}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+double measureBSPcostG_local(int block_size, int comm_size) {
+  int comm_to, *src, *dst;
+  int i,j,oversample;
+
+  comm_to  = (my_pid+1) % bsp_p;
+
+  src = calloc(comm_size,sizeof(int));
+  dst = calloc(comm_size,sizeof(int));
+  if (src==NULL || dst==NULL) 
+    bsp_abort("{measureBSPcostG_local} unable to allocate %d bytes",
+	       comm_size*sizeof(int));
+  bsp_pushregister(dst,comm_size*sizeof(int));
+  bsp_sync();
+
+  oversample = (int) (G_OVERSAMPLE * oversample_scale);
+  if (oversample<MIN_SAMPLE) oversample=MIN_SAMPLE;
+
+  time_clockA = bsp_dtime();
+  for(i=0;i<oversample;i++) {
+    for(j=0;j<comm_size;j+=block_size) {
+      bsp_hpput(comm_to,
+                &src[j],
+                dst,j*sizeof(int),
+                block_size*sizeof(int));
+    }
+    bsp_sync();
+  }
+  time_clockA = bsp_dtime();
+  bsp_fold((void (*)(void *, void *, void *, int)) double_max,
+            &time_clockA,&time_clockB,sizeof(double));
+  i  = ((time_clockB*bspparam_s) - (bspparam_l*oversample)) / 1000;
+  j  = oversample*comm_size/1000;
+  j *= sizeof(int)/4; /* Make sure g is in flops per 32bit word */
+  bsp_popregister(dst);
+  free(dst);free(src);
+  return ((double) i) / ((double) j);
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Calculute the value of G for a total exchange}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+double measureBSPcostG_global(int block_size, int comm_size) {
+  int *src, *dst;
+  int i,j,k,oversample;
+
+  src = calloc(comm_size,sizeof(int));
+  dst = calloc(comm_size*bsp_p,sizeof(int));
+  if (src==NULL || dst==NULL)
+    bsp_abort("{measureBSPcostG_global} unable to allocate memory");
+
+  bsp_pushregister(dst,comm_size*bsp_p*sizeof(int));
+  bsp_sync();
+
+  oversample = (int) (G_OVERSAMPLE * oversample_scale);
+  if (oversample<MIN_SAMPLE) oversample=MIN_SAMPLE;
+ time_clockA = bsp_dtime();
+  for(i=0;i<oversample;i++) {
+    for(j=0;j<bsp_p;j++) {
+      for(k=0;k<comm_size;k+=block_size) {
+        bsp_hpput(j,
+                  &src[k],
+                  dst,
+                  ((my_pid*comm_size)+k)*sizeof(int),
+                  block_size*sizeof(int));
+      }
+    }
+    bsp_sync();
+  }
+  time_clockA = bsp_dtime();
+  bsp_fold((void (*)(void *, void *, void *, int)) double_max,
+            &time_clockA,&time_clockB,sizeof(double));
+  i  = ((time_clockB*bspparam_s) - (bspparam_l*oversample)) / 1000;
+  j  = oversample*comm_size/1000;
+  j  *= sizeof(int)/4;  /* Make sure g is in flops per 32bit word */
+
+  bsp_popregister(dst);
+  free(dst);free(src);
+  return ((double) i) / ((double) (j*((bsp_p==1)?1:(bsp_p-1))));
+}
+\end{code}

@@ -1,0 +1,947 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsp_profile.lc,v 1.3 1996/09/09 16:08:56 jonh Exp jonh $
+% $Log: bsp_profile.lc,v $
+% Revision 1.3  1996/09/09  16:08:56  jonh
+% Just about to add CALLGRAPH profiling information
+%
+% Revision 1.2  1996/03/11  09:02:23  jonh
+% removing accumulated profile
+%
+% Revision 1.1  1995/08/31  16:35:06  jonh
+% Initial revision
+%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Profiling routines}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+#include <time.h>
+#include <string.h>
+#include <limits.h>
+#include "bsp_lib.h"
+#include "bsp_profile.h"
+#include "bsp_callstack.h"
+
+STATIC _BSPprof_sstep_info *bspprof_lookup(int,char*); 
+STATIC _BSPprof_sstep_info *bspprof_lookup_sstep_id(int); 
+STATIC void bspprof_flush_symbol_table();
+STATIC void bspprof_flush_supersteps();
+STATIC void bsp_gather_noprof(int,void *,void *,int);
+\end{code}
+
+\begin{code}
+_BSPstat_info        _bspstat;
+#ifdef BSP_DRMA
+static int _bspstat_incoming_nbytes_exch[BSP_MAX_PROCS];
+static int _bspstat_outgoing_nbytes_exch[BSP_MAX_PROCS];
+static int _bspstat_incoming_pkts_exch[BSP_MAX_PROCS];
+static int _bspstat_outgoing_pkts_exch[BSP_MAX_PROCS];
+int *_bspstat_incoming_nbytes, *_bspstat_outgoing_nbytes,
+    *_bspstat_incoming_pkts,   *_bspstat_outgoing_pkts;
+#endif
+\end{code}
+
+\begin{code}
+_BSPprof_sstep_info **_bspprof_sstep;
+\end{code}
+
+
+\begin{code}
+_BSPprof_comm_info  *_bspprof_comm;
+double               _bspprof_comm_start_time,
+                     _bspprof_comm_fix_time,
+                     _bspprof_comm_end_time;
+int                  _bspprof_comm_next    =0;
+int                  _bspprof_comm_noin    =0;
+int                  _bspprof_comm_noout   =0;
+int                  _bspprof_comm_inbytes =0;
+int                  _bspprof_comm_outbytes=0;
+\end{code}
+
+\begin{code}
+PROF_FILETYPE _bspstat_fptr;   /* Only defined on proc 0 */
+PROF_FILETYPE _bspprof_graph_fptr;
+\end{code}
+
+\begin{code}
+#ifdef CALLGRAPH_PROFILE
+char _bspprof_callstack[TRUNCATE_CALLSTACK_DEPTH][TRUNCATE_CALLSTACK_FUNNAME];
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Statistics profile log}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Initialise the statistics profile}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bspstat_init() {
+   int i;
+   _bspstat.super_steps            =0;
+   _bspstat.packet_puts_src        =0;
+   _bspstat.packet_puts_dst        =0;
+   _bspstat.packet_puts_srcnbytes  =0;
+   _bspstat.packet_puts_dstnbytes  =0;
+   _bspstat.buffer_high_water_mark =0;
+   _bspstat.write_waits            =0;
+   _bspstat.read_waits             =0;
+#ifdef BSP_DRMA
+   _bspstat_incoming_nbytes = CALLOC(_bsp_nprocs,SIZEOF(int));
+   _bspstat_outgoing_nbytes = CALLOC(_bsp_nprocs,SIZEOF(int));
+   _bspstat_incoming_pkts   = CALLOC(_bsp_nprocs,SIZEOF(int));
+   _bspstat_outgoing_pkts   = CALLOC(_bsp_nprocs,SIZEOF(int));
+   if (_bspstat_incoming_nbytes==NULL ||
+       _bspstat_outgoing_nbytes==NULL || 
+       _bspstat_incoming_pkts  ==NULL ||
+       _bspstat_outgoing_pkts  ==NULL) {
+     bsp_abort("{bspstat_init} unable to allocate arrays");
+   }
+   for(i=0;i<_bsp_nprocs;i++) {
+     _bspstat_incoming_nbytes[i]=0;
+     _bspstat_outgoing_nbytes[i]=0;
+     _bspstat_incoming_pkts[i]  =0;
+     _bspstat_outgoing_pkts[i]  =0;
+   }
+#endif
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%
+\subsection{Creating the statistics profile log}
+%%%%%%%%%%%%%%%
+\begin{code}
+void bspstat_create() {
+  PROF_DATETYPE clock;
+
+  if (_bsp_pid==0) {
+    _bspstat_fptr = prof_fopen("STAT.bsp");
+    if (_bspstat_fptr==NULL) 
+        bsp_abort("{bsp_begin}: unable to open profiling file for writing");
+  
+    fprintf(_bspstat_fptr,"Statistics created on: %s\n",prof_datestring(clock));
+    prof_fflush(_bspstat_fptr);
+  }
+}
+\end{code}
+
+\begin{code}
+void bspstat_truncate() {
+  if (_bsp_pid==0) prof_fclose(_bspstat_fptr);
+}
+
+void bspstat_recreate() {
+  if (_bsp_pid==0) { 
+    _bspstat_fptr = prof_freopen("STAT.bsp");
+    if (_bspstat_fptr==NULL) 
+      bsp_abort("{bsp_begin}: unable to reopen statistics file for writing");
+  }
+}
+\end{code}
+
+\begin{code}
+#ifdef BSP_DRMA
+void bspstat_incoming(int pid, int nbytes) {
+  _bspstat_incoming_pkts[pid]++;
+  _bspstat_incoming_nbytes[pid]+=nbytes;  
+}
+
+void bspstat_outgoing(int pid, int nbytes) {
+  _bspstat_outgoing_pkts[pid]++;
+  _bspstat_outgoing_nbytes[pid]+=nbytes;  
+}
+
+#endif
+\end{code}
+
+\begin{code}
+#ifdef BSP_DRMA
+void bspstat_updateremote() {
+  int i,pid;
+  for (i=1;i<_bsp_nprocs;i++) {
+    pid = (_bsp_pid+i)%_bsp_nprocs;
+    drma_put(pid,&_bspstat_incoming_pkts[pid], 
+                 &_bspstat_incoming_pkts_exch[_bsp_pid],
+                 SIZEOF(int));
+    drma_put(pid,&_bspstat_incoming_nbytes[pid], 
+                 &_bspstat_incoming_nbytes_exch[_bsp_pid],
+                 SIZEOF(int));
+    drma_put(pid,&_bspstat_outgoing_pkts[pid], 
+                 &_bspstat_outgoing_pkts_exch[_bsp_pid],
+                 SIZEOF(int));
+    drma_put(pid,&_bspstat_outgoing_nbytes[pid], 
+                 &_bspstat_outgoing_nbytes_exch[_bsp_pid],
+                 SIZEOF(int));
+    _bspstat_incoming_pkts[pid]  =0;
+    _bspstat_incoming_nbytes[pid]=0;
+    _bspstat_outgoing_pkts[pid]  =0;
+    _bspstat_outgoing_nbytes[pid]=0;
+  }
+}
+
+void bspstat_finalise() {
+  int i;
+  for(i=0;i<_bsp_nprocs;i++) {
+    _bspstat.packet_puts_src += _bspstat_outgoing_pkts_exch[i];
+    _bspstat.packet_puts_dst += _bspstat_incoming_pkts_exch[i];
+    _bspstat.packet_puts_srcnbytes += _bspstat_outgoing_nbytes_exch[i];
+    _bspstat.packet_puts_dstnbytes += _bspstat_incoming_nbytes_exch[i];
+  }
+}
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%
+\subsection{Closing the statistics profile log}
+%%%%%%%%%%%%%%%
+\begin{code}
+void bspstat_close() {
+  int           i=0;
+
+  int           tot_puts_src=0, tot_puts_srcnbytes=0, 
+                tot_puts_dst=0, tot_puts_dstnbytes=0,
+                tot_write_waits=0,tot_read_waits=0,
+                tot_hwm=0,
+                tot_malloc_no=0, tot_malloc_bytes=0,
+                tot_comb_hits=0, tot_comb_fails=0;
+
+#ifdef STATISTICS
+  static _BSPstat_info  gather_buffer[BSP_MAX_PROCS];
+#else
+  static _BSPstat_info *gather_buffer;
+  bsp_abort("{bspstat_close} should never get here");
+#endif
+
+  bsp_gather_noprof(0,&_bspstat,gather_buffer,SIZEOF(_BSPstat_info));
+
+  if (_bsp_pid==0) {
+    fprintf(_bspstat_fptr,"1) General information\n"
+                          "----------------------\n\n");
+    fprintf(_bspstat_fptr,"\tNumber of processes =%6d\n",_bsp_nprocs);
+    fprintf(_bspstat_fptr,"\tElapsed time        =%6.3f seconds\n",
+            bsp_time());
+    fprintf(_bspstat_fptr,"\tSuper-steps executed=%6d\n\n",
+            _bspstat.super_steps);
+    fprintf(_bspstat_fptr,"\tBSP parameter S     =%6.1f Mflops\n",
+            (bsp_s()/1000000.0));
+    fprintf(_bspstat_fptr,"\tBSP parameter L     =%6d flops\n",
+            (int)bsp_l());
+    fprintf(_bspstat_fptr,"\tBSP parameter G     =%6.1f flops/32bit word\n",
+            bsp_g());
+    fprintf(_bspstat_fptr,"\tBSP parameter n_1/2 =%6d 32bit word\n\n",
+            (int) bsp_nhalf());
+    fprintf(_bspstat_fptr,"\tNumber of buffers   =%6d per process\n",
+            _bsp_nbuffers);
+    fprintf(_bspstat_fptr,"\tBuffer size         =%5dK per process\n",
+           _bsp_buffer_size/1024);
+    fprintf(_bspstat_fptr,"\tCombine buffer size =%5dK per process\n",
+            (2*_bsp_opt_fcombine_puts*_bsp_nprocs)/1024);
+    fprintf(_bspstat_fptr,"\tCommunication FIFO  =%6d entries\n\n\n",
+            _bsp_comm_fifo_size);
+
+    fprintf(_bspstat_fptr,"2) Communication statistics\n"
+                         "---------------------------\n\n");
+    fprintf(_bspstat_fptr,"\tProc|"
+                         "     Number put/get comms      |"
+                         "     Waits   | Buffer |\n");
+    fprintf(_bspstat_fptr,"\t    |"
+                         " from |  bytes |  to  |  bytes |"
+                         "write | read | H.W.M  |\n"
+                         "\t----|"
+                         "------+--------+------+--------|"
+                         "------+------|--------|\n");
+
+    for (i=0; i<_bsp_nprocs; i++) {
+      fprintf(_bspstat_fptr,"\t%3d |%6d|%s|%6d|%s|%6d|%6d|%s|\n",
+              i,
+              gather_buffer[i].packet_puts_src,
+              bsp_pprbytes(gather_buffer[i].packet_puts_srcnbytes),
+              gather_buffer[i].packet_puts_dst,
+              bsp_pprbytes(gather_buffer[i].packet_puts_dstnbytes),
+              gather_buffer[i].write_waits,
+              gather_buffer[i].read_waits,
+              bsp_pprbytes(gather_buffer[i].buffer_high_water_mark));
+      tot_puts_src       +=gather_buffer[i].packet_puts_src;
+      tot_puts_srcnbytes +=gather_buffer[i].packet_puts_srcnbytes;
+      tot_puts_dst       +=gather_buffer[i].packet_puts_dst;
+      tot_puts_dstnbytes +=gather_buffer[i].packet_puts_dstnbytes;
+      tot_write_waits      +=gather_buffer[i].write_waits;
+      tot_read_waits      +=gather_buffer[i].read_waits;
+      if (tot_hwm < gather_buffer[i].buffer_high_water_mark) 
+         tot_hwm = gather_buffer[i].buffer_high_water_mark;
+    }
+    fprintf(_bspstat_fptr,"\t====|======+========+======+========+"
+                         "======+======+========|\n");
+    fprintf(_bspstat_fptr,"\tTot.|%6d|%s|%6d|%s|%6d|%6d|%s|\n",
+            tot_puts_src, 
+            bsp_pprbytes(tot_puts_srcnbytes),
+            tot_puts_dst,
+            bsp_pprbytes(tot_puts_dstnbytes),
+            tot_write_waits,
+            tot_read_waits,
+            bsp_pprbytes(tot_hwm));
+
+    if (_bsp_opt_fcombine_puts) {
+      fprintf(_bspstat_fptr,"\n\n"
+                            "\tProc|   Combined puts     |\n"
+                            "\t    | Combined |  Wasted  |\n"
+                            "\t----+----------+----------|\n");
+      for(i=0;i<_bsp_nprocs;i++) {
+        fprintf(_bspstat_fptr,"\t%3d | %8d | %8d |\n",
+		i,
+		gather_buffer[i].combput_hits,
+		gather_buffer[i].combput_fails);
+        tot_comb_hits  += gather_buffer[i].combput_hits;
+        tot_comb_fails += gather_buffer[i].combput_fails;
+      }
+      fprintf(_bspstat_fptr,"\t====+==========+==========|\n");
+      fprintf(_bspstat_fptr,"\tTot.| %8d | %8d |\n\n",
+              tot_comb_hits,tot_comb_fails);
+
+    }
+    fprintf(_bspstat_fptr,"3) Collective communication costs\n"
+                          "---------------------------------\n");
+    bsp_bcast_stat(_bspstat_fptr);
+    bsp_scan_stat(_bspstat_fptr);
+    bsp_fold_stat(_bspstat_fptr);
+  }
+#if defined(MPASS_UDPIP) || defined(MPASS_3C905B)
+  bspudp_dump_stats(_bspstat_fptr,BSP_MPASS_STATISTICS_DATA);
+#endif
+  if (bsp_pid==0) prof_fclose(_bspstat_fptr);
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Super-step profiling graph log}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%
+\subsection{Initialise Super-step graph profile log}
+%%%%%%%%%%%%%%%
+
+\begin{code}
+void bspprof_init() {
+   int i;
+
+   if (PROFILE_COMM_BUFFER_SIZE<_bsp_nprocs)
+     bsp_abort("{bspprof_init} PROFILE_COMM_BUFFER_SIZE<$d",_bsp_nprocs);
+
+   _bspprof_comm  = CALLOC(PROFILE_COMM_BUFFER_SIZE,
+                           SIZEOF(_BSPprof_comm_info));
+   _bspprof_sstep = CALLOC(PROFILE_SSTEP_BUFFER_SIZE,
+                           SIZEOF(_BSPprof_sstep_info*));
+   if (_bspprof_sstep==NULL || _bspprof_comm ==NULL) 
+     bsp_abort("{bsp_begin} unable to create profiling information");
+
+   for(i=0;i<PROFILE_SSTEP_BUFFER_SIZE;i++) _bspprof_sstep[i]=NULL;
+   _bspprof_comm_next            = 0;
+   _bspprof_comm_noin            = 0;
+   _bspprof_comm_noout           = 0;
+   _bspprof_comm_inbytes         = 0;
+   _bspprof_comm_outbytes        = 0;
+
+#ifdef CALLGRAPH_PROFILE
+   if (_bsp_pid==0 && _bsp_do_cgprof) bsp_init_callstack();
+#endif
+}
+\end{code}
+
+%%%%%%%%%%%%%%
+\subsection{Creating the super-step graph profile log}
+%%%%%%%%%%%%%%%
+
+\begin{code}
+void bspprof_create() {
+  extern char *_bsp_compile_flags;
+  PROF_DATETYPE clock;
+
+  if (_bsp_pid==0) {
+    _bspprof_graph_fptr = prof_fopen("PROF.bsp");
+    if (_bspprof_graph_fptr==NULL) 
+        bsp_abort("{bsp_begin}: unable to open profiling file for writing");
+    fprintf(_bspprof_graph_fptr,"D %s",prof_datestring(clock));
+    fprintf(_bspprof_graph_fptr,"F %s\n",_bsp_compile_flags);
+    fprintf(_bspprof_graph_fptr,"N %s\n",_bsp_arch);
+    fprintf(_bspprof_graph_fptr,"X %s\n",_bsp_device);    
+    fprintf(_bspprof_graph_fptr,"P %d\n",_bsp_nprocs);
+    prof_fflush(_bspprof_graph_fptr);
+  }
+}
+\end{code}
+
+\begin{code}
+void bspprof_truncate() {
+  if (_bsp_pid==0) prof_fclose(_bspprof_graph_fptr);
+}
+
+void bspprof_recreate() {
+  if (_bsp_pid==0) { 
+  _bspprof_graph_fptr = prof_freopen("PROF.bsp");
+  if (_bspprof_graph_fptr==NULL) 
+     bsp_abort("{bsp_begin}: unable to reopen profiling file for writing");
+  }
+}
+\end{code}
+
+
+\begin{code}
+void bspprof_close() {
+
+  if (_bspprof_comm_next>0) bspprof_flush_supersteps();
+  bspprof_flush_symbol_table();
+#ifndef MPASS_TCPIP
+  barrier_sync();
+#endif
+  if (_bsp_pid==0)  {
+    fprintf(_bspprof_graph_fptr,"E %f\n",bsp_time());
+    prof_fclose(_bspprof_graph_fptr);
+  }
+}
+\end{code}
+
+
+Look up in the hash table the entry associated with the superstep in
+the code identified by filename and line number. If the entry is not
+in the table, then create a new one. 
+\begin{code}
+STATIC _BSPprof_sstep_info *bspprof_lookup(int   lineno,char* filename) {
+  _BSPprof_sstep_info *ptr, **drag, *cell;
+   int j,hash, found=0;
+   static int sstep_id=0;
+#ifdef CALLGRAPH_PROFILE
+  if (_bsp_do_cgprof) bsp_get_callstack(_bspprof_callstack);
+#endif
+
+  hash = (hashpjw(filename)+lineno)%PROFILE_SSTEP_BUFFER_SIZE;
+  ptr  = _bspprof_sstep[hash];
+  drag = &_bspprof_sstep[hash];
+
+  while (ptr!=NULL && !found) {
+    found = (ptr->lineno==lineno) && (strcmp(ptr->filename,filename)==0);
+#ifdef CALLGRAPH_PROFILE
+    if (_bsp_do_cgprof) {
+      for(j=0;j<TRUNCATE_CALLSTACK_DEPTH      && 
+              found                            &&
+              !(_bspprof_callstack[j][0]=='\0' &&
+              ptr->call_stack[j][0]=='\0');
+          j++)
+        found=found && (strcmp(_bspprof_callstack[j],ptr->call_stack[j])==0);
+    }
+#endif
+    if (!found) {
+      drag = &ptr->next;
+      ptr  = ptr->next;
+    }
+  }
+
+  if (found && ptr!=NULL) return ptr;
+  else {
+    cell          = MALLOC(SIZEOF(_BSPprof_sstep_info));
+    if (cell==NULL)
+      bsp_abort("{bspprof_lookup} failed to malloc storage for hash table");
+    cell->next    = *drag;
+    *drag         = cell;
+    cell->lineno  = lineno;
+    cell->sstep_id= ((PROFILE_SSTEP_BUFFER_SIZE)*(sstep_id++))+hash;
+    cell->filename= bsp_strdup(filename);
+#ifdef CALLGRAPH_PROFILE
+    if (_bsp_do_cgprof) {
+      cell->call_stack=(char**)CALLOC(TRUNCATE_CALLSTACK_DEPTH,SIZEOF(char**));
+      if (cell->call_stack==NULL)
+	bsp_abort("{bsprof_loockup} unable to allocate storage");
+      for(j=0;j<TRUNCATE_CALLSTACK_DEPTH;j++) {
+	cell->call_stack[j]=MALLOC(TRUNCATE_CALLSTACK_FUNNAME*SIZEOF(char));
+	if (cell->call_stack[j]==NULL)
+	  bsp_abort("{bsprof_lookup} unable to allocate storage");
+
+	MEMCPY(cell->call_stack[j],
+	       _bspprof_callstack[j],
+	       TRUNCATE_CALLSTACK_FUNNAME*SIZEOF(char));
+      }
+      cell->proc=(_BSPprof_callgraph_proc*) 
+	         CALLOC(_bsp_nprocs,SIZEOF(_BSPprof_callgraph_proc));
+      if (cell->proc==NULL)
+        bsp_abort("{bsprof_lookup} unable to allocate storage");
+      cell->accum_syncs   = 0;
+      cell->accum_comm_max= 0.0;
+      cell->accum_comm_avg= 0.0;
+      cell->accum_comm_min= 0.0;
+      cell->accum_comp_max= 0.0;
+      cell->accum_comp_avg= 0.0;
+      cell->accum_comp_min= 0.0;
+      cell->accum_idle_max= 0.0;
+      cell->accum_idle_avg= 0.0;
+      cell->accum_idle_min= 0.0;
+      cell->accum_h_max   = 0;
+      cell->accum_h_avg   = 0;
+      cell->accum_h_min   = 0;
+
+      for(j=0;j<_bsp_nprocs;j++) {
+        cell->proc[j].proc_comp = 0.0;
+        cell->proc[j].proc_comm = 0.0; 
+        cell->proc[j].proc_idle = 0.0; 
+        cell->proc[j].proc_hin  = 0;
+        cell->proc[j].proc_hout = 0;
+      }
+    }
+#endif
+    return cell;
+  }
+}
+\end{code}
+
+Perform a lookup on the hash table created above, but use the global
+identifier (which has the hash value within it) as the lookup key. 
+\begin{code}
+STATIC _BSPprof_sstep_info *bspprof_lookup_sstep_id(int sstep_id) {
+  _BSPprof_sstep_info *ptr;
+
+  ptr = _bspprof_sstep[sstep_id%PROFILE_SSTEP_BUFFER_SIZE];
+  while (ptr!=NULL) {
+    if (ptr->sstep_id==sstep_id) return ptr;
+    ptr=ptr->next;
+  }
+  bsp_abort("{bspprof_lookup_sstep_id} failed to find entry %d",sstep_id);
+  return NULL;
+}
+\end{code}
+
+\begin{code}
+void bspprof_sstep_start() {
+  _bspprof_comm_start_time = bsp_time();
+}
+
+
+void bspprof_sstep_fix() {
+  _bspprof_comm_fix_time = bsp_time();
+}
+
+void bspprof_sstep_comm_end() {
+  _bspprof_comm_end_time = bsp_time();
+}
+\end{code}
+
+\begin{code}
+void bspprof_sstep_end() {
+  int i;
+  double flushtime;
+  _BSPprof_sstep_info *ptr;
+  _BSPprof_sstep_info *flushinfo;
+
+  if (_bsp_pid==0) {
+    /* Symbol table only defined on process zero */
+    ptr = bspprof_lookup(_bsp_lineno,_bsp_filename);
+    _bspprof_comm[_bspprof_comm_next].sstep_id = ptr->sstep_id; 
+  }
+
+  _bspprof_comm[_bspprof_comm_next].time_fix 
+    = _bspprof_comm_fix_time;
+
+  _bspprof_comm[_bspprof_comm_next].time_delta_start
+    = _bspprof_comm_fix_time - _bspprof_comm_start_time;
+
+  if (_bspprof_comm[_bspprof_comm_next].time_delta_start<0.0)
+    _bspprof_comm[_bspprof_comm_next].time_delta_start=0.0;
+
+#ifdef BSP_MPASS
+  _bspprof_comm[_bspprof_comm_next].time_delta_comm
+    = bsp_time() - _bspprof_comm_fix_time;
+
+  _bspprof_comm[_bspprof_comm_next].time_delta_end   
+    = _bspprof_comm[_bspprof_comm_next].time_delta_comm;
+#else
+  _bspprof_comm[_bspprof_comm_next].time_delta_comm
+    = _bspprof_comm_end_time - _bspprof_comm_fix_time;
+
+  _bspprof_comm[_bspprof_comm_next].time_delta_end   
+    = bsp_time() - _bspprof_comm_fix_time;
+#endif
+
+  if (_bspprof_comm[_bspprof_comm_next].time_delta_comm<0.0)
+    _bspprof_comm[_bspprof_comm_next].time_delta_comm=0.0;
+
+  if (_bspprof_comm[_bspprof_comm_next].time_delta_end<0.0)
+    _bspprof_comm[_bspprof_comm_next].time_delta_end=0.0;
+
+    
+  _bspprof_comm[_bspprof_comm_next].no_out      
+    = _bspstat.packet_puts_src - _bspprof_comm_noout;
+
+  _bspprof_comm[_bspprof_comm_next].no_in      
+    = _bspstat.packet_puts_dst - _bspprof_comm_noin;
+
+  _bspprof_comm[_bspprof_comm_next].out_bytes    
+    = _bspstat.packet_puts_srcnbytes - _bspprof_comm_outbytes;
+
+  _bspprof_comm[_bspprof_comm_next].in_bytes    
+    = _bspstat.packet_puts_dstnbytes - _bspprof_comm_inbytes;
+  
+  
+  _bspprof_comm_noout   = _bspstat.packet_puts_src;
+  _bspprof_comm_noin    = _bspstat.packet_puts_dst;
+  _bspprof_comm_inbytes = _bspstat.packet_puts_dstnbytes;
+  _bspprof_comm_outbytes= _bspstat.packet_puts_srcnbytes;
+  _bspprof_comm_next++;
+
+  if (_bspprof_comm_next >= PROFILE_COMM_BUFFER_SIZE) {
+    flushtime=bsp_time();
+    bspprof_flush_supersteps();
+    /* Record time for flushing _during_ the users computation */
+    if (_bsp_pid==0) {
+      ptr = bspprof_lookup(0,"FLUSH_PROFILE");
+      _bspprof_comm[_bspprof_comm_next].sstep_id = ptr->sstep_id; 
+    }
+    _bspprof_comm[_bspprof_comm_next].time_fix =flushtime;
+    _bspprof_comm[_bspprof_comm_next].time_delta_start=0.0;
+    _bspprof_comm[_bspprof_comm_next].time_delta_comm=0.0;
+    _bspprof_comm[_bspprof_comm_next].time_delta_end=bsp_time()-flushtime;
+    _bspprof_comm[_bspprof_comm_next].no_out=0;
+    _bspprof_comm[_bspprof_comm_next].no_in =0;
+    _bspprof_comm[_bspprof_comm_next].out_bytes=0;   
+    _bspprof_comm[_bspprof_comm_next].in_bytes=0;   
+    _bspprof_comm_next++;
+  }
+
+}
+\end{code}
+
+\begin{code}
+STATIC void bspprof_flush_symbol_table() {
+  _BSPprof_sstep_info *ptr;
+  int i,j;
+
+  if (_bsp_pid==0) {
+    for(i=0;i<PROFILE_SSTEP_BUFFER_SIZE;i++) {
+      ptr = _bspprof_sstep[i];
+      while (ptr!=NULL) {
+        fprintf(_bspprof_graph_fptr,"s %d %d %s\n",
+                ptr->sstep_id/PROFILE_SSTEP_BUFFER_SIZE,
+                ptr->lineno,ptr->filename);
+        ptr=ptr->next;
+      }
+    }
+#ifdef CALLGRAPH_PROFILE
+    if (_bsp_do_cgprof) {
+      for(i=0;i<PROFILE_SSTEP_BUFFER_SIZE;i++) {
+	ptr = _bspprof_sstep[i];
+	while (ptr!=NULL) {
+	  fprintf(_bspprof_graph_fptr,"A <%d of %s ",
+                  ptr->lineno,ptr->filename);
+	  /* Ignore first 3 entries which will be always be
+	     bspprof_lookup,bspprof_sstep_end,bsp_sync */
+	  for(j=3;j<TRUNCATE_CALLSTACK_DEPTH && 
+                ptr->call_stack[j][0]!='\0';j++)
+	    fprintf(_bspprof_graph_fptr,"%s,",ptr->call_stack[j]);
+	  fprintf(_bspprof_graph_fptr,
+		  " > with %d SYNCS %f %f %f COMP %f %f %f COMM %f %f %f "
+                  "COMPIDLE %ld %ld %ld HREL ",
+		  ptr->accum_syncs,
+		  ptr->accum_comp_max,
+		  ptr->accum_comp_avg, 
+		  ptr->accum_comp_min,
+		  ptr->accum_comm_max,
+		  ptr->accum_comm_avg, 
+		  ptr->accum_comm_min, 
+		  ptr->accum_idle_max, 
+		  ptr->accum_idle_avg, 
+		  ptr->accum_idle_min,
+		  ptr->accum_h_max/4,
+		  ptr->accum_h_avg/4,
+		  ptr->accum_h_min/4);
+	  for(j=0;j<_bsp_nprocs;j++)
+	    fprintf(_bspprof_graph_fptr,
+		    "%f,%f,%f,%ld,%ld;",
+		    ptr->proc[j].proc_comp,
+		    ptr->proc[j].proc_comm,
+		    ptr->proc[j].proc_idle,
+		    ptr->proc[j].proc_hin/4,
+		    ptr->proc[j].proc_hout/4); /* 32bit word*/
+	  fprintf(_bspprof_graph_fptr,"\n");	  
+	  ptr=ptr->next;
+	}
+      }
+    }
+#endif
+  }
+}
+\end{code}
+
+/* Gather in terms of $p$ supersteps to minimise memory requirements */
+\begin{code}
+STATIC void bspprof_flush_supersteps() {
+  int    i,j, comm_size, comm_chunk, comm_offset;
+  double time_fix, time_start,time_delta_start, time_delta_end,time_end;
+  static double       time_last_end=0.0;
+#ifdef CALLGRAPH_PROFILE
+  _BSPprof_sstep_info *sstep_info;
+  int    tempi, min_h, max_h, avg_h;
+  double tempd,min_comp, avg_comp, max_comp;
+  double min_comm, avg_comm, max_comm;
+  double min_idle, avg_idle, max_idle, first_l_time, last_l_time;
+  static double *last_time_fix=NULL;
+#endif
+  _BSPprof_comm_info *ptr;
+#ifdef PROFILE
+  static _BSPprof_comm_info  gather_buffer[PROFILE_COMM_BUFFER_SIZE];
+#else
+  static _BSPprof_comm_info  *gather_buffer;
+  bsp_abort("{bspprof_flush_supersteps} should never get here");
+#endif
+
+#ifdef CALLGRAPH_PROFILE
+  if (last_time_fix==NULL) {
+    last_time_fix=CALLOC(_bsp_nprocs,sizeof(double));
+    if (last_time_fix==NULL)
+      bsp_abort("{bspprof_flush_supersteps} unable to allocate memory");
+    for(i=0;i<_bsp_nprocs;i++) last_time_fix[i]=0.0;
+  }
+#endif
+  comm_size   = _bspprof_comm_next;
+  comm_offset = 0;
+
+  while (comm_size>0) {
+    if (comm_size*_bsp_nprocs < PROFILE_COMM_BUFFER_SIZE)
+      comm_chunk = comm_size;
+    else
+      comm_chunk = PROFILE_COMM_BUFFER_SIZE / _bsp_nprocs;
+
+    bsp_gather_noprof(0,&_bspprof_comm[comm_offset],gather_buffer,
+                      SIZEOF(_BSPprof_comm_info)*comm_chunk);
+    comm_size   -= comm_chunk;
+    comm_offset += comm_chunk;
+    if (_bsp_pid==0) {
+      for(i=0; i<comm_chunk;i++) {
+        time_fix= gather_buffer[i+(comm_chunk*(_bsp_nprocs-1))].time_fix;
+        time_delta_start = 78840000.0; /* Infinity...well a year will do */
+        time_delta_end   = 0.0;
+        for(j=0;j<_bsp_nprocs;j++) {
+          ptr=&gather_buffer[i + (comm_chunk*j)];
+
+          if (ptr->time_delta_start < time_delta_start)  
+            time_delta_start = ptr->time_delta_start;
+
+          if (ptr->time_delta_end > time_delta_end)
+            time_delta_end = ptr->time_delta_end;
+        }
+        time_start = time_fix-time_delta_start; /* Start comm */
+        
+        if (time_start<time_last_end) {
+          /* Something strange is happening to the timers, or one of
+             the processors is desceduled between finishing the
+             barrier and taking the fix time. To make sure time associated
+             with each superstep increases, we use the fix
+             time as the start of the communication part of the superstep*/
+          time_start = time_fix;
+        }
+        time_end   = time_fix + time_delta_end; /* End   comm */
+        if (_bsp_do_prof) {
+          fprintf(_bspprof_graph_fptr,"c %d %f %f ",
+                  gather_buffer[i].sstep_id/PROFILE_SSTEP_BUFFER_SIZE,
+                  time_start,time_end); 
+          for(j=0;j<_bsp_nprocs;j++) { 
+            fprintf(_bspprof_graph_fptr,"%d %d ",
+                    gather_buffer[i + (comm_chunk*j)].no_in,
+                    gather_buffer[i + (comm_chunk*j)].no_out);
+          } 
+          fprintf(_bspprof_graph_fptr,"@@ ");
+          for(j=0;j<_bsp_nprocs;j++) {
+            fprintf(_bspprof_graph_fptr,"%d %d ",
+                    gather_buffer[i + (comm_chunk*j)].in_bytes,
+                    gather_buffer[i + (comm_chunk*j)].out_bytes);
+          }
+          fprintf(_bspprof_graph_fptr,"\n");
+        }
+#ifdef CALLGRAPH_PROFILE
+        if (_bsp_do_cgprof) {
+	  sstep_info = bspprof_lookup_sstep_id(gather_buffer[i].sstep_id);
+	  sstep_info->accum_syncs++;
+              
+	  min_h         = INT_MAX;
+          max_h         = 0;
+          avg_h         = 0;
+
+          min_comp      = 31536000.0;
+	  max_comp      = 0.0;
+	  avg_comp      = 0.0;
+
+          min_comm      = 31536000.0;
+	  max_comm      = 0.0;
+	  avg_comm      = 0.0;
+
+          min_idle = 31536000.0;
+          max_idle = 0.0;
+	  avg_idle = 0.0;
+
+          first_l_time = 31536000.0;
+          last_l_time  = 31536000.0;
+
+	  for(j=0;j<_bsp_nprocs;j++) {
+	    ptr =&gather_buffer[i + (comm_chunk*j)];
+
+         
+            tempd = ptr->time_fix-last_time_fix[j]-ptr->time_delta_start;
+            sstep_info->proc[j].proc_comp+= tempd;
+	    if (min_comp>tempd) min_comp=tempd;
+	    if (max_comp<tempd) max_comp=tempd;
+	    avg_comp +=tempd;
+
+            tempd = ptr->time_delta_comm;
+	    sstep_info->proc[j].proc_comm +=tempd;
+            if (min_comm>tempd) min_comm=tempd;
+	    if (max_comm<tempd) max_comm=tempd;
+	    avg_comm +=tempd;
+
+            /* Idle time at start + idle time at end */
+	    tempd = ptr->time_delta_start + 
+	            (ptr->time_delta_end-ptr->time_delta_comm);
+	    sstep_info->proc[j].proc_idle+=tempd;
+            if (min_idle>tempd) min_idle=tempd;
+	    if (max_idle<tempd) max_idle=tempd;
+	    avg_idle +=tempd;
+
+            
+            if (ptr->time_delta_start<first_l_time) 
+              first_l_time= ptr->time_delta_start;
+            if ((ptr->time_delta_end-ptr->time_delta_comm)<last_l_time)
+	      last_l_time = ptr->time_delta_end-ptr->time_delta_comm;
+
+            tempi = PAIRMAX(ptr->out_bytes,ptr->in_bytes);
+	    sstep_info->proc[j].proc_hin+=ptr->in_bytes;
+	    sstep_info->proc[j].proc_hout+=ptr->out_bytes;
+            if (min_h>tempi) min_h=tempi;
+	    if (max_h<tempi) max_h=tempi;
+	    avg_h+=tempi;
+
+	  }
+          sstep_info->accum_comp_min+= min_comp;
+          sstep_info->accum_comp_max+= max_comp;
+	  sstep_info->accum_comp_avg+= avg_comp / ((double)_bsp_nprocs);
+
+          sstep_info->accum_comm_min+= min_comm + first_l_time + last_l_time;
+          sstep_info->accum_comm_max+= max_comm + first_l_time + last_l_time;
+	  sstep_info->accum_comm_avg+= (avg_comm / ((double)_bsp_nprocs))+
+	                               (first_l_time + last_l_time);
+          for(j=0;j<_bsp_nprocs;j++) 
+            sstep_info->proc[j].proc_comm += first_l_time + last_l_time;
+
+          sstep_info->accum_idle_min+=min_idle- (first_l_time + last_l_time);
+          sstep_info->accum_idle_max+=max_idle- (first_l_time + last_l_time);
+	  sstep_info->accum_idle_avg+=(avg_idle/((double)_bsp_nprocs))-
+	                              (first_l_time + last_l_time);
+
+	  sstep_info->accum_h_max  += max_h; 
+          sstep_info->accum_h_avg  += avg_h / _bsp_nprocs;
+	  sstep_info->accum_h_min  += min_h;
+	}  
+#endif
+        time_last_end = time_end;
+#ifdef CALLGRAPH_PROFILE
+	for(j=0;j<_bsp_nprocs;j++) 
+	  last_time_fix[j]=gather_buffer[i + (comm_chunk*j)].time_fix;
+#endif
+	  
+      }
+    }
+  }
+  _bspprof_comm_next=0;
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Gather function used by the profiler.}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+A gather is used within the profilig routines. Unfortunately, we
+cann't use the one defined at level 1 of the library, because it uses
+the superstep structure---which may get us into an infinite recursion
+if the profile buffer is a little too small. Here are native versions
+built ontop of message passing primitives, shared memory, or DRMA.
+
+%%%%%%%%%%%%%%%%%%%
+\subsection{Message passing}
+%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef BSP_MPASS
+STATIC void bsp_gather_noprof(int pid, void *src, void *dst, int nbytes) {
+  int errno;
+
+  errno = messg_gather(_bsp_nprocs,_bsp_pid,pid,src,dst,nbytes);
+  if (errno)
+    bsp_abort("{bsp_gather_noprog}: failed with error %d",errno);
+}
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%
+\subsection{Shared memory}
+%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef BSP_SHMEM
+STATIC void bsp_gather_noprof(int pid, void *src, void *dst, int nbytes) {
+  int   togo_nbytes  = nbytes;
+  int   i,chunk_nbytes;
+  void *chunk_dst    = dst;
+  void *chunk_src    = src;
+
+
+  while (togo_nbytes>0) {
+    if (togo_nbytes > _bsp_buffer_size) {
+      togo_nbytes -= _bsp_buffer_size;
+      chunk_nbytes = _bsp_buffer_size;
+    } else {
+      chunk_nbytes = togo_nbytes;
+      togo_nbytes  = 0;
+    }
+    MEMCPY((char *)_shmem.proc_buffer[_bsp_pid][0],
+           (char*)chunk_src,chunk_nbytes); 
+    barrier_sync();
+    if (_bsp_pid==pid) {
+      for(i=0;i<_bsp_nprocs;i++) {
+        MEMCPY((char *)chunk_dst+(i*nbytes),
+              (char *)_shmem.proc_buffer[i][0], chunk_nbytes);
+      }
+    }
+    chunk_src = ((char *)chunk_src) + chunk_nbytes;
+    chunk_dst = ((char *)chunk_dst) + chunk_nbytes;
+    barrier_sync();
+  }
+}
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%
+\subsection{Direct Remote Memory Access}
+%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef BSP_DRMA
+STATIC void bsp_gather_noprof(int pid, void *src, void *dst, int nbytes) {
+
+  barrier_sync();
+  if (nbytes==0) 
+    {/* Do nothing */} 
+  else if (_bsp_pid==pid) 
+    MEMCPY((char*) dst + (_bsp_pid*nbytes),src,nbytes);
+  else 
+    drma_put(pid,src,(char*) dst + (_bsp_pid*nbytes) ,nbytes);
+  barrier_sync();
+}
+#endif
+\end{code}

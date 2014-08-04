@@ -1,0 +1,175 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1997, 1998 Stephen Donaldson                       %%
+%%                      &  The University of Oxford                      %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it into other software, is hereby granted          %%
+%% without fee, provided that                                            %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{BSP Ethernet driver/program interface}
+
+\begin{code}
+#ifndef BSPDEV_H
+#define BSPDEV_H
+#include <linux/ioctl.h>
+#include "../library_shared/bsp_types.h"
+#include "../library_udpip/bspudpdefs.h"
+\end{code}
+
+\subsection{Device parameters structure}
+
+\begin{code}
+typedef struct bspeth_parms bspeth_parms_t;
+struct bspeth_parms
+   {
+   unsigned long pid;
+   unsigned long nprocs;         /* number of BSP processors */
+   unsigned long buff_size;      /* size of buffers to allocate */
+   unsigned long buff_count;     /* number of nic buffers to allocate */
+   bspeth_macaddr_t smac;        /* source mac address */
+   };
+\end{code}
+
+\subsection{Range limits for parameter fields}
+
+\begin{code}
+#define BSPETH_MINPROCS 2              /* minimum number of processors */
+#define BSPETH_MAXPROCS 32             /* maximum number of processors */
+#define BSPETH_MINBUFSZ 64             /* minimum buffer size */
+#define BSPETH_MAXBUFSZ 1526           /* maximum buffer size */
+\end{code}
+
+\subsection{ioctl command values}
+\begin{code}
+#define BSPETH_IOCMAGIC  'B'
+        /* Set and get BSP level paramaters in device */
+#define BSPETH_IOCSPARMS _IOW(BSPETH_IOCMAGIC,1,bspeth_parms_t)
+#define BSPETH_IOCGPARMS _IOR(BSPETH_IOCMAGIC,2,bspeth_parms_t)
+        /* Set and get session level paramaters in device */
+#define BSPETH_IOCSPRDAT _IOW(BSPETH_IOCMAGIC,3,bspudp_sess_t)
+#define BSPETH_IOCXPRDAT _IOWR(BSPETH_IOCMAGIC,4,bspudp_sess_t)
+        /* allocation of mapped buffers and control storage */
+#define BSPETH_IOCQGETBF _IO(BSPETH_IOCMAGIC,5)
+#define BSPETH_IOCQGETST _IOW(BSPETH_IOCMAGIC,6,int)
+        /* controls for the Ethernet card software layer */
+#define BSPETH_IOCSDPOLL _IOW(BSPETH_IOCMAGIC,7,int) /* set Tx Polling */
+#define BSPETH_IOCGDPOLL _IO(BSPETH_IOCMAGIC,8)      /* get Tx Polling */
+#define BSPETH_IOCGDNDPD _IO(BSPETH_IOCMAGIC,10)     /* get down list */
+       /* finished UDP level initialisation */
+#define BSPETH_IOCRINIT  _IOW(BSPETH_IOCMAGIC,11,int) 
+       /* user forces signal handler */
+#define BSPETH_IOCRSIO   _IO(BSPETH_IOCMAGIC,12)
+        /* specify address of anchor block (queues, etc.) */
+#define BSPETH_IOCSANCHOR _IOW(BSPETH_IOCMAGIC,13,bspudp_anch_t)
+        /* start of physical storage */
+#define BSPETH_IOCGPHYS _IO(BSPETH_IOCMAGIC,14)
+        /* Transmit status */
+#define BSPETH_IOCGTXSTATUS _IO(BSPETH_IOCMAGIC,15)
+        /* Status of interrupt mask */
+#define BSPETH_IOCGINTSTATUS _IO(BSPETH_IOCMAGIC,16)
+        /* Force check of kernel data-structure invariants */
+#define BSPETH_IOCSKERNINVAR _IO(BSPETH_IOCMAGIC,17)
+
+#define BSPETH_IOCMAXNR  17
+#endif
+\end{code}
+
+\subsection{BSP control device structure}
+\begin{code}
+#ifndef __KERNEL__
+#include <linux/tqueue.h>
+#endif
+
+typedef struct bspdev bspdev_t;
+struct bspdev
+   {
+   char name[8];               /* dev node name */
+   int major;                  /* major node number */
+   int minor;                  /* major node number */
+   int irq;                    /* IRQ line used by device */
+   int ready;                  /* indicates open and initialised */
+   struct task_struct *bsptask;/* process who opened the BSP device */
+
+   /* read/select wait queues */
+   struct wait_queue *wait_queue_in;  /* waiters on read or select read */
+
+   /* buffer storage allocation control */
+   char *vregion;              /* vremap region of high memory */
+   int vmas;                   /* keep count of vmas */
+   unsigned long page_faults;  /* count number of page faults */
+   unsigned long phys_start;   /* first byte of phys memory for device */
+   unsigned long phys_last;    /* last byte of phys memory for device */
+   unsigned long buff_start;   /* first byte of buffer space */
+   bsp_int32     mem_shift;    /* delta phys/virt mem */
+   unsigned long buff_last;    /* last byte of buffer space */
+   unsigned long buff_next;    /* next byte to allocate */
+   unsigned long buff_alloced; /* number of buffers allocated */
+
+   bspeth_parms_t parms;       /* BSP parameters */
+
+   unsigned long user_opens;   /* upper layer open count */
+   unsigned long user_closes;  /* upper layer close count */
+   unsigned long user_reads;   /* upper layer read count */
+   unsigned long user_writes;  /* upper layer write count*/
+   unsigned long user_ioctls;  /* upper layer ioctl count */
+   unsigned long eth_reads;    /* lower layer read count */
+   unsigned long eth_writes;   /* lower layer write count */
+   unsigned long eth_errors;   /* lower layer error count */
+
+#if BSPETH_STATS >= 2
+   unsigned long eth_starved;  /* socketio has no buffers */
+   unsigned long eth_inter;    /* number of interrupts caught */
+
+   /* packets sent to and recived from NIC (copied from anchor) */
+   unsigned long nic_sends;    /* number of packets passed to nic */
+   unsigned long nic_exsends;  /* number of expedited sends */
+   unsigned long nic_recvs;    /* number of packets received from nic */ 
+   unsigned long send_fails;   /* sends fails because of locks */
+#endif
+
+#if BSPETH_STATS >= 3   
+   /* copies of fields from the anchor block */
+   volatile int user_socketio;  /* Count of user forced socketio */
+   volatile int min_recv_usecs; /* Time spent in user forced socketio */
+   volatile int max_recv_usecs; /* Time spent in user forced socketio */ 
+   volatile int sum_recv_usecs;
+   volatile int sio_packets; 
+#endif
+
+   struct tq_struct bh_task;   /* task queue element for bottom half */
+
+#if BSPETH_STATS >= 1
+   /* 3C905B NIC accumulated stats */
+   unsigned long nic_dmactrl;  /* bus mastering control */
+   unsigned char nic_uppoll;   /* up polling rate */
+   unsigned char nic_dnpoll;   /* down polling rate */
+#endif
+   unsigned long CarrierLost;
+   unsigned long SqeErrors;
+   unsigned long MultiCollisions;
+   unsigned long SingleCollisions;
+   unsigned long LateCollisions;
+   unsigned long RxOverruns;
+   unsigned long FramesXmittedOk;
+   unsigned long FramesRcvdOk;
+   unsigned long FramesDeferred;
+   unsigned long UpperFramesOk;
+   unsigned long BytesRcvdOk;
+   unsigned long BytesXmittedOk;
+   unsigned long BadSSD;
+
+   /* NIC diagnostic registers */
+   unsigned short FifoDiagnostic;
+   unsigned short NetworkDiagnostic;
+   };
+\end{code}

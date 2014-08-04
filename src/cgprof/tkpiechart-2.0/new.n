@@ -1,0 +1,13 @@
+' $Id: new.n,v 1.3 1995/09/29 20:13:04 jfontain Exp $
+.TH new tcl
+.BS
+.SH NAME
+new \- Create an object
+.SH SYNOPSIS
+\fBnew \fIclassName ?parameter parameter ...?\fR
+.SH DESCRIPTION
+A new object of class \fIclassName\fR is created. A unique object identifier is generated and the class constructor, which must exists, is called with the identifier as first parameter and the \fBnew\fR instruction parameters as the following parameters, as in:
+.PP
+\fBclassName::className\fR \fIobjectId parameter parameter ...\fR
+.SH KEYWORDS
+oop, new, delete, object

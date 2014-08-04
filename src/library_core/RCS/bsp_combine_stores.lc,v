@@ -1,0 +1,648 @@
+head	1.4;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.4
+date	96.01.19.13.36.03;	author jonh;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	96.01.03.18.12.20;	author jonh;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	95.12.13.12.31.19;	author jonh;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	95.12.11.08.37.56;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.4
+log
+@moving this file into bsp_lib_common.lh
+@
+text
+@%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995, University of Oxford                         %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsp_combine_stores.lc,v 1.3 1996/01/03 18:12:20 jonh Exp jonh $
+% $Log: bsp_combine_stores.lc,v $
+# Revision 1.3  1996/01/03  18:12:20  jonh
+# Post profiling version...
+#
+# Revision 1.2  1995/12/13  12:31:19  jonh
+# Single buffer for messages and their infomation structures. Designed
+# to work on 64bit architectures as well as 32, by using word alignment.
+#
+# Revision 1.1  1995/12/11  08:37:56  jonh
+# Initial revision
+#
+\begin{code}
+#include "bsp_lib.h"
+#include "bsp_profile.h"
+
+#define MESSAGE_MODULO_SIZE  (sizeof(_BSPcombinfo))
+\end{code}
+
+The following routines do not work for stores to the same processor,
+or if the store size is greater than 64K.
+\begin{code}
+typedef struct {
+  int addr_table_smash_nbytes;
+  int offset;
+} _BSPcombinfo;
+\end{code}
+
+The store_queue is arranged as a matrix of processor by maximum number
+of merged stores. For a given processor, the first element of its
+store queue vector is the number of stores that have been merged. The
+remaining elements are triples of address_table entry, offset, and nbytes;
+\begin{code}
+char *_bspcombstore_buffer;
+static int    _bspcombstore_region_size;
+static int    _bspcombstore_half_size;
+
+/* The next values for all the processors will actually be located at */
+/* the beginning of each processors region of the scrath buffer.      */
+static int   *_bspcombstore_queue_out_size[BSP_MAXMAX_PROCS];
+static char  *_bspcombstore_buffer_out[BSP_MAXMAX_PROCS];       
+static int   *_bspcombstore_queue_in_size[BSP_MAXMAX_PROCS];
+static char  *_bspcombstore_buffer_in[BSP_MAXMAX_PROCS];
+
+/* This is a shadow of ``queue_out_size'', to save indirections */
+/* during stores                                                */
+
+static int    _bspcombstore_queue_out_size_copy[BSP_MAXMAX_PROCS];
+static int    _bspcombstore_queue_nbytes_to_go[BSP_MAXMAX_PROCS];
+
+static int  addr_table_combstore_buffer;
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Initialise Combining stores}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bspcombstores_init() {
+  extern int _bsp_addr_table_limit; 
+  int i,offset;
+
+  if (_bsp_nprocs==1) BSP_OPT_FCOMBINE_STORES=0;
+  else {
+    _bspcombstore_region_size  = BSP_BUFFER_SIZE;
+  
+    _bspcombstore_buffer=malloc((2*(_bsp_nprocs-1))*_bspcombstore_region_size);
+    if (_bspcombstore_buffer==NULL)
+      bsp_error("{bspcombstores_init} unable to allocate %d bytes",
+                _bspcombstore_buffer);
+    /* Make sure the regions we use as buffers are word addressable */
+    _bspcombstore_region_size -=_bspcombstore_region_size%sizeof(_BSPcombinfo);
+    _bspcombstore_half_size    =_bspcombstore_region_size*(_bsp_nprocs-1);
+         
+    if (_bsp_nprocs>BSP_MAXMAX_PROCS) {
+      bsp_debug("Turning off -fcombine-stores: only works for <%d processors",
+                BSP_MAXMAX_PROCS);
+      BSP_OPT_FCOMBINE_STORES = 0;
+    }
+
+    for(i=0;i<_bsp_nprocs;i++) {
+      if (i!=_bsp_pid) {
+        offset = (i>=_bsp_pid)?1:0;
+        _bspcombstore_queue_out_size[i]
+          =(int*) (_bspcombstore_buffer+
+                   ((i-offset)*_bspcombstore_region_size));
+        _bspcombstore_queue_in_size[i]
+          =(int*) (_bspcombstore_buffer+_bspcombstore_half_size+
+                   ((i-offset)*_bspcombstore_region_size));
+      }
+    }
+
+    addr_table_combstore_buffer 
+      = bsp_addr_new_global(_bspcombstore_buffer+_bspcombstore_half_size);
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Reset Combining stores}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bspcombstores_reset() {
+  int i,offset;
+
+  for(i=0;i<_bsp_nprocs;i++) {
+    if (i!=_bsp_pid) {
+      *_bspcombstore_queue_in_size[i]     =0;
+      _bspcombstore_queue_out_size_copy[i]=0;
+      offset = sizeof(_BSPcombinfo) / sizeof(int);
+      _bspcombstore_buffer_out[i]
+        =(char*) (_bspcombstore_queue_out_size[i] + offset);
+      _bspcombstore_buffer_in[i] 
+        =(char*) (_bspcombstore_queue_in_size[i]  + offset);
+
+      _bspcombstore_queue_nbytes_to_go[i] =_bspcombstore_region_size - 
+                                           (4*sizeof(_BSPcombinfo));
+    }
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Combine stores}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+int bspcombstores_store(int pid,void *src,int dst_addr,
+                         int offset,int inbytes){
+  int nbytes;
+  _BSPcombinfo *ptr;
+
+  if (_bspcombstore_queue_nbytes_to_go[pid]>inbytes) {
+    ptr = (_BSPcombinfo*) _bspcombstore_buffer_out[pid];
+    FAST_MEMCPY(ptr+1,src,inbytes);
+
+    _bspcombstore_queue_out_size_copy[pid]++;
+    ptr->addr_table_smash_nbytes = dst_addr | (inbytes << 16);
+    ptr->offset                  = offset;
+
+    /* Make sure that the buffer is allocated in blocks modulo */
+    /* BSPcombinfo size */
+    nbytes = inbytes % sizeof(_BSPcombinfo);
+    if (nbytes) nbytes = sizeof(_BSPcombinfo) -nbytes;
+    nbytes+= inbytes + sizeof(_BSPcombinfo);
+
+    _bspcombstore_buffer_out[pid]         += nbytes;
+    _bspcombstore_queue_nbytes_to_go[pid] -= nbytes;
+
+    return 1;
+  } else {
+    return 0;
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Flush combine stores}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bspcombstores_flush() {
+  int i;
+  _BSPcombinfo *ptr;
+
+  for (i=0;i<_bsp_nprocs;i++) {
+    if (i==_bsp_pid) {
+      /* Do nothing */
+    } else if        (_bspcombstore_queue_out_size_copy[i]==0) {
+#ifdef DEBUG
+      bsp_debug("{bspcombstores} nothing going out to %d",i);
+#endif
+    } else if (_bspcombstore_queue_out_size_copy[i]==1) {
+#ifdef DEBUG
+      bsp_debug("{bspcombstores} only one thing going out to %d",i);
+#endif
+      /* Only one thing to send, so just send it */
+      ptr= (_BSPcombinfo *) 
+             (_bspcombstore_buffer+sizeof(_BSPcombinfo)+
+              ((i-((i>=_bsp_pid)?1:0))*_bspcombstore_region_size));
+      _bsp_addr_store(i,
+                      (_bspcombstore_buffer+(2*sizeof(_BSPcombinfo))+
+                       ((i+((i>=_bsp_pid)?-1:0))*_bspcombstore_region_size)),
+                      0xffff & ptr->addr_table_smash_nbytes,
+                      ptr->offset,
+                      ptr->addr_table_smash_nbytes >> 16);
+#ifdef STATISTICS
+      _bspstat.combstore_fails++;
+#endif
+    } else {
+      *(_bspcombstore_queue_out_size[i])
+        = _bspcombstore_queue_out_size_copy[i];
+#ifdef DEBUG
+      bsp_debug("{bspcombstores} %d bytes from %d stores merged to proc %d",
+                _bspcombstore_region_size-_bspcombstore_queue_nbytes_to_go[i],
+                *(_bspcombstore_queue_out_size[i]),i);
+#endif 
+      _bsp_addr_store(i,
+                      (char*)_bspcombstore_buffer+
+                      ((i       -((i>=_bsp_pid)?1:0))*
+                      _bspcombstore_region_size),
+                      addr_table_combstore_buffer, /* writing into top-half */
+                      ((_bsp_pid-((_bsp_pid>=i)?1:0))*
+                       _bspcombstore_region_size),
+                      _bspcombstore_region_size-
+                        _bspcombstore_queue_nbytes_to_go[i]);
+#ifdef STATISTICS
+      _bspstat.combstore_hits += *(_bspcombstore_queue_out_size[i]);
+#endif
+    }
+  } 
+} 
+\end{code}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Flush combine stores}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bspcombstores_finalise() {
+  int tmp,i,j, no_stores,smash,nbytes;
+  int addr_table_src,cached_addr_table_src=-1;
+  char *cached_addr_table_tgt;
+  char *buff_addr;
+  _BSPcombinfo *infoptr;
+
+  for (i=0;i<_bsp_nprocs;i++) {
+    if (i!=_bsp_pid) {
+      no_stores = *(_bspcombstore_queue_in_size[i]);
+      if (no_stores>1) {
+#ifdef DEBUG
+        bsp_debug("{bspcombstores_finalise} dealing with %d stores from %d",
+                  no_stores,i);
+#endif
+        buff_addr = _bspcombstore_buffer_in[i];
+        for (j=0;j<no_stores;j++) {
+          infoptr        = (_BSPcombinfo*) buff_addr;
+          buff_addr     += sizeof(_BSPcombinfo);
+          smash          = infoptr->addr_table_smash_nbytes;
+          nbytes         = smash >> 16;
+          addr_table_src = 0xffff & smash ;
+          if (addr_table_src != cached_addr_table_src) {
+            cached_addr_table_src = addr_table_src;
+            cached_addr_table_tgt = bsp_addr_get(addr_table_src);
+          }  
+          FAST_MEMCPY(cached_addr_table_tgt+infoptr->offset,buff_addr,nbytes);
+
+          if (tmp= nbytes % sizeof(_BSPcombinfo)) {
+            buff_addr += nbytes + sizeof(_BSPcombinfo)-tmp;
+          } else {
+            buff_addr += nbytes;
+          }       
+        }
+      }
+    }
+  } 
+}
+
+\end{code}
+
+
+@
+
+
+1.3
+log
+@Post profiling version...
+@
+text
+@d17 1
+a17 1
+% $Id: bsp_combine_stores.lc,v 1.2 1995/12/13 12:31:19 jonh Exp jonh $
+d19 3
+d50 1
+a50 1
+extern char  *_bsp_scratch_buffer;
+d67 1
+a67 1
+static int  addr_table_scratch_buffer;
+d76 1
+d78 29
+a106 1
+  _bspcombstore_region_size  = BSP_BUFFER_SIZE/(2*(_bsp_nprocs-1));
+d108 2
+a109 8
+  /* Make sure the regions we use as buffers are word addressable */
+  _bspcombstore_region_size -=_bspcombstore_region_size % sizeof(_BSPcombinfo);
+  _bspcombstore_half_size    =_bspcombstore_region_size*(_bsp_nprocs-1);
+         
+  if (_bsp_nprocs>BSP_MAXMAX_PROCS) {
+    bsp_debug("Turning off -fcombine-stores: only works for <%d processors",
+              BSP_MAXMAX_PROCS);
+    BSP_OPT_FCOMBINE_STORES = 0;
+a110 3
+  
+  addr_table_scratch_buffer 
+    = bsp_addr_new_global(_bsp_scratch_buffer+_bspcombstore_half_size);
+d123 1
+a123 9
+      offset = (i>=_bsp_pid)?1:0;
+      _bspcombstore_queue_out_size[i]
+        =(int*) (_bsp_scratch_buffer+
+                 ((i-offset)*_bspcombstore_region_size));
+      _bspcombstore_queue_in_size[i]
+        =(int*) (_bsp_scratch_buffer+_bspcombstore_half_size+
+                 ((i-offset)*_bspcombstore_region_size));
+
+      *_bspcombstore_queue_in_size[i]  =0;
+a124 1
+
+d131 1
+a131 1
+      _bspcombstore_queue_nbytes_to_go[i]=_bspcombstore_region_size - 
+d148 2
+a149 1
+    memcpy(_bspcombstore_buffer_out[pid]+sizeof(_BSPcombinfo),src,inbytes);
+a151 1
+    ptr = (_BSPcombinfo*) _bspcombstore_buffer_out[pid];
+d192 1
+a192 1
+             (_bsp_scratch_buffer+sizeof(_BSPcombinfo)+
+d195 1
+a195 1
+                      (_bsp_scratch_buffer+(2*sizeof(_BSPcombinfo))+
+d212 1
+a212 1
+                      (char*)_bsp_scratch_buffer+
+d215 1
+a215 1
+                      addr_table_scratch_buffer, /* writing into top-half */
+d257 1
+a257 1
+          memcpy(cached_addr_table_tgt+infoptr->offset,buff_addr,nbytes);
+@
+
+
+1.2
+log
+@Single buffer for messages and their infomation structures. Designed
+to work on 64bit architectures as well as 32, by using word alignment.
+@
+text
+@d17 1
+a17 1
+% $Id: bsp_combine_stores.lc,v 1.1 1995/12/11 08:37:56 jonh Exp jonh $
+d19 4
+d78 1
+a78 1
+  _bspcombstore_half_size    = _bspcombstore_region_size*(_bsp_nprocs-1);
+d81 1
+a81 1
+    bsp_error("Turning off -fcombine-stores: only works for <%d processors",
+d100 1
+a100 1
+      offset = (i>=_bsp_pid)?-1:0;
+d103 1
+a103 1
+                 ((i+offset)*_bspcombstore_region_size));
+d106 1
+a106 1
+                 ((i+offset)*_bspcombstore_region_size));
+d108 1
+a108 1
+      *_bspcombstore_queue_in_size[i] =0;
+d118 1
+a118 1
+                                           (2*sizeof(_BSPcombinfo));
+d179 1
+a179 1
+              ((i+((i>=_bsp_pid)?-1:0))*_bspcombstore_region_size));
+d199 1
+a199 1
+                      ((i       +((i>=_bsp_pid)?-1:0))*
+d202 1
+a202 1
+                      ((_bsp_pid+((_bsp_pid>=i)?-1:0))*
+a216 3
+void my_memcpy(char* dst,int offset,char* src,int bytes) {
+  memcpy(dst+offset,src,bytes);
+}
+d218 3
+a220 1
+  int i,j, no_stores,smash,nbytes;
+a222 1
+  extern void *_bsp_addr_table[];
+d234 13
+a246 11
+          infoptr      = (_BSPcombinfo*) buff_addr;
+          buff_addr   += sizeof(_BSPcombinfo);
+          smash   = infoptr->addr_table_smash_nbytes;
+          nbytes  = (smash >> 16);
+          memcpy(((char*)_bsp_addr_table[0xffff & smash])+infoptr->offset,
+                 buff_addr,
+                 nbytes);
+
+          if (nbytes % sizeof(_BSPcombinfo)) {
+            buff_addr += nbytes + 
+                         sizeof(_BSPcombinfo)-(nbytes%sizeof(_BSPcombinfo));
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d17 5
+a21 2
+% $Id$
+% $Log$
+d25 2
+d29 2
+d43 3
+a45 6
+_BSPcombinfo  **_bspcombstore_queue;
+_BSPcombinfo   *_bspcombstore_queue_in; /* Flattened matrix for */
+					 /* incoming messages    */
+int    _bspcombstore_queue_maxsize;
+int    _bspcombstore_region_size;
+int    _bspcombstore_half_size;
+d49 10
+a58 4
+int  **_bspcombstore_queue_next;         
+int   *_bspcombstore_queue_nbytes_to_go;
+char **_bspcombstore_buffer_next;
+int    _bspcombstore_doing_flush;
+d60 1
+a60 2
+int  addr_table_store_queue_in;
+int  addr_table_scratch_buffer;
+a67 1
+  int i;
+d70 1
+a70 3
+  _bspcombstore_region_size  = BSP_BUFFER_SIZE/(2*_bsp_nprocs);
+  if (_bspcombstore_region_size>65536)
+    _bspcombstore_region_size  = 65536;
+d73 7
+a79 27
+  _bspcombstore_region_size -=_bspcombstore_region_size % sizeof(void*);
+  _bspcombstore_half_size    = _bspcombstore_region_size*_bsp_nprocs;
+ 
+  /* The queue will be either be the size requested by the user, or */
+  /* truncated to the scratch buffer size if the requested size is a */
+  /* little to large */
+
+  _bspcombstore_queue_maxsize = BSP_BUFFER_SIZE/(sizeof(_BSPcombinfo));
+  if (BSP_OPT_FCOMBINE_STORES<=_bspcombstore_queue_maxsize)
+    _bspcombstore_queue_maxsize = BSP_OPT_FCOMBINE_STORES;
+  if (_bspcombstore_queue_maxsize>65536)
+    _bspcombstore_queue_maxsize = 65536;
+      
+                                
+#ifdef DEBUG
+  bsp_debug("{bspcombstores_init} queue=%d elements",
+          _bspcombstore_queue_maxsize);
+#endif
+  _bspcombstore_queue = calloc(_bsp_nprocs,sizeof(_BSPcombinfo*));
+  if (_bspcombstore_queue==NULL) 
+    bsp_error("{bspcombstores_init} unable to allocate table");
+
+  for(i=0;i<_bsp_nprocs;i++) {
+    _bspcombstore_queue[i]=calloc(_bspcombstore_queue_maxsize,
+                                  sizeof(_BSPcombinfo));
+    if (_bspcombstore_queue[i]==NULL)
+      bsp_error("{bspcombstores_init} unable to allocate table");
+d81 1
+a81 18
+
+  _bspcombstore_queue_next = calloc(_bsp_nprocs,sizeof(int*));
+  if (_bspcombstore_queue_next==NULL)
+    bsp_error("{bspcombstores_init} unable to allocate table");
+
+  _bspcombstore_queue_nbytes_to_go = calloc(_bsp_nprocs,sizeof(int));
+  if (_bspcombstore_queue_nbytes_to_go==NULL)
+    bsp_error("{bspcombstores_init} unable to allocate table");
+
+  _bspcombstore_buffer_next = calloc(_bsp_nprocs,sizeof(char*));
+  if (_bspcombstore_buffer_next==NULL)
+    bsp_error("{bspcombstores_init} unable to allocate table");
+
+  _bspcombstore_queue_in = calloc(_bsp_nprocs*_bspcombstore_queue_maxsize,
+                                  sizeof(_BSPcombinfo));
+  if (_bspcombstore_queue_in==NULL)
+    bsp_error("{bspcombstores_init} unable to allocate table");
+
+a83 2
+  addr_table_store_queue_in 
+    = bsp_addr_new_global(_bspcombstore_queue_in);
+d92 1
+a92 1
+  int i, *iptr;
+d95 21
+a115 11
+    _bspcombstore_queue_nbytes_to_go[i]
+      =_bspcombstore_region_size-sizeof(int)-sizeof(void*);
+    iptr  = (int*) _bsp_scratch_buffer;
+    iptr += (i*_bspcombstore_region_size)/sizeof(int);
+    _bspcombstore_queue_next[i] = iptr;
+    _bspcombstore_buffer_next[i]= (char*) (1+iptr); /* One integer on */
+    *(_bspcombstore_queue_next[i])= 0;
+    iptr  = (int*) _bsp_scratch_buffer;
+    iptr += ( _bspcombstore_half_size +
+             (i*_bspcombstore_region_size))/sizeof(int);
+    *iptr = 0;
+a116 1
+  _bspcombstore_doing_flush=0;
+d125 21
+a145 21
+			 int offset,int inbytes){
+  unsigned int nbytes;
+  char         *ptr1;
+  _BSPcombinfo *ptr2;
+  int          *ptr;
+
+  ptr = _bspcombstore_queue_next[pid];
+  if ((_bspcombstore_queue_nbytes_to_go[pid]>inbytes) &&
+      (*ptr < _bspcombstore_queue_maxsize)            &&
+      (!_bspcombstore_doing_flush)) {
+    ptr1   = _bspcombstore_buffer_next[pid];
+    memcpy(ptr1,src,inbytes);
+    nbytes = inbytes;
+    nbytes = nbytes % sizeof(void*);
+    if (nbytes) nbytes = inbytes + sizeof(void*)-nbytes;
+    _bspcombstore_queue_nbytes_to_go[pid] -=nbytes;
+    ptr1 +=nbytes;
+
+    ptr2 = &_bspcombstore_queue[pid][(*ptr)++];
+    ptr2->addr_table_smash_nbytes = dst_addr | (inbytes << 16);
+    ptr2->offset                  = offset;
+d159 1
+a159 3
+  int smash;
+
+  _bspcombstore_doing_flush = 1;
+d162 3
+a164 1
+    if        (*(_bspcombstore_queue_next[i])==0) {
+d168 1
+a168 1
+    } else if (*(_bspcombstore_queue_next[i])==1) {
+d173 9
+a181 7
+     
+      smash  = _bspcombstore_queue[i][0].addr_table_smash_nbytes;
+      bsp_addr_store(i,(char*)_bsp_scratch_buffer+sizeof(int)+
+                              (i*_bspcombstore_region_size),
+                     0xffff & smash,
+                     _bspcombstore_queue[i][0].offset,
+                     smash >> 16);
+d186 2
+d191 10
+a200 7
+                *(_bspcombstore_queue_next[i]),i);
+#endif
+      bsp_addr_store(i,(char*)_bsp_scratch_buffer+
+                              (i*_bspcombstore_region_size),
+                     addr_table_scratch_buffer, /* writing into top-half */
+                     _bsp_pid*_bspcombstore_region_size,
+                     _bspcombstore_region_size-
+a201 5
+
+      bsp_addr_store(i,_bspcombstore_queue[i],
+                     addr_table_store_queue_in,
+                     _bsp_pid*_bspcombstore_queue_maxsize*sizeof(_BSPcombinfo),
+                     *(_bspcombstore_queue_next[i])*sizeof(_BSPcombinfo));
+d203 1
+a203 1
+      _bspstat.combstore_hits += *(_bspcombstore_queue_next[i]);
+d213 3
+d217 4
+a220 2
+  int i,k, no_stores,nbytes_offset,smash,nbytes,*iptr;
+  _BSPcombinfo *ptr;
+d223 3
+a225 4
+    iptr = (int*) _bsp_scratch_buffer;
+    iptr+= ( _bspcombstore_half_size +
+             (i*_bspcombstore_region_size))/sizeof(int);
+    no_stores = *iptr;
+d227 2
+a228 2
+  bsp_debug("{bspcombstores_finalise} dealing with %d stores from %d",
+            no_stores,i);
+d230 17
+a246 12
+    if (no_stores>0) {
+      nbytes_offset =  _bspcombstore_half_size+ sizeof(int) +
+                      (i*_bspcombstore_region_size);
+      ptr = &_bspcombstore_queue_in[i*_bspcombstore_queue_maxsize];
+      for (k=0;k<no_stores;k++) {
+        smash   = ptr[k].addr_table_smash_nbytes;
+        nbytes  = (smash >> 16);
+        memcpy(bsp_addr_get(0xffff & smash)+ptr[k].offset,
+               _bsp_scratch_buffer+nbytes_offset,nbytes);
+        nbytes += (nbytes%sizeof(void*))?
+                  (sizeof(void*)-(nbytes%sizeof(void*))):0;  
+        nbytes_offset += nbytes;
+d251 1
+@

@@ -1,0 +1,210 @@
+% $Id: sample.lc,v 1.1 1997/07/11 10:29:00 jonh Exp $
+% $Log: sample.lc,v $
+% Revision 1.1  1997/07/11 10:29:00  jonh
+% Initial revision
+%
+
+\begin{code}
+#include <stdlib.h>
+#include <stdio.h>
+
+#include "bspudpl.h"
+#define BSPTCP_BUFF_LEN        200  /* Temporary buffer space */
+extern int bspudp_slot_size_usecs;
+char alpha[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+void main(int argc, char *argv[])
+   {
+   int i, j;
+   int mypid;
+   char *env;
+   char buf[BSPTCP_BUFF_LEN];
+   int buflen;
+   int nprocs;
+   int rprocs;
+   char *nullptr = NULL;
+   int size;
+   int trials;
+   int exps;
+   int from;
+   int type;
+   int nbytes;
+   int set_size = 1000;
+   int set_nbuffs = 1000;
+
+   if (argc > 1)
+      {
+      sscanf(argv[1],"%d",&rprocs);
+      printf("\nNumber of processes requested = %d\n",rprocs); fflush(stdout);
+      }
+
+   bspudp_set_buffer_size(&set_size,&set_nbuffs,1200);
+   bspudp_env(rprocs,"/home/sd/BSP/src/library_udpip/sample");
+
+   bspudp_init(&nprocs);
+   bspudp_slot_size_usecs = 0;
+
+   if (nprocs < 2)
+      {
+      fprintf(stderr,"Expected procs not initialised (%d is too few).\n",
+              nprocs); fflush(stdout);
+      bspudp_messg_exit(-1);
+      }
+
+   printf("The sample program has started.\n"); fflush(stdout);
+
+   env = getenv("BSPTCP_PID");
+   if (env)
+      sscanf(env,"%d",&mypid);
+   else
+      mypid = 0;
+
+   /*
+    * Get the size of the message from the user and broadcast to all 
+    * patricipating processes:
+    */
+
+   if (!mypid)
+      {
+      printf("Size of message: "); fflush(stdout);
+      scanf("%d",&size);
+      printf("\nMessage size is %d\n",size); fflush(stdout);
+      for (i = 1; i < nprocs; i++)
+         while (!bspudp_nonblock_send((char *)&size,sizeof(size),i,1,1));
+      }
+   else
+      {
+      from = -1;
+      type = 1;         
+      bspudp_probe(&from,&type,1,0);
+      bspudp_block_recv((char *)&size,sizeof(size),&from,&type,&nbytes);
+      if (type == 1)
+         {
+         printf("Pid %d received size of %d from pid %d\n",
+            mypid,size,from); fflush(stdout);
+         }
+      else
+         {
+         printf("Size of message type not received.\n"); fflush(stdout);
+         bspudp_messg_stopall();
+         }
+      }
+     
+   /*
+    * Get the number of trials to run and broadcast to all the other
+    * participating processes:
+    */ 
+
+   if (!mypid)
+      {
+      printf("Number of trials: "); fflush(stdout);
+      scanf("%d",&trials);
+      printf("\nNumber of trials is %d\n",trials); fflush(stdout);
+      for (i = 1; i < nprocs; i++)
+         while(!bspudp_nonblock_send((char *)&trials,sizeof(trials),i,2,1));
+      }
+   else
+      {
+      from = -1;
+      type = 2;         
+      bspudp_probe(&from,&type,1,0);
+      bspudp_block_recv((char *)&trials,sizeof(trials),&from,&type,&nbytes);
+      if (type == 2)
+         {
+         printf("Pid %d received number of trials = %d from pid %d\n",
+            mypid,trials,from); fflush(stdout);
+         }
+      else
+         {
+         printf("Number of trials message type not received.\n"); 
+         fflush(stdout);
+         bspudp_messg_stopall();
+         }
+      }
+
+   /*
+    * Run the trials of experiments:
+    */
+
+   for(exps = 0; exps < 10; exps++)
+      {
+      for (j = 0; j < trials; j++)
+         {
+         memset(buf,'Z',size);
+         while (!bspudp_nonblock_send(buf,size,(mypid+1)%nprocs,
+            20+exps*10+j,1));
+         memset(buf,0,sizeof(buf));
+      
+      
+         from = (mypid-1+nprocs)%nprocs;
+         type = 20+exps*10+j;
+         bspudp_probe(&from,&type,1,0);
+         printf("Type=%d(%d) should come from %d\n",type,20+exps*10+j,from);
+         bspudp_block_recv(buf,size,&from,&type,&buflen);
+         buf[buflen] = 0;
+         printf("BSP-A pid %d received from pid %d(%d) : %s\n",
+            mypid,from,type,buf); 
+         fflush(stdout);
+         if (buflen != size)
+            {
+            printf("Expected %d, but received %d.\n",size,buflen);
+            fflush(stdout);
+            }
+         } 
+
+      memset(buf,alpha[(exps+j)%26],size);
+      if (mypid != 0) 
+         {
+         while(!bspudp_nonblock_send(buf,strlen(buf),0,200+exps,1));
+         }
+      else
+         {
+         for (i = 1; i < nprocs; i++)
+            {
+            from = -1;
+            type = 200+exps;
+            bspudp_probe(&from,&type,1,0);
+            bspudp_block_recv(buf,sizeof(buf),&from,&type,&buflen);
+            buf[buflen] = 0;
+            printf("BSP-B pid %d received from pid %d(%d) : %s\n",
+               mypid,from,type,buf); 
+            fflush(stdout);
+            }
+         }
+
+      /*
+       * All the processes now ``synchronise'':
+       */
+   
+      if (mypid)
+         {
+         buf[0] = 'X';
+         while (!bspudp_nonblock_send(buf,1,0,3,1));
+         from = 0;
+         type = 4;         
+         bspudp_block_recv(buf,1,&from,&type,&nbytes);
+         }
+      else
+         {
+         for (j = 0; j < nprocs-1; j++)
+            {
+            from = -1;
+            type = 3;         
+            bspudp_probe(&from,&type,1,0);
+            bspudp_block_recv(buf,1,&from,&type,&nbytes);
+            }
+         for (j = 1; j < nprocs; j++)
+            while (!bspudp_nonblock_send(buf,1,j,4,1));
+         }
+      bspudp_wait_sends();
+      }
+
+  /*
+   * Shutdown:
+   */ 
+   if (mypid)
+      bspudp_messg_exit(0);
+   else
+      exit(0);   
+   }
+\end{code}

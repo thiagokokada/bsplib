@@ -1,0 +1,175 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1997, 1998 Stephen Donaldson                       %%
+%%                      &  The University of Oxford                      %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it into other software, is hereby granted          %%
+%% without fee, provided that                                            %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+#include <sys/time.h>
+
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <sys/stat.h>
+#include <sys/fcntl.h>
+
+#include "../library_shared/bsp_types.h"
+#include "bspdev.h"
+
+\end{code}
+
+%%%%%%%%%
+\section{Format BSP control device data (bsp_dev) from /proc/bspdata}
+%%%%%%%%%
+
+\begin{code}
+void main(int argc, char *argv[])
+   { 
+   int i;
+   char cls[]="\033[H\033[2J";
+   bspdev_t dev;
+   char errbuf[200];
+   int fd;
+   time_t rep_time;
+   int parm_err = 0;
+   int rep = 0;
+
+   for (i = 1; i < argc; i++) 
+      switch (argv[i][0])
+         {
+         case 'r':
+         case 'R':
+            if (sscanf(argv[i]+1,"%d",&rep) != 1)
+               parm_err = i;
+            break;
+         default: 
+            parm_err = i;
+         }
+   
+   if (parm_err)
+      {  
+      fprintf(stderr,"BSP/Eth %s: invalid option: %s\n",argv[0],argv[parm_err]);
+      exit(1);
+      }
+
+   do {
+      fd = open("/proc/bspdata",O_RDONLY);
+      if (fd < 0)
+         {
+         sprintf(errbuf,"BSP/Eth %s: Error opening /dev/bspdata",
+            argv[0]);
+         perror(errbuf);
+         exit(1);
+         }
+
+      memset(&dev,0,sizeof(dev));
+      if (read(fd,&dev,sizeof(dev)) != sizeof(dev) && 0)
+         {
+         fprintf(stderr,"BSP/Eth %s: Error reading /dev/bspdata\n",
+            argv[0]);
+         close(fd);
+         exit(1);
+         }
+      
+      close(fd);
+   
+      printf("%s ---------------- Device Identification ------------------\n",
+	     cls);
+      printf(" BSP device: %s, major = %d, minor = %d, %s",
+         dev.name,dev.major,dev.minor,(time(&rep_time),ctime(&rep_time)));
+   
+      printf("\n ------------------- Storage Usage -----------------------\n");
+      printf( 
+         " Virtual: start = %08x, end = %08x, next = %08x, allocated = %d.\n",
+         dev.buff_start,dev.buff_last,dev.buff_next,dev.buff_alloced); 
+   
+      printf( 
+         " Physical: start = %08x, end = %08x, vmas = %d, pfaults = %u.\n",
+         dev.phys_start,dev.phys_last,dev.vmas,dev.page_faults); 
+   
+      printf("\n ------------ Application Usage and Parameters -----------\n");
+      printf( " User: opens = %u, closes = %u, "
+         "ready = %d, ioctls = %u.\n",
+         dev.user_opens,dev.user_closes,dev.ready,dev.user_ioctls);
+   
+      printf( 
+         " Parameters: num procs = %u, buff size = %u, num buffs = %u.\n",
+         dev.parms.nprocs,dev.parms.buff_size,dev.parms.buff_count);
+
+#if BSPETH_STATS >= 2   
+      printf("\n ------------------ BSPlib Statistics --------------------\n");
+      printf( " BSPlib: sends = %u, recvs = %u, interrupts = %u\n",
+	      dev.nic_sends,dev.nic_recvs,dev.eth_inter);
+      printf( "         send fails = %u expedited sends = %u\n",
+	      dev.send_fails,dev.nic_exsends);
+      printf( "         packet errors = %u, starvation errors = %u\n",
+	     dev.eth_errors,dev.eth_starved);
+#endif
+
+#if BSPETH_STATS >= 3
+      printf( "         minimum pkt recv time  = %d usecs\n",
+	      dev.min_recv_usecs);
+      printf( "         average pkt recv time  = %.2f usecs\n",
+	      (!dev.sio_packets?0.0:
+	        (double)dev.sum_recv_usecs/(double)dev.sio_packets));
+      printf( "         maximum pkt recv time  = %d usecs\n",
+	      dev.max_recv_usecs);
+#endif
+   
+#if BSPETH_STATS >= 1   
+      printf("\n ---------- Accumulated NIC Transmit Statistics ----------\n");
+      printf(" Kbytes transmitted OK        : %.1f k\n",(double)dev.BytesXmittedOk/1024.0);
+      printf(" Frames transmitted OK        : %u\n",dev.FramesXmittedOk);
+      printf(" Average frame size           : %u bytes\n",
+	     (!dev.FramesXmittedOk)?0:dev.BytesXmittedOk/dev.FramesXmittedOk);
+       printf(" Carrier lost on frame        : %u\n",dev.CarrierLost);
+      printf(" Frame transmit deferred      : %u\n",dev.FramesDeferred);
+      printf(" Late collisions detected     : %u\n",dev.LateCollisions);
+      printf(" Multiple collisions detected : %u\n",dev.MultiCollisions);
+      printf(" Single collisions detected   : %u\n",dev.SingleCollisions);
+      printf(" SQE pulses missing           : %u\n",dev.SqeErrors);
+   
+      printf("\n ---------- Accumulated NIC Receive Statistics -----------\n");
+      printf(" Kbytes received OK           : %.1f k\n",(double)dev.BytesRcvdOk/1024.0);
+      printf(" Frames received OK           : %u\n",dev.FramesRcvdOk);
+      printf(" Average frame size           : %u bytes\n",
+	     (!dev.FramesRcvdOk)?0:dev.BytesRcvdOk/dev.FramesRcvdOk);
+      printf(" Receive overruns             : %u\n",dev.RxOverruns);
+      printf(" Bad SSD frames               : %u\n",dev.BadSSD);
+
+      printf("\n -------------------- NIC Diagnostics --------------------\n");
+      printf(" Fifo diagnostic              : 0x%04hx\n",dev.FifoDiagnostic); 
+      printf(" Network diagnostic           : 0x%04hx\n",
+             dev.NetworkDiagnostic); 
+      printf(" Bus Mastering Status         : 0x%08x\n",dev.nic_dmactrl); 
+      printf(" Down poll                    : %.2f usecs\n"
+             " Up poll                      : %.2f usecs\n",
+             ((double)dev.nic_dnpoll)*0.32, ((double) dev.nic_uppoll)*0.32);
+
+      printf("\n ---------------------------------------------------------\n");
+      fflush(stdout);
+#endif
+
+      if (rep) sleep(rep);
+      } while(rep);
+       
+   exit(0);
+   } /* main */
+\end{code}

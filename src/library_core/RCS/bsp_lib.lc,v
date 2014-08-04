@@ -1,0 +1,1301 @@
+head	1.4;
+access;
+symbols;
+locks
+	jonh:1.4; strict;
+comment	@% @;
+
+
+1.4
+date	95.08.09.12.51.32;	author jonh;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	95.08.06.17.16.32;	author jonh;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	95.08.03.08.10.27;	author jonh;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	95.08.02.11.00.17;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.4
+log
+@Fixed bug with locking on fetch and store
+@
+text
+@%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+% $Id: bsp_lib.lc,v 1.3 1995/08/06 17:16:32 jonh Exp jonh $ 
+% $Log: bsp_lib.lc,v $
+# Revision 1.3  1995/08/06  17:16:32  jonh
+# Changed BSP_BUFFER_SIZE so that it is initialised by bspfront
+#
+% Revision 1.2  1995/08/03  08:10:27  jonh
+% Changed sstep_end to use a different permute algorithm
+%
+% Revision 1.1  1995/08/02  11:00:17  jonh
+% Initial revision
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+\chapter{A BSP library using IRIX IPC} 
+\label{sect:bspirix}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Includes and defines}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#include "bsp_lib.h"
+#ifdef PROFILE
+#include <time.h>
+#endif
+
+void copyFilledBufferToDestination();
+int copySourceToBuffer(int);
+void dumpFifoCommTable();
+\end{code}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Shared global variables}
+\label{sect:bspirix:shmemglobals}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Global shared memory arena used in the SGI implementation of shared memory.
+\begin{code}
+usptr_t *sgi_shmem_arena;
+
+ulock_t debug_lock;
+ulock_t print_lock;
+
+_BSPinfo *_shmem;
+\end{code}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Per-process global variables}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+int _bsp_pid;         /* An indivduals process number   */
+
+int _bsp_insstep=0;
+int _bsp_sstepno;
+int _bsp_instart=0;
+
+void **_bsp_addr_table;
+int _bsp_addr_table_limit;
+\end{code}
+
+\begin{code}
+#ifdef PROFILE
+typedef struct {
+   int packet_stores_src;
+   int packet_stores_srcnbytes;
+   int packet_stores_dst;
+   int packet_stores_dstnbytes;
+   int buffer_high_water_mark;
+   int write_waits;
+   int empty_waits;
+ } _BSPprofinfo;
+
+_BSPprofinfo _bspprof;
+FILE *_bsp_profout;   /* Only defined on proc 0 */
+#endif
+\end{code} 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Initialise an individual processes global variables}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void initProcessGlobals() {
+   _bsp_addr_table= (void **) calloc(BSP_ADDR_TABLE_SIZE,
+		                     sizeof(void*));
+   if (_bsp_addr_table==NULL)
+      bsp_error("{calloc} unable to alloc per process addr table");
+
+   _bsp_addr_table_limit = BSP_ADDR_TABLE_SIZE-1;
+#ifdef PROFILE
+   _bspprof.packet_stores_src      =0;
+   _bspprof.packet_stores_dst      =0;
+   _bspprof.packet_stores_srcnbytes=0;
+   _bspprof.packet_stores_dstnbytes=0;
+   _bspprof.buffer_high_water_mark =0;
+   _bspprof.write_waits            =0;
+   _bspprof.empty_waits            =0;
+#endif
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Check the defines are correct}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Check to see that various restrictions on the conforms are true
+\begin{code}
+void checkDefines() {
+   if (BSP_BUFFER_SIZE % 4 != 0)
+      bottom("{BSP_BUFFER_SIZE} has to be divisable by 4.");
+#ifdef PROFILE
+   if (sizeof(_BSPprofinfo) > BSP_BUFFER_SIZE)
+      bottom("{BSP_BUFFER_SIZE=%d} has to be greater than %d bytes.\n"
+             "Recompile your code with the -bspbuffer option",
+             BSP_BUFFER_SIZE,sizeof(_BSPprofinfo));
+#endif
+   if (BSP_MAX_PROCS < 0)
+      bottom("{BSP_MAX_PROCS=%d} has to be positive",BSP_BUFFER_SIZE);
+
+   if (BSP_BUFFER_SIZE < (BSP_MAX_PROCS*sizeof(int)))
+      bottom("{BSP_BUFFER_SIZE=%d}: is too small. "
+             "It is required to be at least %d bytes for the\n"
+             "internal workings of the library.\n"
+             "Recompile your code with the -bspbuffer option",
+             BSP_BUFFER_SIZE,(BSP_MAX_PROCS*sizeof(int)));
+   if (BSP_COMM_FIFO_SIZE < 1)
+      bottom("{BSP_COMM_FIFO_SIZE} has to be greater than 1");
+}
+
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Starting a BSP process: \texttt{bsp\_start}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+void bsp_start(int maxprocs, int *nprocs, int *mypid) {
+  int i, fork_pid;
+  extern void _bsp_preload_init();
+  extern void kill_all_processors();
+  /* Procedure defined by the BSP compilation driver bspfront */
+  _bsp_preload_init();      
+
+  checkDefines();
+  if      (_bsp_instart) bottom("{bsp_start}: already started");
+  else if (maxprocs<0)   bottom("{bsp_start}: positive number required");
+  else if (maxprocs==0)            *nprocs = BSP_MAX_PROCS;
+  else if (maxprocs>BSP_MAX_PROCS) *nprocs = BSP_MAX_PROCS;
+  else                             *nprocs = maxprocs;
+  _bsp_instart=1;
+  *mypid   =0;
+  _bsp_pid =0;
+\end{code}
+
+Set various parameters for the IRIX arena:
+\begin{description}
+\item[\texttt{CONF\_ARENATYPE}] 
+	Make sure that other unrelated processes cannot join this arena. 
+
+\item[\texttt{CONF\_INITUSERS}] 
+	Allow upto \texttt{BSP\_MAX\_PROCS} processors to become active.
+
+\item[\texttt{CONF\_STHREADIOOFF}]
+	Turn off the single-threading of any stio routines. If I am
+        going to require single theading, then I will perform locking
+        myself.
+\item[\texttt{CONF\_INITSIZE}]
+	Set the size of the shared memory segment to be equal to the
+        size of the global variables defined in
+        \S\ref{sect:bspirix:shmemglobals}.
+
+\item[\texttt{CONF\_LOCKTYPE}]
+	Decide if we are going to perform debugging on locks. For the
+        time being we are just going for the fastest possible locking
+        mechanism.
+\end{description}
+\begin{code}
+  /* Let the arena grow to 20 times its natural size */
+  usconfig(CONF_INITSIZE,
+           2*(sizeof(int)        +
+              sizeof(barrier_t)  +
+              (sizeof(ulock_t))  +
+              ((*nprocs+1)*BSP_BUFFER_SIZE*sizeof(char)) +
+              (*nprocs*((sizeof(char*))     +
+                        (sizeof(ulock_t*))  +
+                        (sizeof(_BSPcomm_thunk*)) +
+                        (2*sizeof(ulock_t)) +
+		        (sizeof(usptr_t*)) +
+		        (sizeof(_BSPcomm_thunk)*(BSP_COMM_FIFO_SIZE+1))+
+		        (2*sizeof(int))))));
+
+  usconfig(CONF_INITUSERS, BSP_MAX_PROCS);
+  usconfig(CONF_ARENATYPE, US_SHAREDONLY);
+  usconfig(CONF_LOCKTYPE,US_NODEBUG); 
+#ifndef DEBUG
+  usconfig(CONF_STHREADIOON);
+  usconfig(CONF_STHREADMISCON); 
+#else
+  usconfig(CONF_STHREADIOOFF);
+  usconfig(CONF_STHREADMISCOFF); 
+#endif
+\end{code}
+
+Allocate a shared memory arena.
+\begin{code}
+  sgi_shmem_arena = usinit("/tmp/BSParena");
+  if (sgi_shmem_arena==NULL) 
+    bottom("{usinit} unable to alloc arena");
+\end{code}
+
+Create the shared memory table that contains all the BSP system info.
+\begin{code}
+  _shmem =(_BSPinfo *) usmalloc(sizeof(_BSPinfo),sgi_shmem_arena);
+  if (_shmem==NULL) 
+    bottom("{usmalloc}: unable to alloc shared memory segment");
+  _shmem->nprocs        = *nprocs;
+
+  _shmem->buffer
+    =(char *) uscalloc(BSP_BUFFER_SIZE,1,sgi_shmem_arena);
+  if (_shmem->buffer==NULL) 
+    bottom("{usmalloc}: unable to alloc buffer");
+ 
+  /* Table has to be max size so that bsp_newprocs works without */
+  /* reallocing */
+  _shmem->proc_buffer 
+    = (char **) uscalloc(*nprocs,sizeof(char*),sgi_shmem_arena);
+  if (_shmem->proc_buffer ==NULL) 
+    bottom("{usmalloc}: unable to alloc the per process buffer table");
+
+  for(i=0; i< *nprocs; i++) {
+    _shmem->proc_buffer[i]
+      =(char *) uscalloc(BSP_BUFFER_SIZE,1,sgi_shmem_arena);
+    if (_shmem->proc_buffer[i]==NULL) 
+      bottom("{usmalloc}: unable to alloc %d bytes for " 
+                "processor %d's buffer",BSP_BUFFER_SIZE,i);
+  }
+
+  _shmem->sync = new_barrier(sgi_shmem_arena);
+  if (_shmem->sync==NULL)  bottom("{new_barrier} unable to alloc barrier");
+  init_barrier(_shmem->sync);
+  
+  _shmem->lock = usnewlock(sgi_shmem_arena);
+  if (_shmem->lock==NULL)  bottom("{newlock} unable to alloc lock");
+
+  debug_lock = usnewlock(sgi_shmem_arena);
+  if (debug_lock==NULL)  bottom("{newlock} unable to alloc lock");
+  print_lock = usnewlock(sgi_shmem_arena);
+  if (print_lock==NULL)  bottom("{newlock} unable to alloc lock");
+
+  _shmem->proc_buffer_write
+    = (ulock_t *) uscalloc(*nprocs,sizeof(ulock_t),sgi_shmem_arena);
+  if (_shmem->proc_buffer_write ==NULL) 
+    bottom("{usmalloc}: unable to alloc per process locks");
+
+  for(i=0; i< *nprocs; i++) {
+    _shmem->proc_buffer_write[i]
+      =usnewlock(sgi_shmem_arena);
+    if (_shmem->proc_buffer_write[i]==NULL)
+      bottom("{usmalloc}: unable to alloc a per process lock");
+  }
+
+  _shmem->proc_buffer_wait
+    =(usptr_t**) uscalloc(*nprocs,sizeof(usptr_t*),sgi_shmem_arena);
+  if (_shmem->proc_buffer_wait==NULL) 
+    bottom("{uscalloc}: unable to alloc per process semaphore");
+
+  for(i=0; i< *nprocs; i++) {
+    _shmem->proc_buffer_wait[i]
+      =usnewsema(sgi_shmem_arena,0); /*Wait or sync semaphore */
+    if (_shmem->proc_buffer_wait[i]==NULL)
+      bottom("{usnewsema}: unable to alloc a per process semaphore");
+  } 
+
+  _shmem->proc_buffer_full
+    = (ulock_t *) uscalloc(*nprocs,sizeof(ulock_t),sgi_shmem_arena);
+  if (_shmem->proc_buffer_full ==NULL) 
+    bottom("{usmalloc}: unable to alloc per process locks");
+
+  for(i=0; i< *nprocs; i++) {
+    _shmem->proc_buffer_full[i]
+      =usnewlock(sgi_shmem_arena);
+    if (_shmem->proc_buffer_full[i]==NULL)
+      bottom("{usmalloc}: unable to alloc a per process lock");
+  }
+
+  _shmem->proc_buffer_info
+    = (_BSPcomm_thunk*) uscalloc(*nprocs,sizeof(_BSPcomm_thunk),
+				 sgi_shmem_arena);
+
+  _shmem->proc_comm_fifo
+    = (_BSPcomm_thunk**) uscalloc(*nprocs,sizeof(_BSPcomm_thunk*),
+				  sgi_shmem_arena);
+  for(i=0; i< *nprocs; i++) {
+    _shmem->proc_comm_fifo[i]
+      =(_BSPcomm_thunk*) uscalloc(BSP_COMM_FIFO_SIZE,sizeof(_BSPcomm_thunk),
+				  sgi_shmem_arena);
+    if (_shmem->proc_comm_fifo[i]==NULL)
+      bottom("{usmalloc}: unable to alloc a per process comm fifo");
+  }
+
+  _shmem->proc_comm_next
+    = (int *) uscalloc(*nprocs,sizeof(int),sgi_shmem_arena);
+  if (_shmem->proc_comm_next==NULL)
+      bottom("{usmalloc}: unable to alloc a per process comm next");
+  for(i=0; i< *nprocs; i++) _shmem->proc_comm_next[i]=0;
+
+  _shmem->stores_to_me
+    = (int *) uscalloc(*nprocs,sizeof(int),sgi_shmem_arena);
+  if (_shmem->stores_to_me==NULL)
+      bottom("{usmalloc}: unable to alloc a per process comm next");
+  for(i=0; i< *nprocs; i++) _shmem->stores_to_me[i]=0;
+\end{code}
+
+Squirrel away the address of the BSP info table in a special shared
+memory address so that other processes know exactly where it is.
+\begin{code}
+  usputinfo(sgi_shmem_arena,_shmem);
+\end{code}
+
+\begin{code}
+  schedctl(SCHEDMODE, SGS_GANG);
+  schedctl(NDPRI,NDPHIMAX);
+  signal(SIGTERM,kill_all_processors);
+  prctl(PR_SETEXITSIG, SIGTERM);
+\end{code}
+
+Fork off \texttt{nproc} processors. Make sure that each of them
+picks-up the address of the shared memory segment.
+\begin{code}
+#ifdef PROFILE
+  startProfileLog();
+#endif
+
+  for (i=1; i< *nprocs; i++) {
+    fork_pid = fork();
+    if      (fork_pid < 0) bottom("{fork}: unable to spawn process");
+    else if (fork_pid ==0) {
+      /* Yippee I'm a child process. Make sure that only the parent */
+      /* continues through the loop.                                */
+      *mypid   = i;
+      _bsp_pid = i;
+      break;
+    }
+  }
+  _shmem = usgetinfo(sgi_shmem_arena);
+  initProcessGlobals();
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Finishing a BSP process: \texttt{bsp\_finish}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+void bsp_finish() {
+#ifdef PROFILE
+  int           i=0;
+  _BSPprofinfo *prof;
+  int tot_stores_src=0, tot_stores_srcnbytes=0, tot_stores_dst=0,
+      tot_stores_dstnbytes=0,tot_write_waits=0,tot_empty_waits=0,
+      tot_hwm=0;
+#endif
+  barrier(_shmem->sync,_shmem->nprocs);
+#ifdef PROFILE
+  if (_bsp_pid==0) {
+     fprintf(_bsp_profout," Proc |"
+                          "            Communication          |"
+	                  "      Waits    | Buffer |\n");
+     fprintf(_bsp_profout,"      |"
+                          "pkt from| nbytes | pkt to | nbytes |"
+                          " write | empty | H.W.M  |\n"
+                          "------|"
+                          "--------+--------+--------+--------|"
+                          "-------+-------|--------|\n");
+  }
+  set_spinlock(_shmem->proc_buffer_write[_bsp_pid]);
+  memcpy(_shmem->proc_buffer[_bsp_pid], &_bspprof,sizeof(_BSPprofinfo));
+  unset_spinlock(_shmem->proc_buffer_write[_bsp_pid]);
+
+  /* Make sure that a process doesnt run ahead and set the i^th lock, */
+  /* before processor i at least starts writing. */
+  barrier(_shmem->sync,_shmem->nprocs);
+  for (i=0; i<_shmem->nprocs; i++) {
+    if (_bsp_pid==0) {   
+      prof = (_BSPprofinfo *) _shmem->proc_buffer[i];
+      fprintf(_bsp_profout,"%5d |%7d |%7d |%7d |%7d |%6d |%6d |%7d |\n",i,
+              prof->packet_stores_src,
+              prof->packet_stores_srcnbytes,
+              prof->packet_stores_dst,
+              prof->packet_stores_dstnbytes,
+              prof->write_waits,
+              prof->empty_waits,
+              prof->buffer_high_water_mark);
+      tot_stores_src       +=prof->packet_stores_src;
+      tot_stores_srcnbytes +=prof->packet_stores_srcnbytes;
+      tot_stores_dst       +=prof->packet_stores_dst;
+      tot_stores_dstnbytes +=prof->packet_stores_dstnbytes;
+      tot_write_waits      +=prof->write_waits;
+      tot_empty_waits      +=prof->empty_waits;
+      if (tot_hwm < prof->buffer_high_water_mark) 
+         tot_hwm = prof->buffer_high_water_mark;
+     }
+  }
+  if (_bsp_pid==0) {
+    fprintf(_bsp_profout,"======|========+========+========+========+======="
+                         "+=======+========|\n");
+    fprintf(_bsp_profout,"Total |%7d |%7d |%7d |%7d |%6d |%6d |%7d |\n",
+            tot_stores_src, 
+            tot_stores_srcnbytes,
+            tot_stores_dst,
+            tot_stores_dstnbytes,
+            tot_write_waits,
+            tot_empty_waits,
+            tot_hwm);
+  
+    fclose(_bsp_profout);
+  }
+#endif
+  if (_bsp_pid > 0) exit(0);
+  /* Only process zero should get here */ 
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\texttt{bsp\_sstep}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_sstep(int sstepno) {
+  if (_bsp_insstep) bsp_error("{bsp_sstep} Cannot have nested super-steps");
+  _bsp_sstepno = sstepno;
+  _bsp_insstep = 1;
+  
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\texttt{bsp\_sstep\_end}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+void bsp_sstep_end(int stepno) {
+  int next_store;
+  int stores_to_other;
+  int pid_copy_to;
+
+  if      (!_bsp_insstep) 
+    bsp_error("{bsp_sstep_end} Not started a super-step");
+  else if (_bsp_sstepno != stepno) 
+    bsp_error("{bsp_sstep_end} Super steps do not match\n"
+	      "Opening is numbered %d, "
+              "whilst closing is numbered %d",_bsp_sstepno,stepno);
+  else {
+    /* Need to perform a synchronise to ensure that all communication */
+    /* thunks have been written */
+    barrier(_shmem->sync,_shmem->nprocs);
+#ifdef DEBUG
+    dumpFifoCommTable(stepno);
+#endif
+\end{code}
+
+Perform all stores on the thunks kept in the FIFO.
+\begin{code}
+    stores_to_other = _shmem->proc_comm_next[_bsp_pid];
+    next_store      =0;
+    while ((_shmem->stores_to_me[_bsp_pid] > 0) ||
+           (stores_to_other > 0)) {
+      if (ustestlock(_shmem->proc_buffer_write[_bsp_pid])) {
+#ifdef PROFILE
+        if (ustestsema(_shmem->proc_buffer_wait[_bsp_pid])==0)
+          _bspprof.write_waits++;
+#endif
+        /* Someone is writing into my buffer. Wait until they */
+        /* have finished writing by sleeping on the semaphore */
+        uspsema(_shmem->proc_buffer_wait[_bsp_pid]);
+        copyFilledBufferToDestination();
+        unset_spinlock(_shmem->proc_buffer_write[_bsp_pid]);
+      } 
+      else if (stores_to_other > 0) {
+        /* My buffer is empty and I have something to send. Send the */
+	/* information to the processor where the store is required. */
+        pid_copy_to = copySourceToBuffer(next_store);
+        stores_to_other--;
+        next_store++;
+        /* Wake-up any process waiting on this semaphore */
+        usvsema(_shmem->proc_buffer_wait[pid_copy_to]);
+      } else {
+        /* I have nothing else to send, but I am waiting for someone */
+	/* to put something into my buffer. Wait until the buffer is */
+        /* full and then copy it into the destination                */
+#ifdef DEBUG
+        bsp_debug("{sstep_end}:Nothing to send, so someone fill my buffer");
+#endif
+#ifdef PROFILE
+        _bspprof.empty_waits++;
+#endif
+        uspsema(_shmem->proc_buffer_wait[_bsp_pid]);
+        copyFilledBufferToDestination();
+        unset_spinlock(_shmem->proc_buffer_write[_bsp_pid]);
+      }
+    }
+#ifdef DEBUG
+    bsp_debug("{sstep_end}:Finished communication");
+#endif
+    _shmem->proc_comm_next[_bsp_pid]=0;
+    /* I'm not quite sure if I need this barrier. I can do without the */
+    /* following barrier if I know that there are no fetches in the    */
+    /* next super-step. Maybe programs could be special cased          */
+    /* the processes run on after communication,                       */
+    barrier(_shmem->sync,_shmem->nprocs);
+  }
+  _bsp_insstep=0;   
+}
+\end{code}
+
+\begin{code}
+void copyFilledBufferToDestination() {
+#ifdef DEBUG
+  bsp_debug("{sstep_end}:Buffer is full. Perform copy to memory");
+#endif
+  if (COMM_IS_STORE(_shmem->proc_buffer_info[_bsp_pid].comm_pid)) {
+    memcpy(((char *) _bsp_addr_table[
+                       _shmem->proc_buffer_info[_bsp_pid].addr_table] + 
+                    _shmem->proc_buffer_info[_bsp_pid].offset),
+           _shmem->proc_buffer[_bsp_pid],
+           _shmem->proc_buffer_info[_bsp_pid].nbytes);
+  } else {
+    memcpy((char *)_shmem->proc_buffer_info[_bsp_pid].addr_real,
+           (char *)_shmem->proc_buffer[_bsp_pid],
+           _shmem->proc_buffer_info[_bsp_pid].nbytes);
+  }
+  _shmem->stores_to_me[_bsp_pid]--;
+#ifdef PROFILE
+  _bspprof.packet_stores_dst++;
+  _bspprof.packet_stores_dstnbytes += 
+  _shmem->proc_buffer_info[_bsp_pid].nbytes;
+#endif
+}
+
+int copySourceToBuffer(int next_store) {
+  _BSPcomm_thunk *to_send;
+  int store_pid;
+
+  to_send   = &_shmem->proc_comm_fifo[_bsp_pid][next_store];
+  store_pid = COMM_GET_PID(to_send->comm_pid);
+#ifdef DEBUG
+  bsp_debug("{sstep_end}:My buffer is empty and "
+            "I have something to send to %d",store_pid);
+#endif
+  set_spinlock(_shmem->proc_buffer_write[store_pid]);
+  if (COMM_IS_STORE(to_send->comm_pid)) {
+    memcpy(_shmem->proc_buffer[store_pid],
+           (char *) to_send->addr_real,
+           to_send->nbytes);
+  } else {
+    memcpy((char *)_shmem->proc_buffer[store_pid],
+           (char *)_bsp_addr_table[to_send->addr_table] + to_send->offset,
+           to_send->nbytes);
+  }
+
+  _shmem->proc_buffer_info[store_pid].comm_pid  = to_send->comm_pid;
+  _shmem->proc_buffer_info[store_pid].addr_real = to_send->addr_real;
+  _shmem->proc_buffer_info[store_pid].addr_table=to_send->addr_table;
+  _shmem->proc_buffer_info[store_pid].offset    = to_send->offset;
+  _shmem->proc_buffer_info[store_pid].nbytes    = to_send->nbytes;
+#ifdef PROFILE
+  _bspprof.packet_stores_src++;
+  _bspprof.packet_stores_srcnbytes += to_send->nbytes;
+#endif
+  return(store_pid);
+}
+
+void dumpFifoCommTable(int stepno) {
+#ifdef DEBUG
+  int i;
+  bsp_debug_start("bsp_sstep_end");
+  bsp_debug_block("Super-step %d on pid %d: fifo size=%d: (%d stores to me)",
+	          stepno,_bsp_pid,_shmem->proc_comm_next[_bsp_pid],
+                  _shmem->stores_to_me[_bsp_pid]);
+  bsp_debug_block("%5s | %8s |%8s |%8s | %6s",
+                  "Type","With pid","Source","Dest.","Nbytes");
+  bsp_debug_block("---------------------------------------------------");
+  for(i=0;i<_shmem->proc_comm_next[_bsp_pid];i++) 
+    if (COMM_IS_STORE(_shmem->proc_comm_fifo[_bsp_pid][i].comm_pid))
+       bsp_debug_block("%5s | %8d |%8x |%2d[%4d] |%6d",
+	         "store",
+	         COMM_GET_PID(_shmem->proc_comm_fifo[_bsp_pid][i].comm_pid),
+                 _shmem->proc_comm_fifo[_bsp_pid][i].addr_real,
+                 _shmem->proc_comm_fifo[_bsp_pid][i].addr_table,
+                 _shmem->proc_comm_fifo[_bsp_pid][i].offset,
+                 _shmem->proc_comm_fifo[_bsp_pid][i].nbytes);
+    else
+       bsp_debug_block("%5s | %8d |%2d[%4d] |%8x |%6d",
+	         "fetch",
+		 COMM_GET_PID(_shmem->proc_comm_fifo[_bsp_pid][i].comm_pid),
+                  _shmem->proc_comm_fifo[_bsp_pid][i].addr_table,
+                  _shmem->proc_comm_fifo[_bsp_pid][i].offset,
+                  _shmem->proc_comm_fifo[_bsp_pid][i].addr_real,
+                  _shmem->proc_comm_fifo[_bsp_pid][i].nbytes);
+   bsp_debug_end("bsp_sstep_end");
+#endif
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\texttt{bsp\_addr}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_addr(int offset, void *addr) {
+#ifdef SANITY_CHECK
+    if (offset > _bsp_addr_table_limit)
+      bsp_error("{bsp_sstep}: internal table overflow");
+#endif
+
+   _bsp_addr_table[offset] = addr;   
+
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\texttt{bsp\_fetch}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void _bsp_fetch(int pid, int src_addr, int offset, void *dst, int nbytes) {
+  int             togo_nbytes  = nbytes;
+  int             chunk_nbytes;
+  void           *chunk_dst    = dst;
+  int             chunk_offset = offset;
+  _BSPcomm_thunk *comm_thunk;
+
+  
+#ifdef SANITY_CHECK
+    if (pid < 0 || pid >= _shmem->nprocs) 
+      bsp_error("{bsp_fetch}: processor %d is trying to fetch "
+                "from no-existant processor %d.",_bsp_pid,pid);
+#endif
+
+  if (pid == _bsp_pid) {
+    memcpy((char *)dst,((char*)_bsp_addr_table[src_addr] + offset),nbytes); 
+  } else {
+#ifdef PROFILE
+  if (_bspprof.buffer_high_water_mark < nbytes)
+    _bspprof.buffer_high_water_mark = nbytes;      
+#endif
+    while (togo_nbytes>0) {
+      if (togo_nbytes > BSP_BUFFER_SIZE) {
+        togo_nbytes -= BSP_BUFFER_SIZE;
+        chunk_nbytes = BSP_BUFFER_SIZE;
+      } else {
+        chunk_nbytes = togo_nbytes;
+        togo_nbytes  = 0;
+      }
+       
+      set_spinlock(_shmem->proc_buffer_write[pid]);
+      comm_thunk=&_shmem->proc_comm_fifo[pid][_shmem->proc_comm_next[pid]];
+      comm_thunk->comm_pid   = COMM_SET_FETCH(_bsp_pid);
+      comm_thunk->addr_table = src_addr;
+      comm_thunk->offset     = chunk_offset;
+      comm_thunk->addr_real  = chunk_dst;
+      comm_thunk->nbytes     = chunk_nbytes;
+      _shmem->proc_comm_next[pid]++;
+      unset_spinlock(_shmem->proc_buffer_write[pid]);
+ 
+      if (_shmem->proc_comm_next[pid] >= BSP_COMM_FIFO_SIZE)
+        bsp_error("{bsp_fetch} internal buffer overflow. \n"
+                  "Recompile with -bspfifo=%d",
+                  10*BSP_COMM_FIFO_SIZE);
+      set_spinlock(_shmem->proc_buffer_write[_bsp_pid]);
+      _shmem->stores_to_me[_bsp_pid]++;
+      unset_spinlock(_shmem->proc_buffer_write[_bsp_pid]);
+    
+      chunk_offset += chunk_nbytes;
+      chunk_dst     = (char *)chunk_dst + chunk_nbytes;
+    }
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\texttt{bsp\_sstep\_store}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+The ordinary super-step communication mechanism is geared around
+having lots of communication operations being performed. This is an
+optimised routine which is equivalent to a super-step with a single
+store in it.
+
+\begin{code}
+void bsp_sstep_store(int pid, void *src, void *dst, int nbytes){
+  int i, tmp_pid;
+
+#ifdef SANITY_CHECK
+    if (pid < 0 || pid >= _shmem->nprocs) 
+      bsp_error("{bsp_store}: processor %d is trying to store "
+                "to no-existant processor %d.",_bsp_pid,pid);
+#endif
+
+  if (nbytes > BSP_BUFFER_SIZE) 
+     bsp_error("{bsp_store}: using optimised store. BSP_BUFFER_SIZE"
+               "has to be larger");
+  else {
+    barrier(_shmem->sync,_shmem->nprocs);
+
+    _shmem->proc_buffer_info[_bsp_pid].comm_pid = pid;
+    _shmem->proc_buffer_info[_bsp_pid].nbytes   = nbytes;
+    _shmem->proc_buffer_info[_bsp_pid].addr_real= dst;
+
+    /* Store the data that I am going to write into my buffer */
+#ifdef DEBUG
+    bsp_debug("{bsp_quickstore}: writing %d bytes from src "
+              "into my buffer so that process %d can pick it up",
+              nbytes,pid);
+#endif
+    memcpy((char*)_shmem->proc_buffer[_bsp_pid],
+           (char *) src,
+           nbytes);
+    barrier(_shmem->sync,_shmem->nprocs);
+   
+    /* Loop through each of the buffers to see if there is anything for me */
+    for(i=0; i<_shmem->nprocs; i++) {
+      tmp_pid    = _shmem->proc_buffer_info[i].comm_pid;
+      if (tmp_pid==_bsp_pid) {
+#ifdef DEBUG
+        bsp_debug("{bsp_quickstore}: copying %d bytes from %d's buffer",
+                  _shmem->buffer[(2*i)+1],i);
+#endif
+        memcpy((char *)_shmem->proc_buffer_info[_bsp_pid].addr_real,
+               (char*)_shmem->proc_buffer[i],
+               _shmem->proc_buffer_info[i].nbytes);
+      } else {
+#ifdef DEBUG
+        bsp_debug("{bsp_quickstore}: nothing from processor %d",i);
+#endif
+      }
+    }
+    barrier(_shmem->sync,_shmem->nprocs); 
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\texttt{bsp\_store}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void _bsp_store(int pid, void *src, int dst_addr, int offset, int nbytes) {
+  int             togo_nbytes  = nbytes;
+  int             chunk_nbytes;
+  void           *chunk_src    = src;
+  int             chunk_offset = offset;
+  _BSPcomm_thunk *comm_thunk;
+
+#ifdef SANITY_CHECK
+    if (pid < 0 || pid >= _shmem->nprocs) 
+      bsp_error("{bsp_store}: processor %d is trying to store "
+                "to no-existant processor %d.",_bsp_pid,pid);
+#endif
+
+  if (pid == _bsp_pid) {
+    memcpy(((char *)_bsp_addr_table[dst_addr] + offset),(char *)src,nbytes); 
+  } else {
+#ifdef PROFILE
+  if (_bspprof.buffer_high_water_mark < nbytes)
+    _bspprof.buffer_high_water_mark = nbytes;      
+#endif
+    while (togo_nbytes>0) {
+      if (togo_nbytes > BSP_BUFFER_SIZE) {
+         togo_nbytes -= BSP_BUFFER_SIZE;
+         chunk_nbytes = BSP_BUFFER_SIZE;
+      } else {
+         chunk_nbytes = togo_nbytes;
+         togo_nbytes  = 0;
+       
+      }
+      set_spinlock(_shmem->proc_buffer_write[_bsp_pid]);
+      comm_thunk=&_shmem->proc_comm_fifo[_bsp_pid]
+                                        [_shmem->proc_comm_next[_bsp_pid]];
+      comm_thunk->comm_pid   = COMM_SET_STORE(pid);
+      comm_thunk->addr_table = dst_addr;
+      comm_thunk->offset     = chunk_offset;
+      comm_thunk->addr_real  = chunk_src;
+      comm_thunk->nbytes     = chunk_nbytes;
+      _shmem->proc_comm_next[_bsp_pid] ++;
+      unset_spinlock(_shmem->proc_buffer_write[_bsp_pid]);
+ 
+      if (_shmem->proc_comm_next[_bsp_pid] >= BSP_COMM_FIFO_SIZE)
+        bsp_error("{bsp_fetch} internal buffer overflow. \n"
+                  "Recompile with -bspfifo=%d",
+                  10*BSP_COMM_FIFO_SIZE);
+      set_spinlock(_shmem->proc_buffer_write[pid]);
+      _shmem->stores_to_me[pid]++;
+      unset_spinlock(_shmem->proc_buffer_write[pid]);
+
+      chunk_offset += chunk_nbytes;
+      chunk_src     = ((char *)chunk_src) + chunk_nbytes;
+   }
+  }
+}
+\end{code}
+
+
+\begin{code}
+#ifdef PROFILE
+void startProfileLog() {
+  time_t clock;
+
+  _bsp_profout = fopen("STAT.bsp","w");
+  if (_bsp_profout==NULL) 
+    bottom("{bsp_start}: unable to open profiling file for writing");
+  
+  fprintf(_bsp_profout,"Profile created on: %s\n",
+          (time(&clock), ctime(&clock)));
+  fprintf(_bsp_profout,"\tNumber of processors      = %d\n",_shmem->nprocs);
+  fprintf(_bsp_profout,"\tShared memory buffer size = %d bytes per process\n",
+          BSP_BUFFER_SIZE);
+  fprintf(_bsp_profout,"\tCommunication FIFO table  = %d entries\n",
+          BSP_COMM_FIFO_SIZE);
+  fprintf(_bsp_profout,"\n\n");
+  fflush(_bsp_profout);
+}
+#endif
+\end{code}
+@
+
+
+1.3
+log
+@Changed BSP_BUFFER_SIZE so that it is initialised by bspfront
+@
+text
+@d2 1
+a2 1
+% $Id: bsp_lib.lc,v 1.2 1995/08/03 08:10:27 jonh Exp jonh $ 
+d4 3
+d55 1
+d85 1
+d135 1
+a135 1
+
+d173 14
+a186 10
+  usconfig(CONF_INITSIZE,2*(sizeof(_BSPinfo)   + 
+                            sizeof(barrier_t)  +
+                            (2*sizeof(ulock_t))+
+                            sizeof(FILE*)      +
+                            ((*nprocs+1)*BSP_BUFFER_SIZE) +
+                            ( *nprocs * ((2*sizeof(ulock_t)) +
+					       (sizeof(usptr_t*)) +
+					       (sizeof(_BSPcomm_thunk)*
+                                                BSP_COMM_FIFO_SIZE)+
+					       sizeof(int)))));
+d316 1
+a316 1
+  /* schedctl(SCHEDMODE, SGS_GANG); */
+d318 2
+d606 2
+a607 2
+#ifdef BOUNDS_CHECK
+    if (offset >= BSP_ADDR_TABLE_SIZE)
+d616 1
+d621 1
+a621 1
+void bsp_fetch(int pid, int src_addr, int offset, void *dst, int nbytes) {
+d629 1
+a629 1
+#ifdef BOUNDS_CHECK
+d651 1
+a652 1
+      set_spinlock(_shmem->proc_buffer_write[pid]);
+a660 1
+#ifdef BOUNDS_CHECK
+d662 3
+a664 4
+        bsp_error("{bsp_fetch}: internal table overflow. \n"
+                  "\t\tBSP_COMM_FIFO_SIZE needs to be larger than %d.",
+                  BSP_COMM_FIFO_SIZE);
+#endif
+d666 1
+a666 1
+      _shmem->stores_to_me[_bsp_pid] +=1;
+d689 1
+a689 1
+#ifdef BOUNDS_CHECK
+d742 1
+a742 1
+void bsp_store(int pid, void *src, int dst_addr, int offset, int nbytes) {
+d749 1
+a749 1
+#ifdef BOUNDS_CHECK
+d771 1
+a773 1
+      set_spinlock(_shmem->proc_buffer_write[_bsp_pid]);
+d779 1
+a779 1
+      _shmem->proc_comm_next[_bsp_pid]++;
+a781 2
+
+#ifdef BOUNDS_CHECK
+d783 3
+a785 4
+        bsp_error("{bsp_store}: internal table overflow\n"
+                  "\t\tBSP_COMM_FIFO_SIZE needs to be larger than %d.",
+                  BSP_COMM_FIFO_SIZE);
+#endif
+d787 1
+a787 1
+      _shmem->stores_to_me[pid] +=1;
+@
+
+
+1.2
+log
+@Changed sstep_end to use a different permute algorithm
+@
+text
+@d2 1
+a2 1
+% $Id: bsp_lib.lc,v 1.1 1995/08/02 11:00:17 jonh Exp jonh $ 
+d4 3
+d76 2
+a77 2
+   _bsp_addr_table= (void **)         calloc(BSP_ADDR_TABLE_SIZE,
+					     sizeof(void*));
+d103 3
+a105 2
+      bottom("{BSP_BUFFER_SIZE} has to be greater than %d bytes",
+             sizeof(_BSPprofinfo));
+d108 2
+a109 1
+      bottom("{BSP_MAX_PROCS} has to be positive");
+d111 5
+a115 4
+      bottom("{BSP_BUFFER_SIZE}: is too small. "
+             "It is required to be at least %d bytes so for the "
+             "internal workings of the library", 
+             (BSP_MAX_PROCS*BSP_MAX_PROCS*sizeof(int)));
+d129 1
+d131 2
+d172 2
+a173 2
+                            ((BSP_MAX_PROCS+1)*BSP_BUFFER_SIZE) +
+                            ( BSP_MAX_PROCS * ((2*sizeof(ulock_t)) +
+d212 1
+a212 1
+    = (char **) uscalloc(BSP_MAX_PROCS,sizeof(char*),sgi_shmem_arena);
+d216 1
+a216 1
+  for(i=0; i< BSP_MAX_PROCS; i++) {
+d237 1
+a237 1
+    = (ulock_t *) uscalloc(BSP_MAX_PROCS,sizeof(ulock_t),sgi_shmem_arena);
+d241 1
+a241 1
+  for(i=0; i< BSP_MAX_PROCS; i++) {
+d249 1
+a249 1
+    =(usptr_t**) uscalloc(BSP_MAX_PROCS,sizeof(usptr_t*),sgi_shmem_arena);
+d253 1
+a253 1
+  for(i=0; i< BSP_MAX_PROCS; i++) {
+d261 1
+a261 1
+    = (ulock_t *) uscalloc(BSP_MAX_PROCS,sizeof(ulock_t),sgi_shmem_arena);
+d265 1
+a265 1
+  for(i=0; i< BSP_MAX_PROCS; i++) {
+d273 1
+a273 1
+    = (_BSPcomm_thunk*) uscalloc(BSP_MAX_PROCS,sizeof(_BSPcomm_thunk),
+d277 1
+a277 1
+    = (_BSPcomm_thunk**) uscalloc(BSP_MAX_PROCS,sizeof(_BSPcomm_thunk*),
+d279 1
+a279 1
+  for(i=0; i< BSP_MAX_PROCS; i++) {
+d288 1
+a288 1
+    = (int *) uscalloc(BSP_MAX_PROCS,sizeof(int),sgi_shmem_arena);
+d291 1
+a291 1
+  for(i=0; i< BSP_MAX_PROCS; i++) _shmem->proc_comm_next[i]=0;
+d294 1
+a294 1
+    = (int *) uscalloc(BSP_MAX_PROCS,sizeof(int),sgi_shmem_arena);
+d297 1
+a297 1
+  for(i=0; i< BSP_MAX_PROCS; i++) _shmem->stores_to_me[i]=0;
+a333 42
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Adding some more processes: \texttt{bsp\_newproc}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+The new processes are only forked off by process zero. If process zero
+doesn't enter here, then no new processes will be allocated.
+\begin{code}
+void bsp_newprocs(int maxprocs, int *nprocs, int *mypid) {
+  int i, fork_pid;
+  int to_allocate,old_nprocs;
+  
+  if      (!_bsp_instart) bsp_error("{bsp_newproc}: call bsp_start first");
+  else if (maxprocs < 0)  bsp_error("{bsp_newproc}: maxprocs -ve");
+  else if (_shmem->nprocs + maxprocs > BSP_MAX_PROCS) {
+    /* Do nothing, and return from this procedure */
+  } 
+  else if (_bsp_pid==0) {
+    if   (maxprocs == 0) *nprocs = BSP_MAX_PROCS;
+    else                 *nprocs = _shmem->nprocs + maxprocs;
+
+    
+    to_allocate = *nprocs - _shmem->nprocs;
+    old_nprocs  = _shmem->nprocs;
+    _shmem->nprocs = *nprocs;
+
+    for (i=0; i<to_allocate; i++) {
+      fork_pid = fork();
+      if      (fork_pid < 0) bsp_error("{fork}: unable to spawn process");
+      else if (fork_pid ==0) {
+	/* Yippee I'm a child process. Make sure that only the parent */
+	/* continues through the loop.                                */
+	*mypid   = i+old_nprocs;
+	_bsp_pid = i+old_nprocs;
+        _shmem = usgetinfo(sgi_shmem_arena);
+        initProcessGlobals();
+	break;
+      }
+    }
+  }
+}
+\end{code}
+    
+a340 1
+  int i=0;
+d342 1
+d361 1
+a361 1
+  ussetlock(_shmem->proc_buffer_write[_bsp_pid]);
+d363 1
+a363 1
+  usunsetlock(_shmem->proc_buffer_write[_bsp_pid]);
+d462 1
+a462 1
+        usunsetlock(_shmem->proc_buffer_write[_bsp_pid]);
+d484 1
+a484 1
+        usunsetlock(_shmem->proc_buffer_write[_bsp_pid]);
+d535 1
+a535 1
+  ussetlock(_shmem->proc_buffer_write[store_pid]);
+a553 2
+  if (_bspprof.buffer_high_water_mark < to_send->nbytes)
+    _bspprof.buffer_high_water_mark = to_send->nbytes;      
+d559 1
+a560 1
+#ifdef DEBUG
+d626 4
+d640 1
+a640 1
+      ussetlock(_shmem->proc_buffer_write[pid]);
+d647 1
+a647 1
+      usunsetlock(_shmem->proc_buffer_write[pid]);
+d651 1
+a651 1
+        bsp_error("{bsp_store}: internal table overflow. \n"
+d655 1
+a655 1
+      ussetlock(_shmem->proc_buffer_write[_bsp_pid]);
+d657 1
+a657 1
+      usunsetlock(_shmem->proc_buffer_write[_bsp_pid]);
+d748 4
+d763 1
+a763 1
+      ussetlock(_shmem->proc_buffer_write[_bsp_pid]);
+d770 1
+a770 1
+      usunsetlock(_shmem->proc_buffer_write[_bsp_pid]);
+d775 3
+a777 1
+        bsp_error("{bsp_store}: internal table overflow");
+d779 1
+a779 1
+      ussetlock(_shmem->proc_buffer_write[pid]);
+d781 1
+a781 1
+      usunsetlock(_shmem->proc_buffer_write[pid]);
+d796 1
+a796 1
+  _bsp_profout = fopen("bsp.STAT","w");
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d2 5
+a6 2
+% $Id$ 
+% $Log$
+d19 4
+a46 2
+\end{code}
+
+a47 1
+\begin{code}
+d458 1
+d461 3
+a463 4
+  int i;
+  int             next_store;
+  int             stores_to_other;
+  _BSPcomm_thunk *to_send;
+d476 1
+a476 27
+    bsp_debug_start("bsp_sstep_end");
+    bsp_debug_block("Super-step %d on pid %d: fifo size=%d: (%d stores to me)",
+	            stepno,_bsp_pid,_shmem->proc_comm_next[_bsp_pid],
+                    _shmem->stores_to_me[_bsp_pid]);
+    bsp_debug_block("%5s | %8s |%8s |%8s | %6s",
+                    "Type","With pid","Source","Dest.","Nbytes");
+    bsp_debug_block("---------------------------------------------------");
+    for(i=0;i<_shmem->proc_comm_next[_bsp_pid];i++) 
+      if (_shmem->proc_comm_fifo[_bsp_pid][i].comm_type==BSP_STORE)
+         bsp_debug_block("%5s | %8d |%8x |%2d[%4d] |%6d",
+		         "store",
+		         _shmem->proc_comm_fifo[_bsp_pid][i].comm_pid,
+                         _shmem->proc_comm_fifo[_bsp_pid][i].addr_real,
+                         _shmem->proc_comm_fifo[_bsp_pid][i].addr_table,
+                         _shmem->proc_comm_fifo[_bsp_pid][i].offset,
+                         _shmem->proc_comm_fifo[_bsp_pid][i].nbytes);
+      else
+         bsp_debug_block("%5s | %8d |%2d[%4d] |%8x |%6d",
+		         "fetch",
+		         _shmem->proc_comm_fifo[_bsp_pid][i].comm_pid,
+                         _shmem->proc_comm_fifo[_bsp_pid][i].addr_table,
+                         _shmem->proc_comm_fifo[_bsp_pid][i].offset,
+                         _shmem->proc_comm_fifo[_bsp_pid][i].addr_real,
+                         _shmem->proc_comm_fifo[_bsp_pid][i].nbytes);
+
+
+     bsp_debug_end("bsp_sstep_end");
+d486 1
+a486 37
+      if (ustestlock(_shmem->proc_buffer_full[_bsp_pid])) {
+        /* If my buffer is full */
+#ifdef DEBUG
+       bsp_debug("{sstep_end}:Buffer is full. Perform copy to memory");
+#endif
+        if (_shmem->proc_buffer_info[_bsp_pid].comm_type == BSP_STORE) {
+           memcpy(((char *) _bsp_addr_table[
+                      _shmem->proc_buffer_info[_bsp_pid].addr_table] + 
+                   _shmem->proc_buffer_info[_bsp_pid].offset),
+                  _shmem->proc_buffer[_bsp_pid],
+                  _shmem->proc_buffer_info[_bsp_pid].nbytes);
+        } else {
+           memcpy((char *)_shmem->proc_buffer_info[_bsp_pid].addr_real,
+                  (char *)_shmem->proc_buffer[_bsp_pid],
+                  _shmem->proc_buffer_info[_bsp_pid].nbytes);
+	}
+        _shmem->stores_to_me[_bsp_pid]--;
+#ifdef PROFILE
+        _bspprof.packet_stores_dst++;
+        _bspprof.packet_stores_dstnbytes += 
+          _shmem->proc_buffer_info[_bsp_pid].nbytes;
+#endif
+        usunsetlock(_shmem->proc_buffer_full[_bsp_pid]);
+        usunsetlock(_shmem->proc_buffer_write[_bsp_pid]);
+        /* Conditional reset of semaphore. If I did not wait on this */
+        /* semaphore before I came in here then I must reset it      */
+#ifdef DEBUG
+          bsp_debug("{sstep_end}:Conditional reset of semaphore");
+#endif
+        uscpsema(_shmem->proc_buffer_wait[_bsp_pid]);
+      } else if (ustestlock(_shmem->proc_buffer_write[_bsp_pid])) {
+        /* Someone is currently writing into my buffer. Wait around  */
+	/* for some time, and then have a go again (by going back to */
+	/* the beginning of the loop).                               */
+#ifdef DEBUG
+        bsp_debug("{sstep_end}:Buffer is being written---Sleeping");
+#endif
+d488 2
+a489 1
+        _bspprof.write_waits++;
+d491 2
+a492 1
+        /* sginap(0); */
+d494 4
+a497 1
+      } else if (stores_to_other > 0) {
+d499 2
+a500 28
+	/* information to the processor were the store is required.  */
+        to_send = &_shmem->proc_comm_fifo[_bsp_pid][next_store];
+#ifdef DEBUG
+        bsp_debug("{sstep_end}:My buffer is empty and "
+                  "I have something to send to %d",to_send->comm_pid);
+#endif
+        ussetlock(_shmem->proc_buffer_write[to_send->comm_pid]);
+        if (to_send->comm_type == BSP_STORE) {
+          memcpy(_shmem->proc_buffer[to_send->comm_pid],
+                 (char *) to_send->addr_real,
+                 to_send->nbytes);
+	} else {
+          memcpy((char *)_shmem->proc_buffer[to_send->comm_pid],
+                 (char *)_bsp_addr_table[to_send->addr_table] + 
+                         to_send->offset,
+                 to_send->nbytes);
+        }
+
+        _shmem->proc_buffer_info[to_send->comm_pid].comm_type
+          = to_send->comm_type;
+        _shmem->proc_buffer_info[to_send->comm_pid].addr_real
+          = to_send->addr_real;
+        _shmem->proc_buffer_info[to_send->comm_pid].addr_table
+          = to_send->addr_table;
+        _shmem->proc_buffer_info[to_send->comm_pid].offset
+          = to_send->offset;
+        _shmem->proc_buffer_info[to_send->comm_pid].nbytes
+          = to_send->nbytes;
+d503 2
+a504 13
+#ifdef PROFILE
+        _bspprof.packet_stores_src++;
+        _bspprof.packet_stores_srcnbytes += to_send->nbytes;
+        if (_bspprof.buffer_high_water_mark < to_send->nbytes)
+          _bspprof.buffer_high_water_mark = to_send->nbytes;      
+#endif
+        ussetlock(_shmem->proc_buffer_full[to_send->comm_pid]);  
+        /* Wake up the process that is waiting on the buffer being */
+	/* filled */
+#ifdef DEBUG
+        bsp_debug("{sstep_end}: waking-up process %d",to_send->comm_pid);
+#endif
+        usvsema(_shmem->proc_buffer_wait[to_send->comm_pid]);  
+d507 2
+a508 1
+	/* to put something into my buffer                           */
+d510 1
+a510 1
+        bsp_debug("{sstep_end}:Nothing to send and fill my buffer");
+a514 1
+        /* sginap(0); */
+d516 2
+d524 5
+d534 91
+d670 1
+d672 1
+a672 3
+      comm_thunk=&_shmem->proc_comm_fifo[pid][_shmem->proc_comm_next[pid]];
+      comm_thunk->comm_type  = BSP_FETCH;
+      comm_thunk->comm_pid   = _bsp_pid;
+d678 1
+a685 1
+      usunsetlock(_shmem->proc_buffer_write[pid]);
+d698 62
+a787 1
+      ussetlock(_shmem->proc_buffer_write[_bsp_pid]);
+d790 2
+a791 2
+      comm_thunk->comm_type  = BSP_STORE;
+      comm_thunk->comm_pid   = pid;
+d797 1
+a803 1
+      usunsetlock(_shmem->proc_buffer_write[_bsp_pid]);
+@

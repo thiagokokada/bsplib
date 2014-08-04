@@ -1,0 +1,429 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id$
+% $Log$
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{System V-like shared memory support for Win32}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+#include "bsp_nt_shmem.h"
+\end{code}
+
+The actual implementation of the Shared memory communications that
+have been carreid over from the SHMEM_SYSV is included here.
+
+This section of code implements a standard set of semaphore operations.
+This implementation simply manipulates an integer in shared memory and
+locls it using atomic integers, (native to NT) which are also stored
+in shared memory.
+
+\begin{code}
+semaphore nt_new_sema(shared_memory_handle handle, int val,
+                      int lineno,char *filename)
+{
+  semaphore rvalue= malloc(sizeof(semaphore_t));
+
+  rvalue->mutex_identifier= (LONG*)shmem_malloc(SIZEOF(LONG), 0);
+  rvalue->sema_value= (int*)shmem_malloc(SIZEOF(int), 0);
+
+  if(bsp_firstprocess()) {
+    *(rvalue->mutex_identifier) = 1;
+    *(rvalue->sema_value)= val;
+
+  } 
+  return rvalue;
+}
+\end{code}
+
+\begin{code}
+void nt_Psema(semaphore sema, int lineno, char *filename) 
+{
+  BOOL managed= FALSE;
+  volatile LONG machine= 0;
+  volatile LONG me= 0;
+
+  do {
+    while((*(sema->sema_value))== 0) nt_release_processor();
+
+    /* Enter critical section. */
+    machine= InterlockedExchange(sema->mutex_identifier, me);
+    if(machine== 1)
+    { 
+
+      /* Enter critical section. */
+     if((*(sema->sema_value))< 0) 
+        bsp_abort("Semaphore bound error, (line %c, file %d", lineno, filename);
+
+      if((*(sema->sema_value))> 0) {
+        (*(sema->sema_value))--;
+        managed= TRUE;
+     }
+      /* Leave critical section */
+      me= InterlockedExchange(sema->mutex_identifier, machine);
+      if(me!= 0) bsp_abort("Error releasing critical section");
+    }
+  } while(managed== FALSE);
+}
+\end{code}
+
+\begin{code}
+int             nt_CPsema(semaphore sema, int lineno, char *filename)
+{
+  int rvalue= 0;
+  volatile LONG machine= 0;
+  volatile LONG me= 0;
+
+  if( *(sema->sema_value) == 0) return 0;
+  machine= InterlockedExchange(sema->mutex_identifier, me);
+  if(machine== 1) {
+
+    /* Enter critical section. */
+    if((*(sema->sema_value))> 0) {
+      (*(sema->sema_value))--;
+      rvalue= 1;
+    }
+    /* Leave critical section */
+    me= InterlockedExchange(sema->mutex_identifier, machine);
+    if(me!= 0) bsp_abort("Error releasing critical section");
+  } 
+
+  return rvalue;
+}
+\end{code}
+
+\begin{code}
+void    nt_Vsema(semaphore sema, int lineno, char *filename)
+{
+  BOOL managed= FALSE;
+  volatile LONG machine= 0;
+  volatile LONG me= 0;
+
+  do {
+    machine= InterlockedExchange(sema->mutex_identifier, me);
+    if(machine== 1) {
+      /* Critical section. */
+      (*(sema->sema_value))++;
+      managed= TRUE;
+      /* Leave critical section */
+      me= InterlockedExchange(sema->mutex_identifier, machine);
+      if(me!= 0) bsp_abort("Error releasing critical section");
+    }
+  }  while(managed== FALSE);
+
+}
+\end{code}
+
+
+\begin{code}
+int             nt_Tsema(semaphore sema, int lineno, char *filename) {
+  int rvalue;
+  volatile LONG machine= 0;
+  volatile LONG me= 0;
+
+  machine= InterlockedExchange(sema->mutex_identifier, me);
+  if(machine== 1) {
+    /* Enter critical section. */
+    rvalue= *(sema->sema_value);
+    /* Leave critical section */
+    me= InterlockedExchange(sema->mutex_identifier, machine);
+    if(me!= 0) bsp_abort("Error releasing critical section");
+  } 
+
+  return rvalue;
+}
+\end{code}
+
+A more efficient spinlock
+\begin{code}
+spinlock_type nt_new_spinlock(shared_memory_handle handle, int lineno, char *filename)
+{
+  spinlock_type rvalue= (spinlock_type)shmem_malloc(SIZEOF(LONG), 0);
+  if(bsp_firstprocess()) {
+    (*rvalue) = 1;
+  }
+  return rvalue;
+}
+
+void nt_set_spinlock(spinlock_type lock, int line, char* file)
+{
+  LONG machine;
+  BOOL finished= FALSE;
+  do {
+    do { 
+      nt_release_processor();
+    } while((*lock)== 0);
+    machine= InterlockedExchange(lock, 0);
+    if(machine== 1) finished= TRUE;
+  } while(!finished);
+}
+
+void nt_unset_spinlock(spinlock_type lock, int line, char* file)
+{
+/*  int machine;
+  machine= InterlockedExchange(lock, 1);
+  if(machine!= 0) 
+        bsp_abort("Double tripped lock, at line %d in file %c", line, file);
+*/
+  if((*lock)!= 0) 
+        bsp_abort("Double tripped lock, at line %d in file %c", line, file);
+  (*lock)= 1;
+}
+
+
+int nt_test_spinlock(spinlock_type lock, int line, char* file)
+{
+  volatile int result= (1- (int)(*lock));
+  return (result);
+}
+
+int nt_conshortset_spinlock(spinlock_type lock, int line, char* file) 
+{
+  LONG machine;
+  LONG me= 0;
+  machine= InterlockedExchange(lock, me);
+  return (int)machine;
+}
+
+int nt_conlongset_spinlock(spinlock_type lock, int line, char* file) 
+{
+  LONG machine;
+  LONG me= 0;
+  machine= InterlockedExchange(lock, me);
+  return (int)machine;
+}
+\end{code}
+
+Creating shared memory in WIN32 is relatively easy.  All we have to do
+is create a file, which we then map to main memory.
+
+Processes which are then created by the initial process can then
+inherit the handle to this mapping, and open it with any relevant
+permissions.
+
+\begin{code}
+void shmem_create_memory_segment(shared_memory_handle handle, 
+                                 int nprocs, int size)
+{
+  SECURITY_ATTRIBUTES             sa;
+  HANDLE                          hfile;
+  sa.nLength= SIZEOF(SECURITY_ATTRIBUTES);
+  sa.lpSecurityDescriptor = NULL;
+  sa.bInheritHandle= TRUE;
+
+  _nbytes_of_shared_memory_segment_free
+      = (NT_SHMEM_PROC_ERROR*nprocs)+NT_SHMEM_ERROR_EXTRA+size;
+
+   if(bsp_firstprocess()) {
+
+      /* I am the first process. */
+      /* So create the file to map. */
+      hfile= CreateFile("bsp_shmem", 
+                        GENERIC_READ+GENERIC_WRITE, 
+                        FILE_SHARE_DELETE+FILE_SHARE_READ+FILE_SHARE_WRITE, 
+                        &sa, 
+                        CREATE_ALWAYS,
+                        FILE_ATTRIBUTE_TEMPORARY+FILE_FLAG_DELETE_ON_CLOSE,
+                        NULL);
+      if(hfile== NULL) 
+        bsp_abort("shmem_create: error creating shared memory file;"
+                  "error code: %d\n", GetLastError());
+      /* Create a named file mapping object. */
+      nt_the_real_shmem_segment= CreateFileMapping(
+                        hfile,          
+                        &sa,                            
+                        PAGE_READWRITE,         
+                        0,                              
+                        NT_SHMEM_SHARED_SLOSH+(NT_SHMEM_PROC_SLOSH*nprocs)+
+                                _nbytes_of_shared_memory_segment_free,   
+                        "bsp_shmem_mapping");
+      if(nt_the_real_shmem_segment== NULL) 
+        bsp_abort("shmem_create: error creating shared memory file mapping;"
+                  " error code: %d\n", GetLastError());
+      /* Map the view of the file into the addres space. */
+      _the_entire_shared_memory_segment= MapViewOfFile(
+                        nt_the_real_shmem_segment,      
+                        FILE_MAP_WRITE,                 
+                        0,                              
+                        0,                              
+                        0);                             
+     if(_the_entire_shared_memory_segment== NULL)
+       bsp_abort("shmem_create: error creating shared memory mapping;"
+                 " error code: %d\n", GetLastError());
+     /* So now pointer_to_shmem_segment is the address 
+      * of the mapped view;
+      * i.e. the address of the shared memory.
+     */
+  } else {
+    /* I am one of the other processes, so jump onto the mapping. */
+    nt_the_real_shmem_segment= OpenFileMapping(
+                         FILE_MAP_ALL_ACCESS,
+                         FALSE,
+                         "bsp_shmem_mapping");
+    if(nt_the_real_shmem_segment== NULL) {
+      /* Flag an error */
+    }
+    _the_entire_shared_memory_segment= MapViewOfFile(
+                         nt_the_real_shmem_segment,
+                         FILE_MAP_ALL_ACCESS,
+                         0,
+                         0,
+                         0);
+    /* So now pointer_to_shmem_segment is the address
+     * of the mapped view;
+     * i.e. the address of the shared memory.
+   */
+  }
+
+}
+\end{code}
+
+This is a very simple way around the problem that Win32 cannot fork.
+
+We get away with this, because BSP does not gaurantee any integrity
+between process address spaces in BSP processes.  We ensure that the
+library will set up everything required around the fork; and as always
+the user is resonsible for any extra message passing that they want to
+do.
+
+This probably at least shows that Win32 process creation at least
+gives us something resembling a lowest common denominator!
+
+\begin{code}
+int     fork()
+{
+  STARTUPINFO si;
+  PROCESS_INFORMATION pi;
+  SECURITY_ATTRIBUTES sa;
+  LPTSTR bsp_env_string;
+  LPTSTR child_identifier;
+  int rvalue= 0;
+  
+  bsp_env_string= (LPTSTR)malloc(25*SIZEOF(char));
+  child_identifier= (LPTSTR)malloc(25*SIZEOF(char));
+
+  /* Note it is the responsibility of bsp_begin() to make sure that
+   * the arrays 
+   * nt_bsp_handle_array  have enough memory. 
+  */
+  if(bsp_firstprocess()) {
+    sprintf(bsp_env_string, "%d", ++_bsp_pid_copy);
+    if(!SetEnvironmentVariable("BSP_MYPID", bsp_env_string))
+      bsp_abort("An error occured in setting up required environments.");
+    sprintf(bsp_env_string, "%d", bsp_nprocs());
+    if(!SetEnvironmentVariable("BSP_NPROCS", bsp_env_string))
+      bsp_abort("An error occured in setting up required environments.");
+    if(!SetEnvironmentVariable("BSP_PARENT_IDENTIFIER", "BSP_CHILD"))
+      bsp_abort("An error occured in setting up required environments.");
+    sprintf(bsp_env_string, "%d", GetCurrentProcessId());
+    if(!SetEnvironmentVariable("BSP_PARENT_PID", bsp_env_string))
+      bsp_abort("An error occured in setting up required environments.");
+    ZeroMemory(&si, SIZEOF(si));
+    si.cb= SIZEOF(si);
+    sa.nLength= (DWORD)SIZEOF(SECURITY_ATTRIBUTES);
+    sa.lpSecurityDescriptor= NULL;
+    sa.bInheritHandle= TRUE;
+
+    rvalue= CreateProcess( NULL, GetCommandLine(), 
+                        NULL, NULL, TRUE, 0, NULL, NULL, &si,   &pi );   
+
+    if(rvalue!= 0) rvalue= pi.dwProcessId;
+    /* Now put the handle in the global array */
+    nt_bsp_handle_array[_bsp_pid_copy]= pi.hProcess;
+    _bsp_children[_bsp_pid_copy]= pi.dwProcessId;
+  } else {
+    GetEnvironmentVariable("BSP_PARENT_PID", bsp_env_string, 25);
+    parent_process= OpenProcess(PROCESS_ALL_ACCESS, TRUE, 
+                                atoi((char*)bsp_env_string));
+    set_getppid();
+    bsp_set_ppid();
+    set_getpid();
+    bsp_set_pid();
+  }
+  return rvalue;
+}
+\end{code}
+
+And this is the rest of the random functions which we still need to
+define to keep WIN32 happy.
+
+\begin{code}
+void set_getpid()
+{
+  _pid= GetCurrentProcessId();
+}
+
+void set_getppid()
+{
+  _ppid= -1; /* Or something:) */
+}
+
+void bsp_set_firstprocess()
+{
+  GetEnvironmentVariable("BSP_PARENT_IDENTIFIER", bsp_env_string, ENV_STRING_SIZE);
+  _bsp_firstprocess= (BOOL)strcmp("BSP_CHILD", bsp_env_string);
+  if(bsp_firstprocess()) {
+    _bsp_pid= 0;
+    _bsp_pid_copy= 0;
+  } else {
+    bsp_set_pid();
+  }
+}
+
+void bsp_set_pid()
+{
+  GetEnvironmentVariable("BSP_MYPID", bsp_env_string, ENV_STRING_SIZE);
+  _bsp_pid= atoi(bsp_env_string);
+  _bsp_pid_copy= _bsp_pid;
+}
+
+void bsp_set_nprocs(int maxprocs)
+{
+  if(bsp_firstprocess()) {
+    _bsp_nprocs= maxprocs;
+  } else {
+      GetEnvironmentVariable("BSP_NPROCS", bsp_env_string, ENV_STRING_SIZE);
+      _bsp_nprocs= atoi(bsp_env_string);
+  }
+}
+
+void bsp_set_ppid()
+{
+  GetEnvironmentVariable("BSP_PARENT_PID", bsp_env_string, ENV_STRING_SIZE);
+  _bsp_ppid= atoi(bsp_env_string);
+}
+
+int kill(int pid, int signal) 
+{
+  return  -1;
+}
+        
+void signal_shutdown(int signal_value)
+{
+  int count;
+  if(bsp_firstprocess()) {
+    for(count= 1; count < bsp_nprocs(); count++)
+      TerminateProcess(nt_bsp_handle_array[count], 3);
+      ExitProcess(3);
+    } else {
+      kill(bsp_get_ppid(), 3);
+      nt_release_processor();            
+    }
+}
+\end{code}
+

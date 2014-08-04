@@ -1,0 +1,104 @@
+\makeatletter				% Can use @ in names
+
+\def\litprimaryindex#1{\underline{#1}}
+\def\litseealso#1#2{{\em see also\/} #1}
+
+\newcounter{@codectr}
+% other: $&#^_~%
+% left special: \{}
+% unnecessary: @`'"
+\def\setcodechar{%
+  \@makeother\$\@makeother\&\@makeother\#%
+  \@makeother\^\@makeother\_\@makeother\~%
+  \@makeother\%%
+}
+
+\def\setupcode#1{\parsep=0pt\parindent=0pt%
+  \def\par{\leavevmode\egroup\box0\endgraf}%
+  \def\@codectr{#1}%
+  \obeylines\obeyspaces%
+  \frenchspacing\catcode``=13\@noligs%
+  \def\\{\char`\\}%
+  \setcodechar%
+  \let\lit=\cd@lit% 		Define the literate command
+  \catcode`\^^I=\active%
+  \small\tt
+  \everypar{\refstepcounter{\@codectr}% |label(tex:everypar)
+	    \llap{\footnotesize \arabic{\@codectr}\ \ }\startbox}%
+}
+{\obeyspaces\global\let =\ }
+%%
+%% This lot is to handle tabs
+%% See the TeXbook Page 390.
+%%
+\newdimen\w \setbox0=\hbox{\small\tt\space} \w=8\wd0 % tab amount
+\def\startbox{\setbox0=\hbox\bgroup}
+{\catcode`\^^I=\active%
+ \gdef^^I{\leavevmode\egroup%
+  \dimen0=\wd0% The width so far or since the previous tab
+  \divide\dimen0 by\w
+  \multiply\dimen0 by\w% compute previous multiple of \w
+  \advance\dimen0 by\w% advance to next multiple of \w
+  \wd0=\dimen0 \box0 \startbox}%
+}
+%% code
+%% Check whether a language is defined in the optional argument. Note that
+%% every language corresponds to a separate counter. If there is no counter
+%% defined, the counter defaults to C, i.e. C code. The check
+%% on whether the counter is defined comes from \setcounter in latex.tex.
+
+\newcounter{C}
+
+\def\setcodefile#1{\@ifnextchar[{\@setcodefile{#1}}{\@setcodefile{#1}[]}}
+\def\@setcodefile#1[#2]#3{\setcodecounter{#1}{0}}
+
+\def\@codedefault{C}
+\def\setcodelang#1{\def\@codedefault{#1}}
+\def\setcodecounter#1#2{\@ifundefined{c@#1}{\newcounter{#1}}
+			{\setcounter{#1}{#2}}}
+
+\def\code{\obeylines\@ifnextchar[{\@code}{\@code[\@codedefault]}}
+\def\@code[#1]#2{
+	\@ifundefined{c@#1}{\newcounter{#1}}{}%
+	\vskip\parskip\vskip\partopsep%
+	\begingroup\small%
+	\parskip0mm\parsep0mm\parindent0mm % Set all sizes to 0 
+%	\hrule\vskip1mm\setupcode{#1}%
+        \vskip1mm\setupcode{#1}%
+}
+\def\endcode{\endgroup%
+%	\vskip1mm\hrule%
+	\vskip1mm%
+	\vskip\parskip\vskip\partopsep%
+}
+
+%% Environment for reference code, i.e. code that isn't extracted.
+%% Such an environment is used in explanations, and the numbering always
+%% starts anew.
+\def\hiddencode{\obeylines\@ifnextchar[{\@code}%
+                {\@ifundefined{c@hiddencode}{\newcounter{c@hiddencode}}%
+			                   {\setcounter{hiddencode}{0}}%
+		\@code[hiddencode]}%
+	       }
+\let\endhiddencode\endcode
+%% Reset all special characters to their normal function
+\def\cd@lit{\leavevmode\catcode`\$=3\catcode`\&=4\catcode`\#=6\catcode`\^=7%
+	      \catcode`\_=8\catcode`\~=13\catcode`\%=14\def\^{\char`\^}%
+	      \begingroup\@texincode}
+
+\def\@texincode#1{\rm #1\endgroup}
+%% Special environment for TeX code
+% TeXmode, \| becomes the escape character
+\def\texcode{\obeylines\@ifnextchar[{\@texcode}{\@texcode[\@codedefault] }}
+\def\@texcode[#1]#2{\@ifundefined{c@#1}{\newcounter{#1}}{}%
+	\vskip\parskip\vskip\partopsep%
+	\begingroup\small%
+	\parskip0mm\parsep0mm\parindent0mm % Set all sizes to 0 
+	\hrule\vskip1mm\setupcode{#1}%
+	\catcode`\\=11\catcode`\{=11\catcode`\}=11%
+	\catcode`\(=1\catcode`\)=2\catcode`\|=0char`\\}
+\def\endtexcode{\catcode`\\=0\catcode`\|=11%
+        \catcode`\{=1\catcode`\}=2\catcode`\(=11\catcode`\)=11%
+         \endgroup%
+	\vskip1mm\hrule%
+}

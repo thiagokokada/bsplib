@@ -1,0 +1,85 @@
+\documentclass[12pt]{report}
+\usepackage{draft}
+\usepackage{a4wide}
+\usepackage{lit}
+\usepackage{makeidx}
+\makeindex
+
+%\nofiles
+%\usepackage{2up} \source{1000}{210mm}{293mm}
+%\target{833}{293mm}{210mm} \targetlayout{twosided} \special{landscape}
+
+\newcommand{\bsplib}{\textsl{BSPlib}}
+\newcommand{\nhalf}{n_{\frac{1}{2}}}
+\newcommand{\ToDo}[1]{\textbf{TODO:}\emph{#1}}
+\begin{document}
+\title{The Oxford BSP Toolset implementation of \bsplib{}: the TCP/IP
+transport device}
+\author{Stephen Donaldson\footnote{\texttt{sd@comlab.ox.ac.uk}} and Jonathan Hill\footnote{\texttt{Jonathan.Hill@comlab.ox.ac.uk}}\\
+        Oxford University Computing Laboratory}
+\maketitle
+
+\tableofcontents
+
+\chapter*{Copyright notice}
+\centerline{Copyright \copyright 1997 Stephen Donaldson and the University of Oxford.}
+\vspace{2ex}
+
+\noindent Permission to use, copy, modify, and distribute this
+software, and to incorporate it into other software, is hereby granted
+without fee, provided that:
+\begin{enumerate}
+\item the above copyright notice and this permission notice appear in
+all copies of the source code, and the above copyright notice appear
+in clearly visible form on all supporting documentation and
+distribution media;
+
+\item modified versions of this software be accompanied by a complete
+change history describing author, date, and modifications made; and 
+
+\item any redistribution of the software, in original or modified form, be without fee and subject to these same conditions.
+\end{enumerate}
+
+\chapter*{Introduction}
+This document describes a small message passing library that uses
+TCP/IP socket communications that is intended to sit below
+\bsplib{}. A description of the techniques used in this implementation
+can be found in the following papers:
+
+\begin{quote}
+\cite{hill:stability} ``\emph{Stability of communication performance in
+     practice: from NOWs to the Cray T3E}'' Jonathan M.D Hill, Stephen
+     Donaldson, and David B. Skillicorn. Technical Report
+     PRG-TR-33-97, Programming Research Group, Oxford University
+     Computing Laboratory, October 1997.
+\end{quote}
+
+\begin{quote}
+``Communication Performance Optimisation Requires Minimising
+     Variance'' Stephen R.  Donaldson, Jonathan M.D. Hill, and David
+     B. Skillicorn. Submitted for publication, November 1997.
+\end{quote}
+
+        \input{bsptcpdefs.h.tex}
+	\input{bsptcperrs.h.tex}
+	\input{bsptcpl.h.tex}
+	\input{bsptcpl.c.tex}
+
+	\input{bsptcpm.c.tex}
+	\input{bsptcps.c.tex}
+        \input{bsptcpsio.h.tex}
+	\input{bsptcpsio.c.tex}
+
+	\input{bspportd.c.tex}
+	\input{bsptcpd.c.tex}
+	\input{bspshutd.c.tex}
+
+	\input{bsploadd.c.tex}
+	\input{bsploadfuns.h.tex}
+	\input{bsploadfuns.c.tex}
+
+
+\bibliographystyle{alpha}
+\bibliography{bsp,hill}
+\printindex
+\end{document}

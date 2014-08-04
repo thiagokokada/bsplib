@@ -1,0 +1,149 @@
+head	1.1;
+access;
+symbols;
+locks
+	jonh:1.1; strict;
+comment	@% @;
+
+
+1.1
+date	95.08.02.11.00.35;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id$
+% $Log$
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Miscellaneous library functions used in the IRIX IPC BSP library}
+\label{sect:bspirixmisc}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Includes and defines}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#include "bsp_lib.h"
+#include <stdarg.h>
+
+\end{code}
+
+
+  
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Error function: \texttt{bsp\_error}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+An error routine to be called when the program is running in
+parallel mode.
+
+\begin{code}
+void bsp_error(char* format, ...) {
+va_list args;
+
+  ussetlock(_shmem->lock);
+  va_start(args, format);
+  fprintf(stderr, " ERROR(pid%3d):\t",_bsp_pid);
+  vfprintf(stderr, format, args);
+  fprintf(stderr, "\n");
+  va_end(args);
+  fflush(stderr);
+  _shmem->nprocs--;
+  usunsetlock(_shmem->lock);
+  exit(0);
+}
+
+void bottom(char* format, ...) {
+va_list args;
+
+  va_start(args, format);
+  fprintf(stderr, " ERROR(pid%3d):\t",_bsp_pid);
+  vfprintf(stderr, format, args);
+  fprintf(stderr, "\n");
+  va_end(args);
+  fflush(stderr);
+  exit(1);
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Debugging functions}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_debug_start(char *text) {
+  ussetlock(debug_lock);
+  fprintf(stderr,"\nSTART DEBUG(pid%3d) :\"%s\"\n",_bsp_pid,text);
+}
+
+void bsp_debug_end(char *text) {
+  fprintf(stderr,"END DEBUG(pid%3d)   :\"%s\"\n\n",_bsp_pid,text);
+  usunsetlock(debug_lock);
+}
+
+void bsp_debug_block(char* format, ...) {
+va_list args;
+
+   va_start(args, format);
+   fprintf(stderr, " DEBUG(pid%3d):\t",_bsp_pid);
+   vfprintf(stderr, format, args);
+   fprintf(stderr, "\n");
+   va_end(args);
+}
+
+void bsp_debug(char* format, ...) {
+  va_list args;
+  ussetlock(debug_lock);
+  va_start(args, format);
+  fprintf(stderr, "DEBUG(pid%3d):\t",_bsp_pid);
+  vfprintf(stderr, format, args);
+  fprintf(stderr, "\n");
+  va_end(args);
+  usunsetlock(debug_lock);
+}
+
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Order preserving prining functions}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_print_start(char *text) {
+  ussetlock(print_lock);
+  fprintf(stderr,"\nSTART PRINT(pid%3d) :\"%s\"\n",_bsp_pid,text);
+}
+
+void bsp_print_end(char *text) {
+  fprintf(stderr,"END PRINT(pid%3d)   :\"%s\"\n\n",_bsp_pid,text);
+  usunsetlock(print_lock);
+}
+
+void bsp_print_block(char* format, ...) {
+va_list args;
+
+   va_start(args, format);
+   vfprintf(stderr, format, args);
+   va_end(args);
+}
+
+void bsp_print(char* format, ...) {
+  va_list args;
+  ussetlock(print_lock);
+  va_start(args, format);
+  vfprintf(stderr, format, args);
+  va_end(args);
+  usunsetlock(print_lock);
+}
+
+\end{code}
+
+
+
+@

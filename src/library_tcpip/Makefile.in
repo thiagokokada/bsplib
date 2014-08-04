@@ -1,0 +1,356 @@
+###########################################################################
+##      Copyright (C) 1995,1996,1997 University of Oxford                ##
+##                                                                       ##
+## Permission to use, copy, modify, and distribute this software,        ##
+## and to incorporate it, in whole or in part, into other software,      ##
+## is hereby granted without fee, provided that                          ##
+##   (1) the above copyright notice and this permission notice appear in ##
+##       all copies of the source code, and the above copyright notice   ##
+##       appear in clearly visible form on all supporting documentation  ##
+##       and distribution media;                                         ##
+##   (2) modified versions of this software be accompanied by a complete ##
+##       change history describing author, date, and modifications made; ##
+##       and                                                             ##
+##   (3) any redistribution of the software, in original or modified     ##
+##       form, be without fee and subject to these same conditions.      ##
+###########################################################################
+
+###########################################################################
+##            D O N T  C H A N G E  A N Y T H I N G  !!                  ##
+###########################################################################
+
+SHELL      = /bin/sh
+
+prefix     = @prefix@
+exec_prefix= @exec_prefix@
+bindir     = @bindir@
+includedir = @includedir@
+libdir     = @libdir@
+top_srcdir = @top_srcdir@/../
+
+BSP_ONLINE_PROCS= @BSP_ONLINE_PROCS@
+RANLIB          = @RANLIB@
+GCC             = @GCC@
+INSTALL          = @INSTALL@
+INSTALL_PROGRAM  = @INSTALL_PROGRAM@
+INSTALL_DATA     = @INSTALL_DATA@
+
+mpiincludedir   = @mpiincludedir@
+
+editpl = sed -e 's,@''includedir''@,$(includedir),g'       \
+             -e 's,@''bindir''@,$(bindir),g'               \
+             -e 's,@''binarchdir''@,$(bindir)/$(ARCH)/,g'  \
+             -e 's,@''libdir''@,$(libdir),g'               \
+             -e 's,@''mandir''@,$(mandir),g'               \
+             -e 's,@''GCC''@,$(GCC),g'                     \
+             -e 's,@''G77''@,$(G77),g'                     \
+             -e 's,@''GPLUSPLUS''@,$(GPLUSPLUS),g'         \
+             -e 's,@''mpiincludedir''@,$(mpiincludedir),g' \
+             -e 's,@''mpilibdir''@,$(mpilibdir),g'         \
+             -e 's,@''PERL_DBMOK''@,$(PERL_DBMOK),g'       \
+             -e 's,@''PERL''@,$(PERL),g'                   \
+             -e 's,@''PWD''@,$(PWD),g'
+
+##########################################################################
+# Architecture independent modules
+##########################################################################
+SRCS_LC   = bsptcpl.lc  
+NOW_O     = ../library_now/bsptcpsio.o ../library_now/bsploadfuns.o
+
+SRCS_LH   = bsptcpl.lh 
+
+.SUFFIXES: .lc .lh .c .tex .c.tex .h.tex .s
+
+#############################################################
+##             Flags and conversions                       ##
+#############################################################
+
+LIBRARIES     = @SOCKET_LIBRARY@ @NSL_LIBRARY@
+INCLUDES      = 
+
+SRCS_O        = $(SRCS_LC:.lc=.o) 
+
+SRCS_C        = $(SRCS_LC:.lc=.c)
+
+SRCS_H        = $(SRCS_LH:.lh=.h)
+
+SRCS_TEX      = $(SRCS_LH:.lh=.h.tex) $(SRCS_LC:.lc=.c.tex)
+
+CC         = cc
+YACC       = @YACC@
+LEX        = @LEX@
+CFLAGS     =  ${BUILD_DEFINES}  -DBSPTCP_NODELAY -DBSPTCP_SNDLOWAT \
+             -DBSPTCP_RCVLOWAT 
+LIBNAME    = "libbsptcpip"
+
+.SUFFIXES: .lc .lh .h .c .tex .c.tex .h.tex
+
+#############################################################
+##             Compilation rules                           ##
+#############################################################
+
+
+.lh.h:
+	rm -f $*.h $*.tmp;				\
+	litToPgm $<;					\
+	$(editpl) $*.h > $*.tmp && mv $*.tmp $*.h
+
+
+.lc.o:
+	rm -f $*.c $*.tmp;				\
+	litToPgm $<;					\
+	$(editpl) $*.c > $*.tmp && mv $*.tmp $*.c;	\
+	${CC} ${CFLAGS} $(INCLUDES) -c $*.c 
+
+.lc.c:
+	litToPgm $<;					\
+	rm -f $*.tmp;					\
+	$(editpl) $*.c > $*.tmp && mv $*.tmp $*.c
+
+.y.c:
+	${YACC} $<
+
+.l.c:
+	${LEX} -t $< > $*.c
+
+.c.o:
+	${CC} ${CFLAGS} $(INCLUDES) -c $*.c 
+
+.lh.h.tex:
+	litToTex $<
+
+.lc.c.tex:
+	litToTex $<
+
+
+
+#############################################################
+##             Main Targets                                ##
+#############################################################
+all::
+	
+
+sample: 
+	@make machine;					\
+	litToPgm sample.lc;				\
+	${CC} -DBSPTCP_SETENV sample.c bsptcpl.o -o sample -lnsl -lsocket;\
+        rm -f sample.c
+
+massdata: bsptcpl.h massdata.o
+	@make machine;					\
+	litToPgm massdata.lc;				\
+	${CC} -DBSPTCP_SETENV massdata.o bsptcpl.o -o massdata -lnsl -lsocket;\
+        rm -f massdata.c
+
+
+build:
+	@$(MAKE) clean; $(MAKE) machine 
+
+develop:
+	@$(MAKE) machine
+
+#############################################################
+##             Machine Targets                             ##
+#############################################################
+machine:
+	@case `bsparch -arch` in					   \
+	SGICHALL64) 							   \
+		$(MAKE) banner TYPE="machine" FOR="SGI PowerChallenge";    \
+                $(MAKE) lib 	                  	                   \
+                     BUILD_DEFINES="-DBSPTCP_SETENV                        \
+                                    -D__INLINE_INTRINSICS     		   \
+                                    -xansi -64 -mips4                      \
+                                    -GCM:pointer_speculation=ON            \
+                                    -GCM:static_load_speculation=ON        \
+                                    -O3 -DSGICHALL64"                      \
+ 		     ARCH="SGICHALL64"					   \
+                     AR=ar                                                 \
+                     CC=cc;;                                               \
+                                                                           \
+	SP2)    $(MAKE) banner TYPE="machine" FOR="IBM Sp2";               \
+                $(MAKE) lib	                       		           \
+                     BUILD_DEFINES="-O2 -DSP2 -DBSPTCP_OSAIX" 		   \
+		     ARCH="SP2"						   \
+                     AR=ar                                                 \
+                     CC=mpcc;;                                             \
+                                                                           \
+        CONVEXSPP)							   \
+		$(MAKE) banner TYPE="machine" FOR="Convex SPP";            \
+                $(MAKE) lib	                             		   \
+                     BUILD_DEFINES="-or none -DCONVEXSPP"                  \
+		     ARCH="CONVEXSPP"					   \
+                     AR=ar                                                 \
+                     CC="/usr/convex/bin/cc";;                             \
+                                                                           \
+	PARSYTEC)                                                          \
+                $(MAKE) banner TYPE="machine" FOR="Parsytec Explorer";     \
+                $(MAKE) lib	                           		   \
+                     BUILD_DEFINES=""                  	 		   \
+		     ARCH="PARSYTEC"					   \
+                     AR=ar                                                 \
+                     CC="px ancc";;                                        \
+                                                                           \
+	PARAMID)                                                           \
+                $(MAKE) banner TYPE="machine" FOR="Transtech Paramid";     \
+                $(MAKE) lib	                          		   \
+                     BUILD_DEFINES=""                  	 		   \
+		     ARCH="PARAMID"					   \
+                     AR=ar860                                              \
+                     CC="pgcc";;                                           \
+                                                                           \
+	HITACHIMPP)                                                        \
+                $(MAKE) banner TYPE="machine" FOR="Hitachi SR2001";        \
+                $(MAKE) lib	                                	   \
+                     BUILD_DEFINES="+O3 -DHITACHIMPP"      		   \
+		     ARCH="HITACHIMPP"					   \
+                     AR=ar                                                 \
+                     CC="srcc";;                                           \
+                                                                           \
+	FUJIAP1000)                                                        \
+                $(MAKE) banner TYPE="machine" FOR="Fujitsu AP1000";        \
+                $(MAKE) lib	                                 	   \
+                     BUILD_DEFINES="-O3 -DFUJIAP1000"      		   \
+		     ARCH="HITACHIMPP"					   \
+                     AR=ar                                                 \
+                     CC="cc.c7";;                                          \
+                                                                           \
+	CRAYT3D) 							   \
+		$(MAKE) banner TYPE="machine" FOR="Cray T3D";              \
+                $(MAKE) lib 	                                 	   \
+                     BUILD_DEFINES="-O3 -DCRAYT3D"             		   \
+		     ARCH="CRAYT3D"					   \
+                     CC=cc;;                                               \
+                                                                           \
+	RS6000) $(MAKE) banner TYPE="machine" FOR="IBM RS6000";            \
+                $(MAKE) lib	                     		           \
+                     BUILD_DEFINES="-O2 -DRS6000 -DBSPTCP_OSAIX            \
+				    -DBSPTCP_SETENV"                       \
+		     ARCH="RS6000"					   \
+                     AR=ar                                                 \
+                     CC=cc;;                                               \
+                                                                           \
+	OSF1)   $(MAKE) banner TYPE="machine" FOR="Digital Alpha";         \
+                $(MAKE) lib	                    		           \
+                     BUILD_DEFINES="-O5 -migrate -DOSF1"                   \
+ 		     ARCH="OSF1"					   \
+                     AR=ar                                                 \
+                     CC=cc;;                                               \
+                                                                           \
+	SGI) 							           \
+		$(MAKE) banner TYPE="machine" FOR="Uniprocessor SGI";      \
+                $(MAKE) lib 	                  	                   \
+                     BUILD_DEFINES="-DSGI -O2 -DBSPTCP_SETENV"             \
+		     ARCH="SGI"					           \
+                     AR=@AR@                                               \
+                     CC=cc;;                                               \
+                                                                           \
+	SGIN32) 						           \
+		$(MAKE) banner TYPE="machine" FOR="Uniprocessor SGI";      \
+                $(MAKE) lib 	                                   \
+                     BUILD_DEFINES="-DSGI -O2 -n32 -DBSPTCP_SETENV"        \
+		     ARCH="SGI"					           \
+                     AR=@AR@                                               \
+                     CC=cc;;                                               \
+                                                                           \
+	SunOS)  $(MAKE) banner TYPE="machine" FOR="SunOs";                 \
+                if test -n "${GCC}"; then                                  \
+                  $(MAKE) lib	           	                   	   \
+                     BUILD_DEFINES="-ansi -DSunOS -O2"        		   \
+		     ARCH="SunOS"					   \
+                     AR=@AR@                                               \
+                     CC=gcc;                                               \
+                else                                                       \
+                   $(MAKE) lib	          		                   \
+                     BUILD_DEFINES="-DSunOS -O2"              		   \
+		     ARCH="SunOS"					   \
+                     AR=@AR@                                               \
+                     CC=cc;                                                \
+                fi;;                                                       \
+                                                                           \
+	Solaris)                                                           \
+                $(MAKE) banner TYPE="machine" FOR="Sun Solaris";           \
+                if test -n "${GCC}"; then                                  \
+                  $(MAKE) lib	              	                	   \
+                     BUILD_DEFINES=" -DBSPTCP_SETENV -DSolaris -O2"        \
+		     ARCH="Solaris"					   \
+                     AR=@AR@                                               \
+                     CC=gcc;                                               \
+                else                                                       \
+                  $(MAKE) lib	              	                	   \
+                     BUILD_DEFINES="-DBSPTCP_SETENV -DSolaris -fast -xO4"  \
+		     ARCH="Solaris"					   \
+                     AR=@AR@                                               \
+                     CC=cc;                                                \
+                fi;;                                                       \
+                                                                           \
+	SolarisX86)                                                        \
+                $(MAKE) banner TYPE="machine" FOR="Intel Solaris";         \
+                if test -n "${GCC}"; then                                  \
+                  $(MAKE) lib	              	                	   \
+                     BUILD_DEFINES=" -DBSPTCP_SETENV -DSolarisX86 -O2"     \
+		     ARCH="SolarisX86"					   \
+                     AR=@AR@                                               \
+                     CC=gcc;                                               \
+                else                                                       \
+                  $(MAKE) lib	              	                	   \
+                     BUILD_DEFINES="-DBSPTCP_SETENV -DSolarisX86           \
+                                    -fast -xO4"                            \
+		     ARCH="SolarisX86"					   \
+                     AR=@AR@                                               \
+                     CC=cc;                                                \
+                fi;;                                                       \
+                                                                           \
+         LINUX)  $(MAKE) banner TYPE="machine" FOR="Linux";                \
+                $(MAKE) lib                       	                   \
+                     BUILD_DEFINES="-ansi -DLINUX -D_I386_BITOPS_H -O2     \
+				    -D_GNU_SOURCE"                         \
+		     ARCH="LINUX"					   \
+                     AR=ar                                                 \
+                     CC=gcc;;                                              \
+                                                                           \
+        *)      echo "I dont know how to BUILD for a `bsparch -arch`";     \
+		exit 1;;	  					   \
+        esac
+
+#############################################################
+##             Generic Compilation targets                 ##
+#############################################################
+
+objects: ${SRCS_H} ${SRCS_O}
+
+delit: ${SRCS_C} ${SRCS_H} 
+
+root.dvi: $(SRCS_TEX)
+	latex root.tex
+
+lib:
+	@$(MAKE) banner TYPE="library prefix "     			 \
+              FOR="\"${LIBNAME}\"; flags are $(CFLAGS)";                 \
+	if [ ! -d ${top_srcdir}/lib/`bsparch -arch` ] ;                  \
+        then  mkdir -p ${top_srcdir}/lib/`bsparch -arch`; fi;            \
+	rm -f ${top_srcdir}/lib/`bsparch -arch`/${LIBNAME}.a;            \
+	$(MAKE) objects SRCS_LC="${SRCS_LC}" SRCS_LH="${SRCS_LH}"        \
+                        SRCS_O="${SRCS_O}" CFLAGS="${CFLAGS} @DEFS@"     \
+                        CC="${CC}";                                      \
+	${AR} crv ${top_srcdir}/lib/`bsparch -arch`/${LIBNAME}.a         \
+                  $(SRCS_O) $(NOW_O);                                    \
+        ${RANLIB} ${top_srcdir}/lib/`bsparch -arch`/${LIBNAME}.a
+
+            
+
+clean:
+	rm -f $(SRCS_O) $(SRCS_ANY_O) $(BINARY_TARGET)   \
+              $(SRCS_H) $(SRCS_TEX) mon.out $(SRCS_C)    \
+	      y.tab.c bsptcpd bsptcps bsptcpm bspportd bsploadd bspshutd
+
+banner:
+	@echo "#########################################################"; \
+        echo  "#####   ${TYPE} = ${FOR}";                                  \
+        echo  "#########################################################"
+
+
+#############################################################
+##             Dependencies                                ##
+#############################################################
+
+bsptcpl.o: bsptcpl.lc bsptcpl.h

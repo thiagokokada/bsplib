@@ -1,0 +1,290 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997,1998 University of Oxford           %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id$
+% $Log$
+
+\begin{code}
+#include <stdarg.h>
+#include <stdlib.h>
+#include <stddef.h>
+#include "bsp_lib.h"
+#include "bsp_lib_f77.h"
+
+#ifdef CRAYMPP
+#include <fortran.h>
+extern char *bsp_craystr_cstr(_fcd);
+#define F77STRHEADER(f,l) _fcd f
+#define F77STR(f,l) bsp_craystr_cstr(f)
+#else
+#define F77STRHEADER(f,l) char *f, int l
+#define F77STR(f,l) bsp_f77str_cstr(f,l)
+
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Basic BSP functions}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+int BSPPID() {
+  return (bsp_pid());
+}
+
+int BSPNPROCS() {
+  return(bsp_nprocs());
+}
+\end{code}
+
+
+Moved the following into \texttt{bsp\_lib\_mpass/shmem/drma.lc} because
+initialisation is platform and language specific.
+
+\begin{verbatim}
+   void BSPBEGIN(int *maxprocs); 
+   void BSPINIT(void (*startproc)(void))
+\end{verbatim}
+
+\begin{code}
+void BSPEND() {
+  bsp_end();
+}
+\end{code}
+
+Fortran passess \texttt{CHARACTER*N} as a \texttt{char*} followed by
+an integer which represents \texttt{N}.
+\begin{code}
+void BSPSYNC() {
+  bsp_sync_cpp(0,"not_profiled");
+}
+
+void BSPSYNC_CPP(int* lineno, F77STRHEADER(filename,len)) {
+#if defined(TURBO) && !defined(PROFILE)
+  bsp_sync_cpp(0,"unprofiled");
+#else
+  char *str = F77STR(filename,len);
+  bsp_sync_cpp(*lineno,str);
+  free(str);
+#endif
+}
+\end{code}
+
+\begin{code}
+void BSPPUSHREGISTER(void *addr,int *size) {
+  bsp_push_reg_cpp(addr,*size,0,"unprofiled");
+}
+
+void BSPPUSHREG(void *addr,int *size) {
+  bsp_push_reg_cpp(addr,*size,0,"unprofiled");
+}
+
+void BSPPUSHREG_CPP(void *addr,int *size,int* lineno,
+		    F77STRHEADER(filename,len)) {
+#if defined(TURBO) && !defined(PROFILE)
+  bsp_push_reg_cpp(addr,*size,0,"unprofiled");
+#else
+  char *str = F77STR(filename,len);
+  bsp_push_reg_cpp(addr,*size,*lineno,str);
+  free(str);
+#endif
+}
+\end{code}
+
+\begin{code}
+void BSPPOPREG(void *addr) {
+  bsp_pop_reg_cpp(addr,0,"unprofiled");
+}
+void BSPPOPREGISTER(void *addr) {
+  bsp_pop_reg_cpp(addr,0,"unprofiled");
+}
+
+void BSPPOPREG_CPP(void *addr, int* lineno,F77STRHEADER(filename,len)) {
+#if defined(TURBO) && !defined(PROFILE)
+  bsp_pop_reg_cpp(addr,0,"unprofiled");
+#else
+  char *str = F77STR(filename,len);
+  bsp_pop_reg_cpp(addr,*lineno,str);
+  free(str);
+#endif
+}
+\end{code}
+
+\begin{code}
+void BSPGET(int *pid, void *src, int *offset, void *dst, int *nbytes) {
+  bsp_get_cpp(*pid,src,*offset,dst,*nbytes,0,"unprofiled");
+}
+
+void BSPGET_CPP(int *pid, void *src, int *offset, void *dst, int *nbytes,
+                int* lineno,F77STRHEADER(filename,len)) {
+#if defined(TURBO) && !defined(PROFILE)
+  bsp_get_cpp(*pid,src,*offset,dst,*nbytes,0,"unprofiled");
+#else
+  char *str = F77STR(filename,len);
+  bsp_get_cpp(*pid,src,*offset,dst,*nbytes,*lineno,str);
+  free(str);
+#endif
+}
+\end{code}
+
+\begin{code}
+void BSPHPGET(int *pid, void *src, int *offset, void *dst, int *nbytes) {
+  bsp_get_cpp(*pid,src,*offset,dst,*nbytes,0,"unprofiled");
+}
+
+void BSPHPGET_CPP(int *pid, void *src, int *offset, void *dst, int *nbytes,
+                  int* lineno,F77STRHEADER(filename,len)) {
+#if defined(TURBO) && !defined(PROFILE)
+  bsp_hpget_cpp(*pid,src,*offset,dst,*nbytes,0,"unprofiled");
+#else
+  char *str = F77STR(filename,len);
+  bsp_hpget_cpp(*pid,src,*offset,dst,*nbytes,*lineno,str);
+  free(str);
+#endif
+}
+\end{code}
+
+\begin{code}
+void BSPPUT(int *pid, void *src, void *dst, int *offset, int *nbytes) {
+  bsp_put_cpp(*pid,src,dst,*offset,*nbytes,0,"unprofiled");
+}
+
+void BSPPUT_CPP(int *pid, void *src, void *dst, int *offset, int *nbytes,
+                int* lineno,F77STRHEADER(filename,len)) {
+#if defined(TURBO) && !defined(PROFILE)
+  bsp_put_cpp(*pid,src,dst,*offset,*nbytes,0,"unprofiled");
+#else
+  char *str = F77STR(filename,len);
+  bsp_put_cpp(*pid,src,dst,*offset,*nbytes,*lineno,str);
+  free(str);
+#endif
+}
+\end{code}
+
+\begin{code}
+void BSPHPPUT(int *pid, void *src, void *dst, int *offset, int *nbytes) {
+  bsp_hpput_cpp(*pid,src,dst,*offset,*nbytes,0,"unprofiled");
+}
+
+void BSPHPPUT_CPP(int *pid, void *src, void *dst, int *offset, int *nbytes,
+                int* lineno,F77STRHEADER(filename,len)) {
+#if defined(TURBO) && !defined(PROFILE)
+  bsp_hpput_cpp(*pid,src,dst,*offset,*nbytes,0,"unprofiled");
+#else
+  char *str = F77STR(filename,len);
+  bsp_hpput_cpp(*pid,src,dst,*offset,*nbytes,*lineno,str);
+  free(str);
+#endif
+}
+\end{code}
+
+\begin{code}
+void BSPABORT(F77STRHEADER(string,len)) { 
+  bsp_abort(F77STR(string,len));
+}
+\end{code}
+
+\begin{code}
+double BSPTIME()  {return(bsp_time()); } 
+double BSPDTIME() {return(bsp_dtime());}
+\end{code}
+
+
+\begin{code}
+void BSPSETTAGSIZE(int *tag_bytes) {
+  bsp_set_tagsize_cpp(tag_bytes,0,"unprofiled");
+}
+
+void BSPSETTAGSIZE_CPP(int *tag_bytes,
+                       int* lineno,F77STRHEADER(filename,len)) {
+#if defined(TURBO) && !defined(PROFILE)
+  bsp_set_tagsize_cpp(tag_bytes,0,"unprofiled");
+#else
+  char *str = F77STR(filename,len);
+  bsp_set_tagsize_cpp(tag_bytes,*lineno,str);
+  free(str);
+#endif
+}
+\end{code}
+
+\begin{code}
+void BSPQSIZE(int *packets,int *accum_nbytes) {
+  bsp_qsize_cpp(packets,accum_nbytes,0,"unprofiled");
+}
+
+void BSPQSIZE_CPP(int *packets,int *accum_nbytes,
+                  int* lineno,F77STRHEADER(filename,len)) {
+#if defined(TURBO) && !defined(PROFILE)
+  bsp_qsize_cpp(packets,accum_nbytes,0,"unprofiled");
+#else
+  char *str = F77STR(filename,len);
+  bsp_qsize_cpp(packets,accum_nbytes,*lineno,str);
+  free(str);
+#endif
+}
+\end{code}
+
+
+\begin{code}
+void BSPGETTAG(int *status,void *tag) {
+  bsp_get_tag_cpp(status,tag,0,"unprofiled");
+}
+
+void BSPGETTAG_CPP(int *status,void *tag,
+                   int* lineno,F77STRHEADER(filename,len)) {
+#if defined(TURBO) && !defined(PROFILE)
+  bsp_get_tag_cpp(status,tag,0,"unprofiled");
+#else
+  char *str = F77STR(filename,len);
+  bsp_get_tag_cpp(status,tag,*lineno,str);
+  free(str);
+#endif
+}
+\end{code}
+
+\begin{code}
+void BSPSEND(int *pid, void *tag, void *payload, int *nbytes) {
+  bsp_send_cpp(*pid,tag,payload,*nbytes,0,"unprofiled");
+}
+
+
+void BSPSEND_CPP(int *pid, void *tag, void *payload, int *nbytes,
+                 int* lineno,F77STRHEADER(filename,len)) {
+#if defined(TURBO) && !defined(PROFILE)
+  bsp_send_cpp(*pid,tag,payload,*nbytes,0,"unprofiled");
+#else
+  char *str = F77STR(filename,len);
+  bsp_send_cpp(*pid,tag,payload,*nbytes,*lineno,str);
+  free(str);
+#endif
+}
+\end{code}
+
+\begin{code}
+void BSPMOVE(void *payload,int *nbytes) {
+  bsp_move_cpp(payload,*nbytes,0,"unprofiled");
+}
+
+void BSPMOVE_CPP(void *payload,int *nbytes,
+                 int* lineno,F77STRHEADER(filename,len)) {
+#if defined(TURBO) && !defined(PROFILE)
+  bsp_move_cpp(payload,*nbytes,0,"unprofiled");
+#else
+  char *str = F77STR(filename,len);
+  bsp_move_cpp(payload,*nbytes,*lineno,str);
+  free(str);
+#endif
+}
+\end{code}

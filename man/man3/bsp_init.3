@@ -1,0 +1,173 @@
+.TH "bsp_init" 3 "1.4 25/9/98" "Oxford BSP Toolset" "BSPlib FUNCTIONS"
+.SH NAME
+bsp_init \- initialise the BSPlib system
+
+.SH C SYNOPSIS
+.nf
+.B #include \&"bsp.h\&"
+.PP
+.BI "void bsp_init(void (*" startproc\c 
+.BI ")(void), int " argc\c
+.BI ", char ** " argv ");"
+.fi
+.SH FORTRAN SYNOPSIS 
+.nf
+.BI "SUBROUTINE bspinit(" startproc ")"
+.B INTERFACE
+.BI"   SUBROUTINE " startproc
+.B END INTERFACE
+.fi
+
+.SH DESCRIPTION
+The purpose of 
+.B bsp_init
+is to support a mode of process intialisation that allows a single
+process to start execution and determine the number of parallel
+processes required for a calculation. The desired number of processes
+are then spawned using
+.B bsp_begin(3)\c
+\&. Execution of the spawned processes continues in a SPMD manner
+until 
+.B bsp_end(3) 
+is encountered by all the processes. At that point, all processes
+except process zero are terminated, and process zero is left to
+continue execution of the rest of the program sequentially.
+.PP
+The procedure
+.B bsp_init
+enables the implementation of BSPlib to simulate this dynamic
+spawning mechanism by giving a hint to the BSPlib system that SPMD
+computation will commence inside the procedure
+.I startproc\c
+\&. The procedure named in 
+.B bsp_init
+must contain 
+.B bsp_begin(3)
+and
+.B bsp_end(3)
+as its first and last statements.
+
+
+.SH EXAMPLES
+.IP 1
+A C implementation of a simple 
+.I hello world
+program, that spawns a number of processes determined by user-driven
+input.
+.PP
+
+.RS
+.nf
+#include <stdio.h>
+#include "bsp.h"
+
+int n; /* global variable
+
+void spmd_part() {
+  bsp_begin(n);
+    printf("Hello BSP Worldwide from process %d of %d\n",
+           bsp_pid(),bsp_nprocs());      
+  bsp_end();
+}
+
+void main(int argc, char **argv) {
+  bsp_init(spmd_part,argc,argv);
+  printf("How many processes? ");
+  scanf("%d",&n);
+  printf("Only one process should print this\\n");
+  spmd_start();
+  printf("Just about to finish\\n");
+}
+.fi
+.RE
+
+When the above program is executed a single process will begin
+execution and read a number from standard input that specifies the
+number of parallel processes to be spawned. The desired number of
+processes will then be spawned within the procedure
+.I spmd_part\c
+\&, and each process will print the string ``Hello BSP Worldwide''.
+
+An example compilation and execution is shown below:
+
+.RS
+.nf
+pippin> bspcc test.c -o hello
+pippin> ./hello
+How many processes? 4
+Only one process should print this
+Hello BSP Worldwide from process  1 of 4
+Hello BSP Worldwide from process  2 of 4
+Hello BSP Worldwide from process  0 of 4
+Hello BSP Worldwide from process  3 of 4
+Just about to finish
+.fi
+.RE
+
+.IP 2
+A Fortran 77 implementation of a simple 
+.I hello world
+program, that spawns a number of processes determined by user-driven
+input.
+
+.RS
+.nf
+        SUBROUTINE spmdpart
+          INCLUDE 'fbsp.h'
+          INTEGER nprocs
+          COMMON /global/ nprocs
+
+          CALL bspbegin(nprocs)
+            WRITE (*,*) 'Hello BSP Worldwide from process',
+     +                  bsppid(), ' of ',bspnprocs()
+          CALL bspend()
+        END
+
+
+        PROGRAM MAIN
+          EXTERNAL spmdpart
+          INTEGER nprocs
+          COMMON /global/ nprocs
+
+          CALL bspinit(spmdpart)
+          READ *,nprocs
+          CALL spmdpart
+        END
+.fi
+.RE
+
+An example compilation and execution is shown below:
+
+.RS
+.nf
+pippin> bspf77 test.f -o hello
+pippin> ./hello
+4
+Hello BSP Worldwide from process	0	of	4
+Hello BSP Worldwide from process	2	of	4
+Hello BSP Worldwide from process	3	of	4
+Hello BSP Worldwide from process	1	of	4
+.fi
+.RE
+
+.SH "SEE ALSO"
+bsplib(3), bsp_begin(3), bsp_end(3)
+
+.I ``BSPlib: The BSP Programming Library''
+Jonathan M. D. Hill, Bill McColl, Dan C. Stefanescu, Mark W. Goudreau,
+Kevin Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and Rob
+Bisseling. Parallel Computing, to appear 1998. See
+.I http://www.bsp-worldwide.org
+for more details.
+
+.SH BUGS
+Problems and bug reports should be mailed to 
+.I bsplib-bugs@comlab.ox.ac.uk
+
+.SH AUTHORS
+The Oxford BSP Toolset implementation of BSPlib was written by
+Jonathan.Hill@comlab.ox.ac.uk
+.br
+.B http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+

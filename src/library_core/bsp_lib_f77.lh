@@ -1,0 +1,172 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id$
+% $Log$
+\begin{code}
+#ifdef F2CUNDERSCORE
+#ifndef UNDERSCORE
+#define UNDERSCORE
+#endif
+#undef  DOUBLEUNDERSCORE
+#undef  UPPERCASE
+#undef  LOWERCASE
+#endif
+
+#ifdef UNDERSCORE
+#define BSPINIT             bspinit_
+#define BSPBEGIN            bspbegin_
+#define BSPEND              bspend_
+#define BSPPID              bsppid_
+#define BSPNPROCS           bspnprocs_
+#define BSPTIME             bsptime_
+#define BSPDTIME            bspdtime_
+#define BSPSYNC             bspsync_
+#define BSPPUSHREGISTER     bsppushregister_
+#define BSPPOPREGISTER      bsppopregister_
+#define BSPPUSHREG          bsppushreg_
+#define BSPPOPREG           bsppopreg_
+#define BSPPUT              bspput_
+#define BSPHPPUT            bsphpput_
+#define BSPGET              bspget_
+#define BSPHPGET            bsphpget_
+#define BSPSETTAGSIZE       bspsettagsize_
+#define BSPQSIZE            bspqsize_
+#define BSPSEND             bspsend_
+#define BSPGETTAG           bspgettag_
+#define BSPMOVE             bspmove_
+#define BSPABORT            bspabort_
+
+#define BSPSYNC_CPP         cppsync_
+#define BSPPUSHREG_CPP      cpppushreg_
+#define BSPPOPREG_CPP       cpppopreg_
+#define BSPPUT_CPP          cppput_
+#define BSPHPPUT_CPP        cpphpput_
+#define BSPGET_CPP          cppget_
+#define BSPHPGET_CPP        cpphpget_
+#define BSPSETTAGSIZE_CPP   cppsettagsize_
+#define BSPQSIZE_CPP        cppqsize_
+#define BSPSEND_CPP         cppsend_
+#define BSPGETTAG_CPP       cppgettag_
+#define BSPMOVE_CPP         cppmove_
+
+#define GETARG              getarg_
+#define IARGC               iargc_
+
+#else
+#ifdef DOUBLEUNDERSCORE
+#define BSPINIT             bspinit__
+#define BSPBEGIN            bspbegin__
+#define BSPEND              bspend__
+#define BSPPID              bsppid__
+#define BSPNPROCS           bspnprocs__
+#define BSPTIME             bsptime__
+#define BSPDTIME            bspdtime__
+#define BSPSYNC             bspsync__
+#define BSPPUSHREGISTER     bsppushregister__
+#define BSPPOPREGISTER      bsppopregister__
+#define BSPPUSHREG          bsppushreg__
+#define BSPPOPREG           bsppopreg__
+#define BSPPUT              bspput__
+#define BSPHPPUT            bsphpput__
+#define BSPGET              bspget__
+#define BSPHPGET            bsphpget__
+#define BSPSETTAGSIZE       bspsettagsize__
+#define BSPQSIZE            bspqsize__
+#define BSPSEND             bspsend__
+#define BSPGETTAG           bspgettag__
+#define BSPMOVE             bspmove__
+#define BSPABORT            bspabort__
+
+#define BSPSYNC_CPP         cppsync__
+#define BSPPUSHREG_CPP      cpppushreg__
+#define BSPPOPREG_CPP       cpppopreg__
+#define BSPPUT_CPP          cppput__
+#define BSPHPPUT_CPP        cpphpput__
+#define BSPGET_CPP          cppget__
+#define BSPHPGET_CPP        cpphpget__
+#define BSPSETTAGSIZE_CPP   cppsettagsize__
+#define BSPQSIZE_CPP        cppqsize__
+#define BSPSEND_CPP         cppsend__
+#define BSPGETTAG_CPP       cppgettag__
+#define BSPMOVE_CPP         cppmove__
+
+#define GETARG              getarg__
+#define IARGC               iargc__
+#else
+#ifdef UPPERCASE
+/* Use the defined names */
+
+#define BSPSYNC_CPP         CPPSYNC
+#define BSPPUSHREG_CPP      CPPPUSHREG
+#define BSPPOPREG_CPP       CPPPOPREG
+#define BSPPUT_CPP          CPPPUT
+#define BSPHPPUT_CPP        CPPHPPUT
+#define BSPGET_CPP          CPPGET
+#define BSPHPGET_CPP        CPPHPGET
+#define BSPSETTAGSIZE_CPP   CPPSETTAGSIZE
+#define BSPQSIZE_CPP        CPPQSIZE
+#define BSPSEND_CPP         CPPSEND
+#define BSPGETTAG_CPP       CPPGETTAG
+#define BSPMOVE_CPP         CPPMOVE
+#else
+
+#define BSPINIT             bspinit
+#define BSPBEGIN            bspbegin
+#define BSPEND              bspend
+#define BSPPID              bsppid
+#define BSPNPROCS           bspnprocs
+#define BSPTIME             bsptime
+#define BSPDTIME            bspdtime
+#define BSPSYNC             bspsync
+#define BSPPUSHREGISTER     bsppushregister
+#define BSPPOPREGISTER      bsppopregister
+#define BSPPUSHREG          bsppushreg
+#define BSPPOPREG           bsppopreg
+#define BSPPUT              bspput
+#define BSPHPPUT            bsphpput
+#define BSPGET              bspget
+#define BSPHPGET            bsphpget
+#define BSPSETTAGSIZE       bspsettagsize
+#define BSPQSIZE            bspqsize
+#define BSPSEND             bspsend
+#define BSPGETTAG           bspgettag
+#define BSPMOVE             bspmove
+#define BSPABORT            bspabort
+#define GETARG              getarg
+#define IARGC               iargc
+
+#define BSPSYNC_CPP         cppsync
+#define BSPPUSHREG_CPP      cpppushreg
+#define BSPPOPREG_CPP       cpppopreg
+#define BSPPUT_CPP          cppput
+#define BSPHPPUT_CPP        cpphpput
+#define BSPGET_CPP          cppget
+#define BSPHPGET_CPP        cpphpget
+#define BSPSETTAGSIZE_CPP   cppsettagsize
+#define BSPQSIZE_CPP        cppqsize
+#define BSPSEND_CPP         cppsend
+#define BSPGETTAG_CPP       cppgettag
+#define BSPMOVE_CPP         cppmove
+
+#define GETARG              getarg
+#define IARGC               iargc
+
+#endif
+#endif
+#endif
+\end{code}
+

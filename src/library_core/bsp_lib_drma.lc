@@ -1,0 +1,902 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997,1998 University of Oxford           %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id$
+% $Log$
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Body of code for DRMA architectures}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+#include "bsp_lib.h"
+#include "bsp_profile.h"
+#include "bsp_contentionfree.h"
+#ifdef CRAYPVP
+#include <sys/types.h>
+#include <unistd.h>
+#include <signal.h>
+#endif
+
+
+STATIC void dumpFifoCommTable(char*,_BSPcomm_thunk**,int*);
+STATIC void bsmp_buffersizes();
+STATIC void bspEnlargeFifo(char*,_BSPcomm_thunk**,int);
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Per-process global variables}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+int _bsp_pid=0;       /* An indivduals process number. */
+                      /* (different on each process)   */
+int _bsp_nprocs=0;    /* Total number of BSP processes */
+
+int _bsp_fork_nprocs; /* Number of processes at startup*/
+
+int _bsp_done_begin=0, _bsp_done_init=0;
+
+_BSPinfo _drma;     /* Global variables required for DRMA */
+
+static int _bsp_finished=0;
+#ifdef CRAYPVP
+static pid_t _bsp_children_static[BSP_MAX_PROCS];
+pid_t *_bsp_children=NULL;
+#endif
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Common code to all versions of the BSP library}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+The following is included here, and not linked into the library. The
+reason for this is efficiency, as some data-structures are static, and
+wouldn't otherwise be visible in the respective files. The efficiency
+of static arrays (e.g., the address table) is far better than
+dynamically allocated arrays on some pipelined architectures because
+the compiler can often speculatively prefetch information. 
+\begin{code}
+#include "bsp_lib_common.h"
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Initialisation: \texttt{bsp\_init}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+This routine is common to \texttt{bsp\_begin} and
+\texttt{bsp\_init}. It is called only once in a \bsplib{} program.
+
+\begin{code}
+STATIC void bsp_init_setup(int main_is_fortran,int argc,char **argv) {
+  int    errno=0;
+  
+  /* Procedure defined by the BSP compilation driver bspfront */
+  _bsp_preload_init();  
+  bsp_check_setup_before_init();
+
+#ifdef CRAYMPP
+  if (main_is_fortran)
+    errno  = f77whatis_nprocs_mypid(&_bsp_fork_nprocs,&_bsp_pid);
+  else
+    errno  = cwhatis_nprocs_mypid(&argc,&argv,&_bsp_fork_nprocs,&_bsp_pid);
+
+  init_pid_mapping(_bsp_fork_nprocs,&_bsp_pid);
+#else
+  _bsp_fork_nprocs = BSP_MAX_PROCS;
+#endif
+
+
+  _bsp_nprocs = _bsp_fork_nprocs; /* This may be changed by start */
+  if (_bsp_fork_nprocs > BSP_MAX_PROCS) 
+    bsp_abort("{main}: BSP_MAX_PROCS too small (=%d) . Recompile library",
+              BSP_MAX_PROCS);
+  if (errno)
+    bsp_abort("{main}: parallel program wouldn't start");
+}
+\end{code}
+
+Fortran and C bindings for \texttt{bsp\_init}.
+\begin{code}
+void BSPINIT(void (*startproc)(void)) {
+  extern void _bsp_init(void (*)(void));
+
+  _bsp_done_init=1;
+  bsp_init_setup(1,0,NULL);
+  _bsp_init(startproc);
+}
+
+void bsp_init_cpp(void (*startproc)(void),int argc,char **argv,
+                  int lineno, const char* filename) {
+  extern void _bsp_init(void (*)(void));
+
+  _bsp_done_init=1;
+  bsp_init_setup(0,argc,argv);
+  _bsp_init(startproc);
+}
+
+void _bsp_init(void (*startproc)(void)) {
+  if (_bsp_pid==0) {
+    /* If processor zero, then just return from this procedure. */
+  } else {
+    
+    /* Call  the procedure that contained bsp_start. Remember that    */
+    /* bsp_finish must be called during the lifetime of the procedure */
+    (*startproc)();
+    bsp_abort("Leaving the scope of the procedure that contained "
+              "bsp_start before finding a bsp_finish.");
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Starting a BSP process: \texttt{bsp\_begin}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+void BSPBEGIN(int *maxprocs) {
+  extern void _bsp_begin(int,int);
+  if (!_bsp_done_init) bsp_init_setup(1,0,NULL); 
+  _bsp_begin(1,*maxprocs);
+  _bsp_done_begin=1;
+#ifdef REALDEBUG
+  bsp_begin_end();
+#endif
+}
+
+void bsp_begin(int maxprocs) {
+  extern void _bsp_begin(int,int);
+  if (!_bsp_done_init) bsp_init_setup(0,0,NULL); 
+  _bsp_begin(0,maxprocs);
+  _bsp_done_begin=1;
+#ifdef REALDEBUG
+  bsp_begin_end();
+#endif
+}
+\end{code}
+
+Determine the number of processors requested by the user on process
+zero, and broadcast the value to all processors.
+\begin{code}
+void _bsp_begin(int main_is_fortran,int maxprocs) {
+  extern void kill_process(int);
+  extern void kill_all_processors(int);
+  int *gids,i,errno;
+  char* junk;
+ 
+  if (_bsp_pid==0) {
+    if      (_bsp_done_begin) bsp_abort("{bsp_begin}:already started");
+    else if (maxprocs<0)     bsp_abort("{bsp_begin}:positive number required");
+    else if (maxprocs==0)    _bsp_nprocs = _bsp_fork_nprocs;
+    else 
+      _bsp_nprocs = (maxprocs>_bsp_fork_nprocs)?_bsp_fork_nprocs:maxprocs;
+  }
+#ifdef CRAYPVP
+  start_pes(_bsp_nprocs);
+  if (main_is_fortran)
+    errno  = f77whatis_nprocs_mypid(&_bsp_fork_nprocs,&_bsp_pid);
+  else
+    errno  = cwhatis_nprocs_mypid(&argc,&argv,&_bsp_fork_nprocs,&_bsp_pid);
+  init_pid_mapping(_bsp_fork_nprocs,&_bsp_pid);
+  _bsp_nprocs = _bsp_fork_nprocs;
+#endif
+  init_barrier();
+  if (_bsp_nprocs>1) drma_broadcast_nprocs();
+#ifdef DEBUG
+  bsp_debug("{bsp_begin} process %d starting",_bsp_pid);
+#endif
+#ifdef CRAYPVP
+  signal(SIGHUP,  kill_all_processors);
+  signal(SIGTERM, kill_all_processors);
+  signal(SIGINT,  kill_all_processors);
+  signal(SIGQUIT, kill_all_processors);
+  signal(SIGABRT, kill_all_processors);
+  signal(SIGFPE,  kill_all_processors);
+#ifndef REALDEBUG
+  signal(SIGSEGV, kill_all_processors); 
+  signal(SIGBUS,  kill_all_processors); 
+#endif
+  _bsp_children = _bsp_children_static;
+  _bsp_children[_bsp_pid] = getpid();
+   barrier_sync();
+   for(i=0;i<_bsp_fork_nprocs;i++)
+     if (i!=_bsp_pid) 
+        drma_get(i,&_bsp_children[i],&_bsp_children[i],SIZEOF(int));
+   barrier_sync();
+#endif
+  _bsp_done_begin = 1;
+  bsp_check_setup_after_init();
+\end{code}
+
+Idle unwanted processors idle by repeatedly barrier synchronising.
+\begin{code}
+  if (_bsp_pid >= _bsp_nprocs) {
+    /* Spin until all processors have finished the program */
+    while (!_bsp_finished) barrier_sync();
+    
+    /* Finished, but do a few more to make sure 
+       everyone finishes in synchrony */ 
+
+    while(_drma.syncs%4) barrier_sync();
+#ifdef DEBUG
+    bsp_debug("{bsp_start}: process not needed so exiting");
+#endif
+    drma_exit(0);
+  }
+  
+\end{code}
+
+Initialise the DMRA global variable structure.
+\begin{code}
+  init_drma_lock(_drma.mutex);
+  /* Create in and out message queues */
+  _drma.proc_comm_put_fifo
+    = CALLOC(_bsp_nprocs,SIZEOF(_BSPcomm_thunk*));
+  _drma.proc_comm_get_fifo
+    = CALLOC(_bsp_nprocs,SIZEOF(_BSPcomm_thunk*));
+  if (_drma.proc_comm_put_fifo==NULL || _drma.proc_comm_get_fifo==NULL )
+    bsp_abort("{bsp_begin}: unable to create outer comm fifo");
+
+  for(i=0;i<_bsp_nprocs;i++) {
+    _drma.proc_comm_put_fifo[i]
+      = CALLOC(_bsp_comm_fifo_size,SIZEOF(_BSPcomm_thunk));
+    _drma.proc_comm_get_fifo[i]
+      = CALLOC(_bsp_comm_fifo_size,SIZEOF(_BSPcomm_thunk));
+    if (_drma.proc_comm_put_fifo[i]==NULL || _drma.proc_comm_get_fifo[i]==NULL)
+      bsp_abort("{bsp_begin}: unable to create inner comm fifo %d of %d bytes",
+		i,_bsp_comm_fifo_size);
+  }
+  _drma.proc_comm_put_next=CALLOC(_bsp_nprocs,SIZEOF(int));
+  _drma.proc_comm_get_next=CALLOC(_bsp_nprocs,SIZEOF(int));
+  _drma.proc_comm_put_size=CALLOC(_bsp_nprocs,SIZEOF(int));
+  _drma.proc_comm_get_size=CALLOC(_bsp_nprocs,SIZEOF(int));
+  if (_drma.proc_comm_put_next==NULL ||
+      _drma.proc_comm_put_size==NULL ||
+      _drma.proc_comm_get_next==NULL ||
+      _drma.proc_comm_get_size==NULL )
+    bsp_abort("{bsp_begin} unable to create next array");
+  for(i=0;i<_bsp_nprocs;i++) {
+   _drma.proc_comm_put_next[i]=0;
+   _drma.proc_comm_put_size[i]=_bsp_comm_fifo_size;
+   _drma.proc_comm_get_next[i]=0;
+   _drma.proc_comm_get_size[i]=_bsp_comm_fifo_size;
+  } 
+
+  _drma.bsmp_sizes = CALLOC(_bsp_nprocs,SIZEOF(int));
+  if (_drma.bsmp_sizes==NULL)
+    bsp_abort("{bsp_begin} unable to allocate bsmp sizes array");
+  for(i=0;i<_bsp_nprocs;i++) _drma.bsmp_sizes[i]=0;
+\end{code}
+
+On the T3D we have a few problems in that the primitive one-sided
+communications only work if the remote address of a DRMA operation is
+well defined on the local process. This is OK for the Cray Shmem
+library as all communication is supposed to be to and from static
+data-structures. However, \bsplib{} is defined for heap and stack allocated
+data as well. Registration overcomes the problem of determining the
+address of data on the remote process, \emph{but that address may be
+outside the address space of the processor doing the
+communication}. We circumvent the problem by enlarging each processors
+address space to the limit---a better solution is required!!
+
+\begin{verbatim}
+/*Don't use brk....doesn't seem to work on the T3D
+  if (_bsp_nprocs>1) {
+    if ((brk(((char *)0) + ulimit(3,0))) == -1)
+       bsp_abort("{bsp_begin} unable to enlarge processes address space");
+  }
+*/
+\end{verbatim}
+
+We enlarge the address space by mallocing increasing amounts of data.
+\begin{code}
+#ifdef CRAYMPP
+  if (_bsp_nprocs>1) {
+    /* First quickly enlarge memory to limit */
+    for(i=1;;i=2*i) {
+      junk = malloc(i);
+      if (junk==NULL) break;
+      free(junk);
+    }
+    i = i/2;
+    /* Then slowly enlarge to limit */
+    for(;;i+=1024) {
+      junk = malloc(i);
+      if (junk==NULL) break;
+      free(junk);
+    }
+  }
+#endif
+\end{code}
+
+The timers across each of the processors are not synchronised. We
+therefore barrier synchronise a few times for the processors to start
+working instep, and then initialise the timing routines. The
+time-shift between the processors may be quite large....
+\begin{code}
+  for(i=0;i<10;i++) barrier_sync();
+  bsp_time_init();    
+  config_contention_free_communication();
+  process_globals_init();
+  bsp_sync_cpp(__LINE__,"bsp_begin");
+  bsplib_routines_init();
+}
+\end{code}
+
+    
+      
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Finishing a BSP process: \texttt{bsp\_end}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_end() {
+  int i;
+
+#ifdef PROFILE
+  _bsp_lineno   = 0;
+  _bsp_filename = "bsp_end";
+  bspprof_sstep_start();
+#endif
+  barrier_sync();
+#ifdef PROFILE
+  bspprof_sstep_fix();
+  bspprof_sstep_end();
+  bspprof_close();
+#endif
+
+#ifdef STATISTICS
+  if (_bsp_do_stat) bspstat_close();
+#endif
+
+  while (_drma.syncs%4) barrier_sync();
+
+  _bsp_finished=1;
+  for(i=_bsp_nprocs;i<_bsp_fork_nprocs;i++)
+    drma_put(i,&_bsp_finished,&_bsp_finished,SIZEOF(int));
+  barrier_sync();
+  while(_drma.syncs%4) barrier_sync();
+  
+  if (_bsp_pid > 0) drma_exit(0);
+  /* Only process zero should get here */
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{\texttt{bsp\_sync}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+This routine is really the heart of \bsplib{}. As all communications
+actions are actually delayed, this routine does the routing of the
+delayed messages. The problem is to therefore route a $h$-relation
+efficiently, whilst ensuring the correct \bsplib{} semantics.
+\begin{code}
+void bsp_sync_cpp(int lineno,const char* filename) {
+  int i,j , bucket,src,out_togo;
+  int no_put_messages=0, no_get_messages=0, any_gets=0;
+  _BSPcomm_thunk *comm_thunk;
+  char *dst_get, *src_get;
+
+#ifdef PROFILE
+  bspprof_sstep_start();
+#endif
+#ifdef STATISTICS
+  _bspstat.super_steps++;
+#endif
+#if defined(PROFILE) || !defined(TURBO)
+  _bsp_lineno   = lineno;
+  if (filename==NULL) _bsp_filename="<null>";
+  else                _bsp_filename=(char*)filename;
+#endif
+\end{code}
+
+Standard out and error are automatically flushed when sanity checking
+is turned on. A variety of checks are performed here to ensure:
+
+\begin{enumerate}
+\item The number of registrations performed by all of the processors
+is consistent.
+\item The processors all go through the same textual superstep if the
+\texttt{bspfront} option \texttt{-fcheck-syncs} is on.
+\end{enumerate}
+\begin{code}
+#ifdef SANITY_CHECK
+  fflush(stdout);
+  fflush(stderr);
+  if (!_bsp_constant(bsp_register_total()))
+    bsp_error_reg_inconsitent();
+
+  if (_bsp_check_syncs && 
+      !_bsp_constant((lineno*20000) + (hashpjw(_bsp_filename) % 20000)))
+    bsp_error_sync_out_of_phase(lineno,_bsp_filename);
+#endif
+\end{code}
+
+BSMP is built on top of \bsplib{}'s DRMA facilities. This works by
+allocating $p$ system buffers per process that each handle messages
+from each of the $p$ processors. The problem we need to solve is to
+ensure that these buffers are always big enough for any relevant
+\texttt{bsp\_send} messages. We solve this problem by incrementing the
+sizes of each of these buffers on demand. This is done by doing a
+quick total exchange here on the total sizes of the BSMP messages that
+will enter each process. Appropriate sized buffers are then allocated.
+\begin{code}
+  bsmp_buffersizes(); /* This doesn't need a barrier to fence it in
+                         as we have two arrays which we write/read */
+  if (_bsp_opt_fcombine_puts) bspcombputs_flush();
+  init_contention_free_communication();
+  barrier_sync(); 
+  for(i=0;i<_bsp_nprocs;i++) 
+    _bsmp.incoming_messages_size[i] = _bsmp.incoming_messages_size_safe[i];
+#ifdef PROFILE
+  /* Fixed point within a superstep where all timing is relative to */
+  bspprof_sstep_fix();
+#endif
+  if (_bsp_opt_bsmp_buffer_size==BSMP_INFINITE_BUFFERS) {
+    bsmp_enlargebuffers();
+    barrier_sync();
+    bsmp_reregisterbuffers();
+    /* barrier_sync();
+    
+       Don't need another sync, as sends are implemented ontop of
+       puts, and there is a barrier between puts and gets */
+  }
+\end{code}
+
+First we need to do the memory copy that is required of any gets to
+and from the same procesor.
+\begin{code}
+  for(i=0;i<_drma.proc_comm_get_next[_bsp_pid];i++) {
+    comm_thunk=&_drma.proc_comm_get_fifo[_bsp_pid][i];
+    if (COMM_IS_GETLIKE(comm_thunk->comm_pid)) {
+#ifdef SANITY_CHECK
+          if (bsp_register_nbytes(comm_thunk->addr_global,_bsp_pid) - 
+                comm_thunk->offset < comm_thunk->nbytes)
+            bsp_error_reg_small(_bsp_pid,comm_thunk->addr_global,
+                                comm_thunk->nbytes,comm_thunk->offset);
+#endif
+          MEMCPY(comm_thunk->addr_real,
+                 bsp_register_global_to_local(comm_thunk->addr_global,
+					      _bsp_pid)+comm_thunk->offset,
+                 comm_thunk->nbytes);
+    }
+  } 
+  _drma.proc_comm_get_next[_bsp_pid]=0;
+\end{code}
+
+The same kind of local copying is then performed for the
+puts---remember that the semantics of \bsplib{} require that all the
+gets occur before any puts!
+\begin{code}
+  for(i=0;i<_drma.proc_comm_put_next[_bsp_pid];i++) {
+    comm_thunk=&_drma.proc_comm_put_fifo[_bsp_pid][i];
+    if (COMM_IS_PUTLIKE(comm_thunk->comm_pid)) {
+#ifdef SANITY_CHECK
+      if (bsp_register_nbytes(comm_thunk->addr_global,_bsp_pid) - 
+            comm_thunk->offset < comm_thunk->nbytes)
+        bsp_error_reg_small(_bsp_pid,comm_thunk->addr_global,
+                            comm_thunk->nbytes,comm_thunk->offset);
+#endif
+      MEMCPY((bsp_register_global_to_local(comm_thunk->addr_global,_bsp_pid)+
+                comm_thunk->offset),
+             (char *) comm_thunk->addr_real,
+             comm_thunk->nbytes);
+    }
+  } 
+  _drma.proc_comm_put_next[_bsp_pid]=0;
+\end{code}
+
+\begin{code}
+#ifdef DEBUG
+  dumpFifoCommTable("Get out table",_drma.proc_comm_get_fifo,
+                    _drma.proc_comm_get_next);
+  dumpFifoCommTable("Put out table",_drma.proc_comm_put_fifo,
+                    _drma.proc_comm_put_next);
+    
+#endif
+\end{code}
+
+Calculate the total number of puts and gets going out of a process. 
+\begin{code}
+  for(i=0;i<_bsp_nprocs;i++) {
+    no_get_messages += _drma.proc_comm_get_next[i];
+    no_put_messages += _drma.proc_comm_put_next[i];
+  }
+  any_gets = no_get_messages>0;
+\end{code}
+
+First perform all the gets. The data incoming from the remote process
+is buffered, and will be copied into the correct destination after all
+the puts have occurred. This ensures that there is no interaction
+between puts and gets as specified in the \bsplib{} semantics.
+\begin{code}
+  if (any_gets) {
+    bucket    =next_contention_free_pid();
+    out_togo  =_drma.proc_comm_get_next[bucket];
+    if (out_togo>0) comm_thunk=_drma.proc_comm_get_fifo[bucket];
+    while (no_get_messages>0) {
+      /* Find a bucket which has something going out */
+      while(out_togo==0) {
+        bucket     = next_contention_free_pid();
+        out_togo   = _drma.proc_comm_get_next[bucket];
+        if (out_togo>0) comm_thunk=_drma.proc_comm_get_fifo[bucket];
+      }
+\end{code}
+
+Check that there are no out of bound communications that may arise on
+the remote process. 
+\begin{code}
+#ifdef SANITY_CHECK
+      if (bsp_register_nbytes(comm_thunk->addr_global,bucket) -
+          comm_thunk->offset < comm_thunk->nbytes)
+        bsp_error_reg_small(bucket,
+                            comm_thunk->addr_global,
+                            comm_thunk->nbytes,
+                            comm_thunk->offset);
+#endif
+      src_get = ((char*)
+	         bsp_register_global_to_local(comm_thunk->addr_global,
+					      bucket))+comm_thunk->offset;
+\end{code}
+
+If a buffered get is performed, then a temporary data-structure is
+created for the destination of the get, and the copying into the
+correct destination is performed at the end of \texttt{bsp\_sync}
+after all the puts have gone out.
+\begin{code}
+      if (COMM_IS_GET(comm_thunk->comm_pid)) {
+        BSP_MALLOC(dst_get,comm_thunk->nbytes,"{bsp_sync}");
+        /* Offset now used to local data */
+        comm_thunk->offset = ((char*)dst_get) - &_bsp_buffget_reference;
+      } else {
+        dst_get =comm_thunk->addr_real;
+      }
+      drma_get(bucket,src_get,dst_get,comm_thunk->nbytes);
+\end{code}
+
+Fiddle around with the statistics to ensure that the remote process
+(where the data is being fetched from) records that the fetched data
+goes out from itself---from a profiling point of view, the one sided
+communications are two-sided as the amount of data leaving and
+entering a process is visualised.
+\begin{code}
+#ifdef STATISTICS
+      _bspstat.packet_puts_dst++;
+      _bspstat.packet_puts_dstnbytes +=comm_thunk->nbytes; 
+      bspstat_outgoing(bucket,comm_thunk->nbytes);
+#endif
+      no_get_messages--;
+      out_togo--;
+      comm_thunk++;
+    }
+  }
+\end{code}
+
+
+Perform a barrier to make sure no get interfers with a put. The puts
+then occur in a similar manner to all the gets. Notice how the puts
+are routed to a destination process in the order specified by
+\texttt{next\_contention\_free\_pid}. This macro picks a random latin
+square as a schedule for each superstep \cite{hill:lessons}.
+\begin{code}
+  barrier_sync();
+  if (no_put_messages>0) {
+    init_contention_free_communication();
+    bucket   =next_contention_free_pid();
+    out_togo =_drma.proc_comm_put_next[bucket];
+    if (out_togo>0) comm_thunk=_drma.proc_comm_put_fifo[bucket];
+    while (no_put_messages>0) {
+      /* Find a bucket which has something going out */
+      while(out_togo==0) {
+        bucket   = next_contention_free_pid();
+        out_togo = _drma.proc_comm_put_next[bucket];
+        if (out_togo>0) comm_thunk=_drma.proc_comm_put_fifo[bucket];
+      }
+#ifdef SANITY_CHECK
+      if (bsp_register_nbytes(comm_thunk->addr_global,bucket) -
+          comm_thunk->offset < comm_thunk->nbytes)
+        bsp_error_reg_small(bucket,
+                            comm_thunk->addr_global,
+                            comm_thunk->nbytes,
+                            comm_thunk->offset);
+#endif
+#ifdef DEBUG
+      bsp_debug("Putting %d bytes into %d at gid=%d=0x%x + %d",
+                comm_thunk->nbytes,bucket,comm_thunk->addr_global,
+                bsp_register_global_to_local(comm_thunk->addr_global,bucket),
+                comm_thunk->offset);
+#endif
+      drma_put(bucket,
+               comm_thunk->addr_real,
+               ((char*)
+                 bsp_register_global_to_local(comm_thunk->addr_global,bucket))+
+               comm_thunk->offset,
+               comm_thunk->nbytes);
+#ifdef STATISTICS
+      _bspstat.packet_puts_src++;
+      _bspstat.packet_puts_srcnbytes +=comm_thunk->nbytes; 
+      bspstat_incoming(bucket,comm_thunk->nbytes);
+#endif
+      no_put_messages--;
+      out_togo--;
+      comm_thunk++;
+    }
+  }
+\end{code}
+
+Everything is nearly finished. Another barrier synchronisation is
+performed to make sure that the puts are fenced in, and don't
+interfere with any computation in the next superstep. The buffered
+gets are also written into each processors address space at this point.
+\begin{code}
+#ifdef STATISTICS
+  bspstat_updateremote();
+#endif
+  deallocateFreeList();
+  bsmp_resetincoming(); /* Reset BSMP buffers for information that has
+                           just been written, and will be read in the 
+                           next superstep */
+#ifdef PROFILE
+  bspprof_sstep_comm_end();
+#endif
+  barrier_sync();
+#ifdef STATISTICS
+  bspstat_finalise();
+#endif
+#ifdef DEBUG
+  bsp_debug("{bsp_sync}:Finished communication");
+#endif
+  if (_bsp_opt_fcombine_puts) bspcombputs_finalise();
+  if (any_gets) {
+    for(i=0;i<_bsp_nprocs;i++) {
+      for(j=0;j<_drma.proc_comm_get_next[i];j++) {
+        comm_thunk=&_drma.proc_comm_get_fifo[i][j];
+        if (COMM_IS_GET(comm_thunk->comm_pid)) {
+          MEMCPY(comm_thunk->addr_real,
+	         &_bsp_buffget_reference+comm_thunk->offset,
+	         comm_thunk->nbytes);
+        }
+      }
+      _drma.proc_comm_get_next[i]=0;
+      _drma.proc_comm_put_next[i]=0;
+    }
+  } else {
+    for(i=0;i<_bsp_nprocs;i++) _drma.proc_comm_put_next[i]=0;
+  }
+ 
+#ifdef PROFILE
+  /* Use the line number from the start of the super-step */
+  bspprof_sstep_end();
+#endif
+#ifdef REALDEBUG
+  bsp_sync_end();
+#endif
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{\texttt{bspEnlargeFifo}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Enlarge the buffer that holds all the delayed
+communications. \texttt{BSP\_COMM\_FIFO\_SIZE} (set by the
+\texttt{-bspfifo} option of \texttt{bspfront}) determines the size of
+the increment.
+
+\begin{code}
+STATIC void bspEnlargeFifo(char* routine,_BSPcomm_thunk **fifo, int elems) {
+#ifdef DEBUG
+  bsp_debug("{bspEnlargeFifo} to %d elements",elems);
+#endif
+  *fifo = (_BSPcomm_thunk*) realloc(*fifo,elems*SIZEOF(_BSPcomm_thunk));
+  if (*fifo==NULL)
+    bsp_abort("{%s} line %d of \"%s\"\n"
+	      "\tFailed to allocate %d bytes for delayed communications.",
+	      routine,_bsp_lineno,_bsp_filename,elems*SIZEOF(_BSPcomm_thunk));
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{\texttt{dumpFifoCommTable}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Debugging routine that dumps the delayed communication table.
+\begin{code}
+STATIC void dumpFifoCommTable(char* str,_BSPcomm_thunk** fifo,int *sizes) {
+#ifdef DEBUG
+  int i,j;
+  bsp_debug_start(str);
+  bsp_debug_block("Super-step on pid %d",_bsp_pid);
+  bsp_debug_block("%5s | %6s | %8s |%8s |%8s | %6s",
+                  "Type","Bucket","With pid","Source","Dest.","Nbytes");
+  bsp_debug_block("-----------------------------------------------------------");
+  for(i=0;i<_bsp_nprocs;i++) {
+    for(j=0;j<sizes[i];j++) 
+    if (COMM_IS_PUTLIKE(fifo[i][j].comm_pid))
+       bsp_debug_block("%5s | %6d | %8d |%8x |%2d[%4d] |%6d",
+                 "put",i,
+                 COMM_GET_PID(fifo[i][j].comm_pid),
+                 fifo[i][j].addr_real,
+                 fifo[i][j].addr_global,
+                 fifo[i][j].offset,
+                 fifo[i][j].nbytes);
+    else
+       bsp_debug_block("%5s | %6d | %8d |%2d[%4d] |%8x |%6d",
+                 "get",i,
+                 COMM_GET_PID(fifo[i][j].comm_pid),
+                 fifo[i][j].addr_global,
+                 fifo[i][j].offset,
+                 fifo[i][j].addr_real,
+                 fifo[i][j].nbytes);
+   bsp_debug_end("bsp_sync");
+  }
+#endif
+}
+\end{code}
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Buffer BSMP}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Perform a total exchange on the accumulated sizes of all
+\texttt{bsp\_send} messages that are going out to each processor. This
+is required so that appropriate sized buffers can be allocated to hold
+the BSMP messages that will actually be communicated by DRMA primitives.
+\begin{code}
+STATIC void  bsmp_buffersizes() {
+  int i,j;
+
+  for(i=1;i<_bsp_nprocs;i++) {
+    j = (_bsp_pid+i)%_bsp_nprocs;
+#ifdef DEBUG
+    bsp_debug("{bsmp_buffersizes} %d bytes out to %d",
+              _drma.bsmp_sizes[j],j);
+#endif
+    if (_drma.bsmp_sizes[j]>0) {
+      drma_put_int(j,
+                   &_drma.bsmp_sizes[j],
+                   &_bsmp.incoming_messages_size_safe[_bsp_pid]);
+      _drma.bsmp_sizes[j]=0;
+    }
+  }
+  _bsmp.incoming_messages_size_safe[_bsp_pid]=_drma.bsmp_sizes[_bsp_pid];
+  _drma.bsmp_sizes[_bsp_pid]=0;
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{\texttt{bsp\_hpget}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+This is a helper function that has a semantics very similar to
+\texttt{bsp\_hpget}. Various checks are performed on the
+communication, before it is chunked up into packets with a maximum
+size of \texttt{BSP\_BUFFER\_SIZE} (set using \texttt{-bspbuffer})
+bytes. These packets are routed to remote processors at the next
+\texttt{bsp\_sync}. 
+\begin{code}
+void _bsp_get(int type_and_pid, const void *src, int offset,
+              void *dst, int nbytes){
+  int             pid,src_addr,togo_nbytes,chunk_nbytes,chunk_offset;
+  void           *chunk_dst;
+  char           *src_plus_offset;
+  _BSPcomm_thunk *comm_thunk;
+
+  pid = COMM_GET_PID(type_and_pid);
+#ifdef SANITY_CHECK
+  if (pid < 0 || pid >= _bsp_nprocs) 
+    bsp_abort("{bsp_get}: line %d  of \"%s\"\n"
+              "\tprocess %d is trying to get from no-existant processor %d.",
+              _bsp_lineno,_bsp_filename,_bsp_pid,pid);
+#endif
+
+  togo_nbytes  = nbytes;
+  chunk_dst    = dst;
+  chunk_offset = offset;
+  src_addr     = bsp_register_local_to_global(src);
+
+#ifdef STATISTICS
+  if (_bspstat.buffer_high_water_mark < nbytes)
+    _bspstat.buffer_high_water_mark = nbytes;      
+#endif
+  while(togo_nbytes>0) {
+    if (togo_nbytes > _bsp_buffer_size) {
+      togo_nbytes -= _bsp_buffer_size;
+      chunk_nbytes = _bsp_buffer_size;
+    } else {
+      chunk_nbytes = togo_nbytes;
+      togo_nbytes  = 0;
+    }
+    /* Put get in the in and out queues because we will */
+    /* receive a message back                             */
+    comm_thunk=&_drma.proc_comm_get_fifo[pid]
+                                        [_drma.proc_comm_get_next[pid]++];
+    comm_thunk->comm_pid   = type_and_pid;
+    comm_thunk->addr_global = src_addr;
+    comm_thunk->offset     = chunk_offset;
+    comm_thunk->addr_real  = chunk_dst;
+    comm_thunk->nbytes     = chunk_nbytes;
+    if (_drma.proc_comm_get_next[pid] >= _drma.proc_comm_get_size[pid]){
+      _drma.proc_comm_get_size[pid] += _bsp_comm_fifo_size;
+      bspEnlargeFifo("bsp_get",
+                     &_drma.proc_comm_get_fifo[pid],
+                     _drma.proc_comm_get_size[pid]);
+    }
+    chunk_offset += chunk_nbytes;
+    chunk_dst     = (char *)chunk_dst + chunk_nbytes;
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{The real code for \texttt{bsp\_put}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+This is a helper function that has a semantics very similar to
+\texttt{bsp\_hpput}. Various checks are performed on the
+communication, before it is chunked up into packets with a maximum
+size of \texttt{BSP\_BUFFER\_SIZE} (set using \texttt{-bspbuffer})
+bytes. These packets are routed to remote processors at the next
+\texttt{bsp\_sync}. 
+\begin{code}
+void _bsp_put(int type_and_pid, const void *src, 
+              int dst_addr, int offset, int nbytes) {
+  int             pid,togo_nbytes,chunk_nbytes,chunk_offset;
+  void           *chunk_src;
+  _BSPcomm_thunk *comm_thunk;
+
+  pid          = COMM_GET_PID(type_and_pid);
+  togo_nbytes  = nbytes;
+  chunk_src    = (void*) src;
+  chunk_offset = offset;
+
+  if (COMM_IS_SEND(type_and_pid)) 
+    _drma.bsmp_sizes[pid] += nbytes;
+
+#ifdef STATISTICS
+  if (_bspstat.buffer_high_water_mark < nbytes)
+    _bspstat.buffer_high_water_mark = nbytes;      
+#endif
+  while (togo_nbytes>0) {
+    if (togo_nbytes > _bsp_buffer_size) {
+      togo_nbytes -= _bsp_buffer_size;
+      chunk_nbytes = _bsp_buffer_size;
+    } else {
+      chunk_nbytes = togo_nbytes;
+      togo_nbytes  = 0;  
+    }
+    comm_thunk=&_drma.proc_comm_put_fifo[pid]
+                                          [_drma.proc_comm_put_next[pid]++];
+    comm_thunk->comm_pid   = type_and_pid;
+    comm_thunk->addr_global= dst_addr;
+    comm_thunk->offset     = chunk_offset;
+    comm_thunk->addr_real  = chunk_src;
+    comm_thunk->nbytes     = chunk_nbytes;
+    
+ 
+    if (_drma.proc_comm_put_next[pid] >= _drma.proc_comm_put_size[pid]){
+      _drma.proc_comm_put_size[pid] += _bsp_comm_fifo_size;
+      bspEnlargeFifo("bsp_put",
+                     &_drma.proc_comm_put_fifo[pid],
+                     _drma.proc_comm_put_size[pid]);
+    }
+    chunk_offset += chunk_nbytes;
+    chunk_src     = ((char *)chunk_src) + chunk_nbytes;
+  }
+}
+\end{code}
+ 
+% LocalWords:  DRMA ok Shmem superstep bspfront fcheck BSMP bsp COMM bspfifo
+% LocalWords:  pget chunked UFFER IZE bspbuffer ync

@@ -1,0 +1,159 @@
+###########################################################################
+##      Copyright (C) 1995,1996,1997 University of Oxford                ##
+##                                                                       ##
+## Permission to use, copy, modify, and distribute this software,        ##
+## and to incorporate it, in whole or in part, into other software,      ##
+## is hereby granted without fee, provided that                          ##
+##   (1) the above copyright notice and this permission notice appear in ##
+##       all copies of the source code, and the above copyright notice   ##
+##       appear in clearly visible form on all supporting documentation  ##
+##       and distribution media;                                         ##
+##   (2) modified versions of this software be accompanied by a complete ##
+##       change history describing author, date, and modifications made; ##
+##       and                                                             ##
+##   (3) any redistribution of the software, in original or modified     ##
+##       form, be without fee and subject to these same conditions.      ##
+###########################################################################
+
+
+###########################################################################
+##            D O N T  C H A N G E  A N Y T H I N G  !!                  ##
+###########################################################################
+
+SHELL      = /bin/sh
+
+prefix     = @prefix@
+exec_prefix= @exec_prefix@
+bindir     = @bindir@
+includedir = @includedir@
+libdir     = @libdir@
+top_srcdir = @top_srcdir@/../
+
+AR              = @AR@
+RANLIB          = @RANLIB@
+GCC             = @GCC@
+
+INSTALL          = @INSTALL@
+INSTALL_PROGRAM  = @INSTALL_PROGRAM@
+INSTALL_DATA     = @INSTALL_DATA@
+
+
+editpl = sed -e 's,@''includedir''@,$(includedir),g'       \
+             -e 's,@''bindir''@,$(bindir),g'               \
+             -e 's,@''binarchdir''@,$(bindir)/$(ARCH)/,g'  \
+             -e 's,@''libdir''@,$(libdir),g'               \
+             -e 's,@''mandir''@,$(mandir),g'               \
+	     -e 's,@''top_srcdir''@,$(top_srcdir),g'       \
+             -e 's,@''GCC''@,$(GCC),g'                     \
+             -e 's,@''G77''@,$(G77),g'                     \
+             -e 's,@''GPLUSPLUS''@,$(GPLUSPLUS),g'         \
+             -e 's,@''mpiincludedir''@,$(mpiincludedir),g' \
+             -e 's,@''mpilibdir''@,$(mpilibdir),g'         \
+             -e 's,@''PERL_DBMOK''@,$(PERL_DBMOK),g'       \
+             -e 's,@''PERL''@,$(PERL),g' 
+
+##########################################################################
+
+# Architecture independent modules
+BINARY_TARGET = cgprof
+SRCS_LC       = cgprof.lc main.lc matrix.lc symbol.lc daVinci.lc pie.lc
+SRCS_LH       = cgprof.lh matrix.lh daVinci.lh symbol.lh
+
+SRCS_S        =
+LIBRARIES     = 
+INCLUDES      = 
+
+#############################################################
+##             Flags and conversions                       ##
+#############################################################
+
+SRCS_O   = $(SRCS_LC:.lc=.o) $(SRCS_S:.s=.o)
+SRCS_H   = $(SRCS_LH:.lh=.h)
+SRCS_TEX = $(SRCS_LC:.lc=.c.tex) $(SRCS_LH:.lh=.h.tex)
+
+CC       = cc
+CFLAGS   = -g
+
+.SUFFIXES: .lc .c .lh .tex .c.tex .h.tex
+
+#############################################################
+##             Compilation rules                           ##
+#############################################################
+
+.lh.h:
+	rm -f $*.h $*.tmp;				\
+	litToPgm $<;					\
+	$(editpl) $*.h > $*.tmp && mv $*.tmp $*.h
+
+.lc.o:
+	rm -f $*.c;                                     \
+        litToPgm $*.lc;                                 \
+        ${CC} ${CFLAGS} $(INCLUDES) -c $*.c -o $*.o
+
+
+.c.o:
+	rm -f $*.c;                                     \
+        litToPgm $*.lc;                                 \
+        ${CC} ${CFLAGS} $(INCLUDES) -c $*.c -o $*.o
+
+
+.lh.h.tex:
+	litToTex $<
+
+
+.lc.c.tex:
+	litToTex $<
+
+#############################################################
+##           Targets used to decide machine options        ##
+#############################################################
+all::
+
+objects: $(SRCS_H)  $(SRCS_O) 
+
+cgprof: objects
+	${CC} ${CFLAGS} -o ${BINARY_TARGET} ${SRCS_O} ${LIBRARIES}
+
+build:
+	if test -n "${GCC}"; then					\
+	  $(MAKE) cgprof CC="${GCC}";					\
+	else								\
+	  $(MAKE) cgprof;				         	\
+	fi;								\
+	if [ ! -d ${top_srcdir}/include/icons ] ;                       \
+        then  mkdir -p ${top_srcdir}/include/icons; fi;                 \
+        if [ ! -d ${top_srcdir}/bin/`bsparch -arch` ] ;                 \
+        then  mkdir -p ${top_srcdir}/bin/`bsparch -arch`; fi;           \
+	${INSTALL_PROGRAM} cgprof                                       \
+                           ${top_srcdir}/bin/`bsparch -arch`/cgprof;	\
+	for i in comm.xbm comp.xbm compress.xbm  		        \
+	         wait.xbm delete.xbm help.xbm hrel.xbm    		\
+		 jump.xbm oxpara.xbm percent.xbm weightdelta.xbm        \
+		 absolute.xbm absdelta.xbm reldelta.xbm	                \
+		 sync.xbm time.xbm uncompress.xbm undo.xbm; do 		\
+	  ${INSTALL_DATA} icons/$$i ${top_srcdir}/include/icons/$$i;    \
+	done;								\
+	$(editpl) cgprof.tcl > $(top_srcdir)/include/cgprof.tcl
+
+	
+delit: $(SRCS_H)
+
+root.dvi: $(SRCS_TEX)
+	latex root.tex
+
+clean::
+	rm -f $(SRCS_O) $(BINARY_TARGET) $(SRCS_LC:.lc=.o) \
+              $(SRCS_LH:.lh=.h) $(SRCS_TEX) mon.out $(SRCS_LC:.lc=.c)
+
+
+#############################################################
+##             Dependencies                                ##
+#############################################################
+
+main.o: cgprof.h matrix.h matrix.o main.lc symbol.h
+cgprof.o: cgprof.h cgprof.lc symbol.h matrix.h
+matrix.o: matrix.h matrix.lc
+symbol.o: symbol.h symbol.lc
+daVinci.o: daVinci.h daVinci.lc symbol.h matrix.h
+pie.o: pie.lc
+

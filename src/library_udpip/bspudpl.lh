@@ -1,0 +1,43 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1997, 1998 Stephen Donaldson                       %%
+%%                      &  The University of Oxford                      %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+File bspudpl.h contains the prototypes for the functions in the 
+file bspudpl.c (the library of interface functions for the BSP/UDP
+implementation.
+\begin{code}
+#include <sys/time.h>
+
+int bspudp_set_buffer_size(int *size, int *nbuffers, 
+			   int slotsize, int roundtrip, int sendlatency);
+void bspudp_env(int request_procs, char *spmd_prog);
+void bspudp_init(int *setup_procs);
+int bspudp_okto_send(int pid);
+int bspudp_nonblock_send(char* message,int size,int to,int type,
+			 int iscontrol, int forceack);
+void bspudp_block_recv(char* msg,int size,int *from,int *type,
+                       int* nbytes,int iscontrol);
+void bspudp_wait_sends(void);
+int bspudp_probe(int *pid, int* type, int block, int usec_wait,int iscontrol);
+void bspudp_messg_stopall(void);
+void bspudp_messg_exit(int status);
+void bspudp_record_seq(void);
+void bspudp_purge_seq(void);
+int bspudp_usecsleep(int usecs, struct timeval *now_tv);
+void bspudp_srand(int seed);
+void bspudp_dump_stats(FILE *fptr,int unique_msgtype);
+\end{code}

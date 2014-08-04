@@ -1,0 +1,63 @@
+.TH "bsp_qsize" 3 "1.4 25/9/98" "Oxford BSP Toolset" "BSPlib FUNCTIONS"
+.SH NAME
+bsp_qsize \- checks to see how many BSMP packets arrived.
+
+.SH C SYNOPSIS
+.nf
+.B #include \&"bsp.h\&"
+.PP
+.BI "void  bsp_qsize(int *" packets ", int *" accum_nbytes ");"
+.fi
+.SH FORTRAN SYNOPSIS 
+.nf
+.BI "SUBROUTINE  bspqsize(" packets "," accum_nbytes ")"
+.BI    "INTEGER, intent(OUT) ::" packets, accum_nbytes
+.fi
+
+
+.SH DESCRIPTION
+
+The function 
+.B bsp_qsize(3)
+is an enquiry function that returns the number of messages that were sent to
+this process in the previous superstep and have not yet been
+consumed by a 
+.B bsp_move(3)\c
+\&. Before any message is consumed by 
+.B bsp_move(3)\c
+\&, the total number of messages received will match those sent by any
+.B bsp_send(3) operations in the previous superstep. The
+function also returns the accumulated size of all the payloads of the
+unconsumed messages. This operation is intended to help the user to
+allocate an appropriately sized data structure to hold all the
+messages that were sent to a process during a superstep.
+
+
+.SH "SEE ALSO"
+bsmp(3) ,bsp_send(3), bsp_move(3)
+
+.I ``BSPlib: The BSP Programming Library''
+Jonathan M. D. Hill, Bill McColl, Dan C. Stefanescu, Mark W. Goudreau,
+Kevin Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and Rob
+Bisseling. Parallel Computing, to appear 1998. See
+.I http://www.bsp-worldwide.org
+for more details.
+
+.SH NOTES
+.IP i
+.B bsp_qsize(3)
+returns the number of
+messages in the system queue at the point the operation is
+called; the number returned therefore decreases after any
+.B bsp_move(3)
+operation.
+
+.SH BUGS
+Problems and bug reports should be mailed to 
+.I bsplib-bugs@comlab.ox.ac.uk
+
+.SH AUTHORS
+The Oxford BSP Toolset implementation of BSPlib was written by
+Jonathan.Hill@comlab.ox.ac.uk
+.br
+.B http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html

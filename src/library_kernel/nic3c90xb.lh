@@ -1,0 +1,344 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1997, 1998 Stephen Donaldson                       %%
+%%                      &  The University of Oxford                      %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it into other software, is hereby granted          %%
+%% without fee, provided that                                            %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\section{3Com 3C90xB Network Interface Card: Commands, Registers and bits}
+
+These values are taken from, and have the same names used in, ``3C90x
+Network Interface Cards Technical Reference'' Part
+Number:09-1163000, December 1997. 3Com. \verb!http://www.3com.com/!
+
+\begin{code}
+#include "../library_shared/bsp_types.h"
+
+#define NIC_VENDORID  0x10B7    /* 3Com Vnedor Id */
+#define NIC_DEVICEID  0x9055    /* 3C905B-TX device id */
+
+#define NIC_DPD_ALIGNMENT 16
+
+#define NIC_ENET_TYPE 0x0842
+\end{code}
+
+Polling rates in units of 320 nano seconds.
+\begin{code}
+#define DN_POLL_RATE_ON   40  
+#define DN_POLL_RATE_OFF  40
+#define UP_POLL_RATE_ON   40
+#define UP_POLL_RATE_OFF  40
+\end{code}
+\section{PCI general and 3C90xB specific Configuration Register Offsets}
+
+\begin{code}
+#define VendorId_offset          0x00   /* manufacturers unique id */
+#define DeviceId_offset          0x02   /* manufacturer assigned id */
+#define PciCommand_offset        0x04   /* PCI command register */
+#define    ioSpace               BIT0
+#define    memorySpace           BIT1
+#define    busMaster             BIT2
+#define    MWIEnable             BIT4
+#define    parityErrorResponse   BIT6
+#define    SERREnable            BIT8
+#define PciStatus_offset         0x06   /* status for PCI bus events */
+#define    capabilitiesList      BIT4
+#define    fastBackToBack        BIT7
+#define    dataParityDetected    BIT8
+#define    devselTiming          (BIT9+BIT10)
+#define    signalTargetAbort     BIT11
+#define    receivedTargetAbort   BIT12
+#define    receivedMasterAbort   BIT13
+#define    signaledSystemError   BIT14
+#define    detectedParityError   BIT15
+#define RevisionId_offset        0x08
+#define ClassCode_offset         0x09
+#define CacheLineSize_offset     0x0C
+#define LatencyTimer_offset      0x0D
+#define HeaderType_offset        0x0E
+#define IoBaseAddress_offset     0x10
+#define MemBaseAddress_offset    0x14
+#define SubsystemVendorId_offset 0x2C
+#define SubsystemId_offset       0x2E
+#define BiosRomControl_offset    0x30
+#define CapPtr_offset            0x34
+#define InterruptLine_offset     0x3C
+#define InterruptPin_offset      0x3D
+#define MinGnt_offset            0x3E
+#define MaxLat_offset            0x3F
+#define CapId_offset             0xDC
+#define NextPtr_offset           0xDD
+#define PowerMgmtCap_offset      0xDE
+#define PowerMgmtCtrl_offset     0xE0
+\end{code}
+
+\section{Accessing PCI configuration registers}
+
+\begin{code}
+#define getVendorId(x) \
+   pcibios_read_config_word(PCI_BUS,PCI_DEV_FN,VendorId_offset,x)
+#define getDevice_ID(x) \
+   pcibios_read_config_word(PCI_BUS,PCI_DEV_FN,DeviceId_offset,x)
+#define getPciCommand(x) \
+   pcibios_read_config_word(PCI_BUS,PCI_DEV_FN,PciCommand_offset,x)
+#define setPciCommand(x) \
+   pcibios_write_config_word(PCI_BUS,PCI_DEV_FN,PciCommand_offset,x)
+#define getPciStatus(x) \
+   pcibios_read_config_word(PCI_BUS,PCI_DEV_FN,PciStatus_offset,x)
+#define setPciStatus(x) \
+   pcibios_write_config_word(PCI_BUS,PCI_DEV_FN,PciStatus_offset,x)
+#define getRevisionId(x) \
+   pcibios_read_config_byte(PCI_BUS,PCI_DEV_FN,RevisionId_offset,x)
+#define setCacheLineSize(x) \
+   pcibios_write_config_word(PCI_BUS,PCI_DEV_FN,CacheLineSize_offset,x)
+#define getCacheLineSize(x) \
+   pcibios_read_config_byte(PCI_BUS,PCI_DEV_FN,CacheLineSize_offset,x)
+#define setLatencyTimer(x) \
+   pcibios_write_config_word(PCI_BUS,PCI_DEV_FN,LatencyTimer_offset,x)
+#define getLatencyTimer(x) \
+   pcibios_read_config_byte(PCI_BUS,PCI_DEV_FN,LatencyTimer_offset,x)
+#define getHeaderType(x) \
+   pcibios_read_config_byte(PCI_BUS,PCI_DEV_FN,HeaderType_offset,x)
+#define setIoBaseAddress(x) \
+   pcibios_write_config_dword(PCI_BUS,PCI_DEV_FN,IoBaseAddress_offset,x)
+#define getIoBaseAddress(x) \
+   pcibios_read_config_dword(PCI_BUS,PCI_DEV_FN,IoBaseAddress_offset,x)
+#define setMemBaseAddress(x) \
+   pcibios_write_config_dword(PCI_BUS,PCI_DEV_FN,MemBaseAddress_offset,x)
+#define getMemBaseAddress(x) \
+   pcibios_read_config_dword(PCI_BUS,PCI_DEV_FN,MemBaseAddress_offset,x)
+#define getSubsystemVendorId(x) \
+   pcibios_read_config_word(PCI_BUS,PCI_DEV_FN,SubsystemVendorId_offset,x)
+#define getSubsystemId(x) \
+   pcibios_read_config_word(PCI_BUS,PCI_DEV_FN,SubsystemId_offset,x)
+#define setBiosRomControl(x) \
+   pcibios_write_config_dword(PCI_BUS,PCI_DEV_FN,BiosRomControl_offset,x)
+#define getBiosRomControl(x) \
+   pcibios_read_config_dword(PCI_BUS,PCI_DEV_FN,BiosRomControl_offset,x)
+#define getCapPtr(x) \
+   pcibios_read_config_byte(PCI_BUS,PCI_DEV_FN,CapPtr_offset,x)
+#define getInterruptLine(x) \
+   pcibios_read_config_byte(PCI_BUS,PCI_DEV_FN,InterruptLine_offset,x)
+#define setInterruptLine(x) \
+   pcibios_write_config_byte(PCI_BUS,PCI_DEV_FN,InterruptLine_offset,x)
+\end{code}
+
+\section{3C90xB NIC Non-Windowed Registers}
+
+\begin{code}
+#if BSP_DEBUG >= 2
+#define WaitCmdComplete(str)                                 \
+  do {                                                       \
+    int i;                                                   \
+    for(i=0;i<5000;i++)                                      \
+      if (!(getIntStatus & cmdInProgress)) break;            \
+    printk(MSG_PFX "NIC " str " completed in %d ticks\n",i); \
+  } while (0)
+#else
+#define WaitCmdComplete(str)                                 \
+  do {                                                       \
+    int i;                                                   \
+    for(i=0;i<5000;i++)                                      \
+      if (!(getIntStatus & cmdInProgress)) break;            \
+  } while (0)
+#endif
+
+#define getIntStatus      inw(IOBASE+0x0E)
+#define    cmdInProgress       BIT12
+#define getIntStatusAuto  inw(IOBASE+0x1E)
+#define    interruptLatch      BIT0       /* NIC is driving interrupt signal */
+#define    hostError           BIT1       /* catastrophic bus error */
+#define    txComplete          BIT2       /* txIndicate pkt xmitted or error */
+#define    rxComplete          BIT4       /* one or more packets in fifo */
+#define    rxEarly             BIT5       /* RxEarlyThresh exceeded */
+#define    intRequested        BIT6       /* countdown expired or RequestInt */
+#define    updateStats         BIT7       /* stats counter nearing overflow */
+#define    linkEvent           BIT8       /* link status change detected */
+#define    cmdInProgress       BIT12      /* last command still in progress */
+#define    windowNumber        (BIT13+BIT14+BIT15)  /* current window number */
+#define getTxPktId        inb(IOBASE+0x18)
+#define getTime           inb(IOBASE+0x1A)
+#define getTxStatus       inb(IOBASE+0x1B)
+#define setTxStatus(x)    outb(x,IOBASE+0x1B)
+#define    txReclaimError      BIT1      /* packet collision after reclaim */
+#define    txStatusOverflow    BIT2      /* status stack is full */
+#define    maxCollisions       BIT3      /* 16 collisions occurred on packet */
+#define    txUnderrun          BIT4      /* packet underrun on transmit */
+#define    txJabber            BIT5      /* NIC transmitting too long */
+#define    interruptRequested  BIT6      /* txIndicate set when FSW written */
+#define    txCompleteTxStat    BIT7      /* indicates other bit values valid */
+#define getDmaCtrl        inl(IOBASE+0x20)
+#define setDmaCtrl(x)     outl(x,IOBASE+0x20)
+#define getDnListPtr      inl(IOBASE+0x24)
+#define setDnListPtr(x)   outl(x,IOBASE+0x24)
+#define getUpPktStatus    inl(IOBASE+0x30)
+#define    upPktLen            0x0FFF    /* current bytes uploaded of packet */
+#define    upStalled           BIT13     /* NIC is in upstall state */
+#define    upError             BIT14     /* error in receipt of packet */
+#define    upPktComplete       BIT15     /* packet is complete */
+#define    upOverrun           BIT16     /* too slow to move data from fifo */
+#define    upRuntFrame         BIT17     /* frame less than 60 bytes */
+#define    upAlignmentError    BIT18     /* bad CRC plus dribble bits */
+#define    upCRCError          BIT19     /* CRC error in packet */
+#define    upOversizedFrame    BIT20     /* MaxPktSize less than packet len */
+#define    dribbleBits         BIT23     /* packet had dribble bits */
+#define    upOverflow          BIT24     /* insufficient buffer space in UPD */
+#define    UpChecksumError     BIT25 
+#define    tcpChecksumError    BIT26
+#define    udpChecksumError    BIT27
+#define    ipChecksumChecked   BIT29
+#define    tcpChecksumChecked  BIT30
+#define    udpCkecsumchecked   BIT31
+#define getFreeTimer      inw(IOBASE+0x34)
+#define getCountdown      inw(IOBASE+0x36)
+#define setCountdown(x)   outw(x,IOBASE+0x36)
+#define getUpListPtr      inl(IOBASE+0x38)
+#define setUpListPtr(x)   outl(x,IOBASE+0x38)
+#define getDnPoll         inb(IOBASE+0x2D)
+#define setDnPoll(x)      outb(x,IOBASE+0x2D)
+#define getUpPoll         inb(IOBASE+0x3D)
+#define setUpPoll(x)      outb(x,IOBASE+0x3D)
+
+\end{code}
+
+\section{Command codes and command bit names}
+
+\begin{code}
+#define GlobalReset(x) outw(0x0000UL+(x),IOBASE+0x0E) /* NIC reset */
+#define    tpAuiReset          BIT0      /* 10BASET and AUI transceiver */
+#define    endecReset          BIT1      /* 10Mbps encoder/decoder */
+#define    networkReset        BIT2      /* network inerface logic */
+#define    fifoReset           BIT3      /* FIFO control logic */
+#define    aismReset           BIT4      /* auto-init state machine logic */
+#define    hostReset           BIT5      /* bus interface logic */
+#define    vcoReset            BIT7      /* onboard 10Mbps VCO */
+#define    UpDownReset         BIT8      /* upload/download logic */
+#define RxReset(x) outw(0x2800UL+(x),IOBASE+0x0E) /* reset receive */
+#define    tpAuiRxReset        BIT0      /* 10BASET and AUI transceiver */
+#define    endecRxReset        BIT1      /* 10Mbps encoder/decoder */
+#define    networkRxReset      BIT2      /* network inerface logic */
+#define    fifoRxReset         BIT3      /* FIFO control logic */
+#define    UpRxReset           BIT8      /* upload/download logic */
+#define TxReset(x) outw(0x5800UL+(x),IOBASE+0x0E) /* reset transmit */
+#define    tpAuiTxReset        BIT0      /* 10BASET and AUI transceiver */
+#define    endecTxReset        BIT1      /* 10Mbps encoder/decoder */
+#define    networkTxReset      BIT2      /* network inerface logic */
+#define    fifoTxReset         BIT3      /* FIFO control logic */
+#define    DnTxReset           BIT8      /* upload/download logic */
+#define DnStall   outw(0x3002UL,IOBASE+0x0E)  /* stall download engine */
+#define DnUnStall outw(0x3003UL,IOBASE+0x0E)  /* unstall download engine */
+#define SetTxStartThresh(x) outw(0x9800UL+(x),IOBASE+0x0E)
+#define SetTxReclaimThresh(x) outw(0xC000UL+(x),IOBASE+0x0E)
+#define TxDisable outw(0x5000UL,IOBASE+0x0E) /* disable packet transmission */
+#define TxEnable outw(0x4800UL,IOBASE+0x0E)  /* enable packet transmission */
+#define RxDisable outw(0x1800UL,IOBASE+0x0E) /* disable packet reception */
+#define RxEnable outw(0x2000UL,IOBASE+0x0E)  /* enable packet reception */
+#define SetHashFilerBit(x) outw(0xC800UL+(x),IOBASE+0x0E) /* hash filter bit */
+#define SetRxEarlyThresh(x) outw(0x8800UL+(x),IOBASE+0x0E) /*reception early */
+#define SetRxFilter(x) outw(0x8000UL+(x),IOBASE+0x0E)  /* set receive filter */
+#define    RxStation           BIT0
+#define    RxMulticast         BIT1
+#define    RxBcast             BIT2
+#define    RxPromiscuous       BIT3 
+#define UpStall outw(0x3000UL,IOBASE+0x0E)  /* stall the upload engine */
+#define UpUnStall outw(0x3001UL,IOBASE+0x0E)  /* unstall the upload engine */
+#define AcknowledgeInterrupt(x) outw(0x6800UL+(x),IOBASE+0x0E)
+#define RequestInterrupt(x) outw(0x6000UL+(x),IOBASE+0x0E) 
+#define SetIndicationEnable(x) outw(0x7800UL+(x),IOBASE+0x0E)
+#define SetInterruptEnable(x)  outw(0x7000UL+(x),IOBASE+0x0E)
+#define    interruptLatchInt   BIT0      /* NIC driving bus interrupt signal */
+#define    hostErrorInt        BIT1
+#define    txCompleteInt       BIT2
+#define    rxCompleteInt       BIT4
+#define    rxEarlyInt          BIT5      /* Rx early bytes received */
+#define    intRequestInt       BIT6      /* req interrupt/countdown expired */
+#define    updateStatsInt      BIT7
+#define    linkEventInt        BIT8
+#define    dnCompleteInt       BIT9      /* packet download complete */
+#define    upCompleteInt       BIT10     /* packet upload complete */
+#define    cmdInProgressInt    BIT12     /* long running command */
+#define DisableDcConverter outw(0xB800UL,IOBASE+0x0E)
+#define EnableDcConverter outw(0x1000UL,IOBASE+0x0E)
+#define SelectRegisterWindow(x) outw(0x0800UL+(x),IOBASE+0x0E)
+#define StatisticsDisable outw(0xB000UL,IOBASE+0x0E)
+#define StatisticsEnable outw(0xA800UL,IOBASE+0x0E)
+\end{code}
+
+\section{Window 0 device registers}
+
+\begin{code}
+#define getBiosRomAddr          inl(IOBASE+0x04)
+#define getBiosRomData          inb(IOBASE+0x08)
+#define setBiosRomAddr(x)       outl(x,IOBASE+0x04)
+#define setBiosRomData(x)       outb(x,IOBASE+0x08)
+\end{code}
+
+\section{Window 2 device registers}
+
+\begin{code}
+#define getStationAddress(i)    inb(IOBASE+0x00+i)
+#define setStationAddress(x,i)  outb(x,IOBASE+0x00+i)
+#define getStationMask(i)       inb(IOBASE+0x06+i)
+#define setStationMask(x,i)     outb(x,IOBASE+0x06+i)
+\end{code}
+
+\section{Window 3 device registers}
+
+\begin{code}
+#define setInternalConfig(x)    outl(x,IOBASE+0x00)
+#define    media10baseT         0
+#define    media100baseTx       BIT22
+#define    media100baseFx       BIT20 | BIT22
+#define    mediaAutoNegotiation BIT23
+#define getInternalConfig       inl(IOBASE+0x00)
+#define setMacControl(x)        outw(x,IOBASE+0x06)
+#define    fullDuplexEnable     BIT5
+#define    halfDuplexEnable     0
+#define getMacControl           inw(IOBASE+0x06)
+#define getMediaOptions         inw(IOBASE+0x08)
+#define getTxFree               inw(IOBASE+0x0C)
+#define getRxFree               inw(IOBASE+0x0A)
+\end{code}
+
+\section{Window 4 device registers}
+\begin{code}
+#define setMediaStatus(x)       outw(x,IOBASE+0x0A)
+#define    linkBeatEnable       BIT7
+#define getMediaStatus          inw(IOBASE+0x0A)
+#define    auiDisable           BIT15
+#define getBadSSD		inb(IOBASE+0x0C)
+#define getFifoDiagnostic       inw(IOBASE+0x04)
+#define getNetworkDiagnostic    inw(IOBASE+0x06)
+\end{code}
+
+\section{Window 5 device registers}
+\begin{code}
+#define getTxStartThresh        inw(IOBASE+0x00)
+\end{code}
+
+\section{Window 6 device registers}
+\begin{code}
+#define getCarrierLost		inb(IOBASE+0x00)
+#define getSqeErrors    	inb(IOBASE+0x01)
+#define getMultiCollisions	inb(IOBASE+0x02)
+#define getSingleCollisions	inb(IOBASE+0x03)
+#define getLateCollisions	inb(IOBASE+0x04)
+#define getRxOverruns		inb(IOBASE+0x05)
+#define getFramesXmittedOk	inb(IOBASE+0x06)
+#define getFramesRcvdOk		inb(IOBASE+0x07)
+#define getFramesDeferred       inb(IOBASE+0x08)
+#define getUpperFramesOk	inb(IOBASE+0x09)
+#define getBytesRcvdOk		inw(IOBASE+0x0A)
+#define getBytesXmittedOk       inw(IOBASE+0x0C)
+\end{code}

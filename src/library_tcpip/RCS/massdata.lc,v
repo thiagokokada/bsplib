@@ -1,0 +1,120 @@
+head	1.1;
+access;
+symbols;
+locks
+	jonh:1.1; strict;
+comment	@# @;
+
+
+1.1
+date	97.07.11.10.28.54;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@% $Id$
+% $Log$
+
+
+\begin{code}
+#include <stdlib.h>
+#include <stdio.h>
+
+#include "bsptcpl.h"
+
+#define BSP_NPROCS 2
+#define BLOCK_SIZE 4
+
+void main(int argc, char *argv[])
+   {
+   int i;
+   int mypid;
+   int frompid;
+   char *env;
+   int buflen;
+   int buftype;
+   int nprocs;
+   int recbytes = 0;
+   int sndbytes = 0;
+   int nbytes;
+   int sentsomethig;
+   int sentsomething;
+   char outbuf[BLOCK_SIZE];
+   char inbuf[BLOCK_SIZE];
+   int datalimit = 10000000;
+
+   for (i = 0; i < BLOCK_SIZE; i++) 
+      outbuf[i] = i % 128;
+
+   bsptcp_set_buffer_size(20000);
+   /* bsptcp_env(BSP_NPROCS,"@@PWD@@/massdata"); */
+   bsptcp_env(BSP_NPROCS,"/sp1/jonh/massdata");
+
+   bsptcp_init(&nprocs);
+
+   if (nprocs < 2)
+      {
+      fprintf(stderr,"Expected procs not initialised (%d is too few).\n",
+              nprocs);
+      bsptcp_messg_exit(-1);
+      }
+
+   printf("The sample program has started.\n"); fflush(stdout);
+
+   env = getenv("BSPTCP_PID");
+   if (env)
+      sscanf(env,"%d",&mypid);
+   else
+      mypid = 0;
+
+   if (mypid == 0 && argc == 2)
+      if (sscanf(argv[1],"%d",&datalimit) != 1)
+         {
+         printf("Invalid command line option.\n"); fflush(stdout);
+         if (mypid) bsptcp_messg_exit(-1);
+         exit(-1);   
+         }
+
+   i = 0;
+   bsptcp_wait_sends();
+   while(1) 
+      {  
+      if (sndbytes < datalimit) 
+         do {
+            sentsomething = 0;
+            for (; !sentsomething; i = (i+1)%nprocs)
+               if (i != mypid && bsptcp_okto_send(i))
+                  sentsomething = bsptcp_nonblock_send(outbuf,BLOCK_SIZE,i,0); 
+            if (sentsomething) sndbytes += BLOCK_SIZE;
+            }
+         while(!sentsomething);
+   
+         while((frompid = -1, buftype = 0, bsptcp_probe(&frompid,&buftype,0,0)))
+            {
+            bsptcp_block_recv(inbuf,BLOCK_SIZE,&frompid,&buftype,&nbytes);
+            if (recbytes / 10000 != (recbytes + nbytes) / 10000) {
+              printf("Number of bytes received = %d.\n",recbytes);
+              fflush(stdout);
+              }
+            recbytes += nbytes;
+            } 
+         if (sndbytes >= datalimit && recbytes >= datalimit)
+            if (mypid == 0) 
+               exit(0);
+            else
+               bsptcp_messg_exit(0);
+               
+
+      } /* while(1) */   
+   }
+\end{code}
+@

@@ -1,0 +1,28 @@
+.TH litTotex 1 "1.4 25/9/98" "Oxford BSP Toolset"
+.SH NAME
+litTotex \- Convert a literate file into LaTeX
+
+.SH SYNOPSIS
+.BI "litToTex " "input-file"
+
+.SH DESCRIPTION
+A literate style of programming adopts an inverse approach to
+comments. Everything in a literate file is considered to be a
+comment, unless it is specified as program code. 
+.B litToTex
+converts a literate laTeX document into a vanilla LaTeX document. The
+style file 
+.I lit.sty 
+should be included into your document as it contains the definition of
+the \\begin{code} \\end{code} environment.
+
+.SH FILES
+
+The file \fIROOTDIR\fR/include/lit.sty contains the LaTeX style file
+for the literate mode; where 
+.I ROOTDIR
+is usually set in the top level Makefile of the BSPlib source.
+
+.SH "SEE ALSO"
+litToPgm(1)
+

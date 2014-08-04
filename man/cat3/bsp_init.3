@@ -1,0 +1,198 @@
+
+
+
+bsp_init(3)             BSPlib FUNCTIONS              bsp_init(3)
+
+
+
+NAME
+     bsp_init - initialise the BSPlib system
+
+
+C SYNOPSIS
+     #include "bsp.h"
+
+     void bsp_init(void (*_s_t_a_r_t_p_r_o_c)(void), int _a_r_g_c, char ** _a_r_g_v);
+
+FORTRAN SYNOPSIS
+     SUBROUTINE bspinit(_s_t_a_r_t_p_r_o_c)
+     INTERFACE
+        SUBROUTINE _s_t_a_r_t_p_r_o_c
+     END INTERFACE
+
+
+DESCRIPTION
+     The purpose of bsp_init is to  support  a  mode  of  process
+     intialisation  that  allows a single process to start execu-
+     tion and determine the number of parallel processes required
+     for  a calculation. The desired number of processes are then
+     spawned  using  bsp_begin(3).  Execution  of   the   spawned
+     processes  continues  in  a  SPMD manner until bsp_end(3) is
+     encountered  by  all  the  processes.  At  that  point,  all
+     processes  except  process  zero are terminated, and process
+     zero is left to continue execution of the rest of  the  pro-
+     gram sequentially.
+
+     The procedure bsp_init enables the implementation of  BSPlib
+     to simulate this dynamic spawning mechanism by giving a hint
+     to the BSPlib system that  SPMD  computation  will  commence
+     inside  the  procedure  _s_t_a_r_t_p_r_o_c.  The  procedure  named in
+     bsp_init must contain bsp_begin(3)  and  bsp_end(3)  as  its
+     first and last statements.
+
+
+
+EXAMPLES
+     1    A C implementation of a  simple  _h_e_l_l_o  _w_o_r_l_d  program,
+          that  spawns  a number of processes determined by user-
+          driven input.
+
+          #include <stdio.h>
+          #include "bsp.h"
+
+          int n; /* global variable
+
+          void spmd_part() {
+            bsp_begin(n);
+              printf("Hello BSP Worldwide from process %d of %d0,
+                     bsp_pid(),bsp_nprocs());
+            bsp_end();
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    1
+
+
+
+
+
+
+bsp_init(3)             BSPlib FUNCTIONS              bsp_init(3)
+
+
+
+          }
+
+          void main(int argc, char **argv) {
+            bsp_init(spmd_part,argc,argv);
+            printf("How many processes? ");
+            scanf("%d",&n);
+            printf("Only one process should print this\n");
+            spmd_start();
+            printf("Just about to finish\n");
+          }
+
+     When the above program is executed  a  single  process  will
+     begin  execution  and read a number from standard input that
+     specifies the number of parallel processes  to  be  spawned.
+     The  desired number of processes will then be spawned within
+     the procedure _s_p_m_d__p_a_r_t, and each  process  will  print  the
+     string ``Hello BSP Worldwide''.
+
+     An example compilation and execution is shown below:
+
+          pippin> bspcc test.c -o hello
+          pippin> ./hello
+          How many processes? 4
+          Only one process should print this
+          Hello BSP Worldwide from process  1 of 4
+          Hello BSP Worldwide from process  2 of 4
+          Hello BSP Worldwide from process  0 of 4
+          Hello BSP Worldwide from process  3 of 4
+          Just about to finish
+
+
+     2    A Fortran 77 implementation of  a  simple  _h_e_l_l_o  _w_o_r_l_d
+          program,  that  spawns a number of processes determined
+          by user-driven input.
+
+                  SUBROUTINE spmdpart
+                    INCLUDE 'fbsp.h'
+                    INTEGER nprocs
+                    COMMON /global/ nprocs
+
+                    CALL bspbegin(nprocs)
+                      WRITE (*,*) 'Hello BSP Worldwide from process',
+               +                  bsppid(), ' of ',bspnprocs()
+                    CALL bspend()
+                  END
+
+
+                  PROGRAM MAIN
+                    EXTERNAL spmdpart
+                    INTEGER nprocs
+                    COMMON /global/ nprocs
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    2
+
+
+
+
+
+
+bsp_init(3)             BSPlib FUNCTIONS              bsp_init(3)
+
+
+
+                    CALL bspinit(spmdpart)
+                    READ *,nprocs
+                    CALL spmdpart
+                  END
+
+     An example compilation and execution is shown below:
+
+          pippin> bspf77 test.f -o hello
+          pippin> ./hello
+          4
+          Hello BSP Worldwide from process   0    of   4
+          Hello BSP Worldwide from process   2    of   4
+          Hello BSP Worldwide from process   3    of   4
+          Hello BSP Worldwide from process   1    of   4
+
+
+SEE ALSO
+     bsplib(3), bsp_begin(3), bsp_end(3)
+
+     ``_B_S_P_l_i_b: _T_h_e _B_S_P _P_r_o_g_r_a_m_m_i_n_g _L_i_b_r_a_r_y'' Jonathan M. D. Hill,
+     Bill  McColl,  Dan  C.  Stefanescu,  Mark W. Goudreau, Kevin
+     Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and
+     Rob  Bisseling.  Parallel  Computing,  to  appear  1998. See
+     _h_t_t_p://_w_w_w._b_s_p-_w_o_r_l_d_w_i_d_e._o_r_g for more details.
+
+
+BUGS
+     Problems  and  bug  reports  should  be  mailed  to  _b_s_p_l_i_b-
+     _b_u_g_s@_c_o_m_l_a_b._o_x._a_c._u_k
+
+
+AUTHORS
+     The Oxford BSP Toolset implementation of BSPlib was  written
+     by Jonathan.Hill@comlab.ox.ac.uk
+     http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    3
+
+
+

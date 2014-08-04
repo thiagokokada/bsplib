@@ -1,0 +1,90 @@
+#! @PERL@
+
+%word_env = ();
+$size_word_env = 0;
+
+while ($_ = $ARGV[0]) {
+  $infile = shift(@ARGV);
+  $infile =~ /\.l(\w+)$/ && ($outfile = $` . ".$1.tex");
+  &loadETAGS();
+  print STDERR "Tags file contains ",$size_word_env," entries.\n";
+  &lit2pgm($infile,$outfile);
+}
+
+
+sub lit2pgm {
+  local($infile,$outfile) = @_;
+  local($first)=1;
+  local($texname,$i,$j);
+  local(@words);
+
+  open(PGM,$infile)        || die "litTopgm: Unable to open $infile";
+  open(OUT,"> " . $outfile)|| die "litTopgm: Unable to open $outfile";
+  while (<PGM>) {
+    if (/^\s*\\begin\{code\}\s*$/) {
+       if ($first) {
+         $texname = $infile;
+	 $texname =~ s/\_/\\\_/g;
+         printf OUT "\\marginpar{\\fbox{\\tiny\\texttt{%s}}}".
+                    "\\setcodecounter{C}{%d}\\begin{code}\n",$texname,$.;
+         $first=0;
+       } else {
+         printf OUT "\\setcodecounter{C}{%d}\\begin{code}\n",$.;
+       }
+       while (<PGM>) {
+         if (/^\s*\\end{code}\s*$/) {
+            print OUT $_;
+            last;
+         } else {
+            s/\\/\\\\/g;
+            s/\{/\\{/g;
+            s/\}/\\}/g;
+            s/^\\{/ \\{/g;
+            s/^\\}/ \\}/g;
+	    chop($_);
+            print OUT $_;
+	    if ($size_word_env>0) {
+               @words = split(/\W+/,$_);
+	       foreach $i (@words) {
+	         if ($word_env{$i}) {
+                   $j=$i;
+	           $j =~ s/_/\\_/g;
+		   if ($word_env{$i}==$.) {
+		      print OUT "\\index{$j\@\\texttt{$j}|litprimaryindex}";
+		   } else {
+		      print OUT "\\index{$j\@\\texttt{$j}}";
+		   }
+                 }
+               }
+	    }
+	    print OUT "\n";
+         }
+       }
+    } else {
+      print OUT $_;
+    }
+  }
+  close(PGM);
+  close(OUT);
+
+}
+
+sub loadETAGS {
+  local($pwd,$line,@words,$lineno);
+
+  $pwd = $ENV{'PWD'};
+  if (open(TAGS,$pwd . "/TAGS")) {
+    while ($line = <TAGS>) {
+      $line =~ /(\d+),\d+$/;
+      $lineno = $1;
+      if ($line =~ /^\s*#define\s+(\w+)/) {
+        $word_env{$1} = $lineno;
+      } elsif ($line =~ /(\w+)\s*\(/) {
+        $word_env{$1} = $lineno;
+      }     
+    }
+  }
+  close(TAGS);
+  @words = keys (%word_env);
+  $size_word_env = 1+ $#words;
+}

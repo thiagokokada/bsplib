@@ -1,0 +1,1228 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1997 Stephen Donaldson                             %%
+%%                      &  The University of Oxford                      %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsptcpm.lc,v 1.1 1997/07/11 10:28:33 jonh Exp jonh $
+% $Log: bsptcpm.lc,v $
+% Revision 1.1  1997/07/11 10:28:33  jonh
+% Initial revision
+%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Master process}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+This program, bsptcpm.c, is the master BSP/TCP program started by the
+BSP/TCP BSP pid 0 program when a user processor (as a result of a
+BSPLib program executing \texttt{bsp\_begin}). This program reads a
+list of host names and attempt to contact the BSP/TCP daemon on those
+hosts. The number of hosts attempted is taken frm the environment
+variable \texttt{BSPTCP\_NPROCS}. This is setup by the BSP PID 0
+program when it reaches the \texttt{bsp\_begin} statement (there is a
+limit to the number of connect attempts that will be attempted -
+\texttt{BSPTCP\_MAX\_ATTEMPTS}). The local userid and password of the
+logged in user are sent to the remote machines to make sure that the
+have login on those machines. The program name and path, and the BSP
+pid of the process on that machinen are also sent to the slave which
+should now be running on that machine.
+
+Once the slaves have been initiated, and each have started the SPMD
+program, the master and slaves are responsible for sending control
+information and signals to each other via the master/slave control
+sockets.
+
+\begin{code}
+#include <unistd.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <signal.h>
+#include <pwd.h>
+
+#include <sys/time.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <sys/socket.h>
+#ifdef BSPTCP_OSAIX
+#include <sys/select.h>
+#endif 
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <netdb.h>
+
+#include "bspnowdefs.h"
+#include "bsploadfuns.h"
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%
+\section{Global variables}
+%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+bsphost_t *bsptcp_host_list;     /* first candidate host */
+volatile int spmd_pid;           /* pid of BSP proc 0 process */
+int *csock = NULL;               /* fds of control sockets to slaves */
+int loadsock;                    /* Socket to load daemon */
+int bsp_nprocs;                  /* number of BSP processors */
+volatile int procs_left;         /* remaining BSP processors */
+volatile int setup_complete=0;   /* successful setup of BSP processes */
+int cxpipe[2];                   /* child exit/signal notify pipe */
+bsphost_t **machines;            /* names of participating machines */
+int splitoutput;                 /* pid banners for terminal IO */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%
+\section{Macros for guard functions}
+%%%%%%%%%%%%%%%%%%%%%%
+
+Define macros expanded in the guard functions. These functions guard
+calls to system functions and abort execution if anything unexpected
+happens. The macros are used to customise the functions for the
+particular BSP/TCP component.
+\begin{code}
+#define BSPTCP_COMPONENT "BSP/NOW Master"    /* component identifier */
+#define ABORT_MSG_OK csock         /* to check if ABORT_MSG & ABORT_EXIT OK */
+#define ABORT_EXIT(exitcode)       /* abort BSP execution */ \
+        { \
+        int i; \
+        bsptcp_msghdr_t msghdr; \
+        \
+        for (i = 1; i < bsp_nprocs; i++) \
+           { \
+           msghdr.msgtype = BSPTCP_MSG_ABORT; \
+           msghdr.msglen = 0; \
+           msghdr.msgspid = 0; \
+           msghdr.msgdpid = i; \
+           if (csock[i]) \
+              { \
+              sendall(csock[i],(char *)&msghdr,sizeof(msghdr),0); \
+              close(csock[i]); csock[i] = 0; \
+              } \
+           } \
+        if (spmd_pid>0) kill(spmd_pid,9); \
+        wait(NULL); \
+        fprintf(stderr,"BSP/NOW Master: computation aborted.\n"); \
+        exit(exitcode); \
+        } 
+#define ABORT_MSG(text) fprintf(stderr,text) 
+
+#define MSG_HEADER(str,src) \
+   { \
+   char str_name[10]; \
+   \
+   if (splitoutput) {\
+     if (str == stdout) strcpy(str_name,"stdout"); \
+     else \
+        if (str == stderr) strcpy(str_name,"stderr"); \
+        else strcpy(str_name,"<other>"); \
+     if (last_src != src || last_str != str) \
+        fprintf(str,"\n --- %s BSP pid %d - %s ---\n", \
+        machines[src]->name,src,str_name); \
+     fflush(str); \
+     last_str = str; \
+     last_src = src; \
+     }\
+   }
+\end{code}
+
+\begin{code}
+#include "bspnowerrs.h"          /* guard functions */
+#include "bsptcpsio.h"           /* guarded socket functions */
+
+#include "y.tab.c"               /* host name table parser */
+#include "bspnowlex.c"           /* host name table lexical analyser */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%
+\section{Prototypes}
+%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void spmdreap(int sig);
+void spmdkill(int sig);
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%
+\section{The main program}
+%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void main(void)
+   {
+   int i, j, check_rc, rc;
+
+   int attempts;                    /* connection attempts to a host */
+   int msock;                       /* master registration socket fd */
+   int bsp_dport;                   /* port BSP daemons listen on */
+   unsigned short bsp_uport;        /* port if user process daemon in use */
+   struct sockaddr_in csockaddr;    /* for addressing BSP daemons */
+   struct linger linger;            /* sockets linger on close if data */
+   int optval;                      /* value of socket option */
+
+   fd_set readfd;                   /* fds to watch for reading */
+   fd_set exceptfd;                 /* fds to watch for exceptions */
+   int maxfd;                       /* max fd number for select */
+   int fd_count;                    /* fds count from select */
+   int ucpipe[2];                   /* control pipe between master and SPMD */
+   int dcpipe[2];                   /* control pipe between master and SPMD */
+   struct timeval timeout;          /* select timeout value */
+   int cleanup;                     /* indicate clean up to be performed */
+
+   bsptcp_msghdr_t msghdr;          /* message header struct */
+   char msgbuf[BSPTCP_BUFF_LEN];    /* message buffer */
+
+   char spmd_prog[BSPTCP_STR_LEN];  /* SPMD program and path */
+   int spmd_stdout;                 /* pipe end for reading pid 0 stdout */
+   int spmd_stderr;                 /* pipe end for reading pid 0 stderr */
+
+   char bsp_hostnames[BSPTCP_STR_LEN]; /* BSP hostnames file name */
+   FILE *hostnames;                 /* BSP hostnames file */
+   char hostname[BSPTCP_STR_LEN];   /* a single hostname */
+   bsphost_t *host_entry;           /* for traversing host data list */
+   envvar_t *env_entry;             /* for traversing env var list */
+
+   struct hostent *host;            /* netdb format host info */
+   struct passwd *passwdent;        /* current user's password entry */ 
+
+   struct sigaction sigchild;       /* action for SIGCHLD signal */
+   struct sigaction sigbcast;       /* action for signal broadcast */
+ 
+   int last_src = -1;               /* last BSP pid to write */
+   FILE *last_str = NULL;           /* last stream used (stdout/stderr) */
+   int using_load_daemon=0;         /* using load daemon */
+   char *temps;
+   int pid0_status=0;               /* exit status of process zero */
+
+#ifdef DEBUG
+   printf("BSP/NOW Master: process has started.\n"); fflush(stdout);
+#endif
+   if (gethostname(bsp_my_hostname,BSPTCP_STR_LEN)) 
+      strcpy(bsp_my_hostname,"localhost");
+\end{code}
+
+Setup reaper for child BSP process 0 termination. This also uses a pipe
+for the signal handler to communicate back with the mainlime code.
+\begin{code}
+   GUARDZ(pipe(cxpipe),"pipe(cxpipe)");
+   memset(&sigchild,0,sizeof(sigchild));
+   sigchild.sa_handler = spmdreap;
+#ifdef SA_RESTART
+   sigchild.sa_flags = SA_NOCLDSTOP+SA_RESTART;
+#else
+   sigchild.sa_flags = SA_NOCLDSTOP;
+#endif
+
+   GUARDZ(sigaction(SIGCHLD,&sigchild,NULL),"sigaction(SIGCHLD)");
+\end{code}
+
+Setup handler to broadcast selected signals which end the BSP computation.
+\begin{code}
+   memset(&sigbcast,0,sizeof(sigbcast));
+   sigbcast.sa_handler = spmdkill;
+#ifdef SA_RESTART
+   sigbcast.sa_flags = SA_NOCLDSTOP+SA_RESTART;
+#else
+   sigbcast.sa_flags = SA_NOCLDSTOP;
+#endif
+
+   GUARDZ(sigaction(SIGHUP,&sigbcast,NULL),"sigaction(SIGHUP)");
+   GUARDZ(sigaction(SIGINT,&sigbcast,NULL),"sigaction(SIGINT)");
+   GUARDZ(sigaction(SIGQUIT,&sigbcast,NULL),"sigaction(SIGQUIT)");
+   GUARDZ(sigaction(SIGILL,&sigbcast,NULL),"sigaction(SIGILL)");
+   GUARDZ(sigaction(SIGTRAP,&sigbcast,NULL),"sigaction(SIGTRAP)");
+   GUARDZ(sigaction(SIGIOT,&sigbcast,NULL),"sigaction(SIGIOT)");
+   GUARDZ(sigaction(SIGBUS,&sigbcast,NULL),"sigaction(SIGBUS)");
+   GUARDZ(sigaction(SIGFPE,&sigbcast,NULL),"sigaction(SIGFPE)");
+   GUARDZ(sigaction(SIGUSR1,&sigbcast,NULL),"sigaction(SIGUSR1)");
+   GUARDZ(sigaction(SIGSEGV,&sigbcast,NULL),"sigaction(SIGSEGV)");
+   GUARDZ(sigaction(SIGUSR2,&sigbcast,NULL),"sigaction(SIGUSR2)");
+   GUARDZ(sigaction(SIGPIPE,&sigbcast,NULL),"sigaction(SIGPIPE)");
+   GUARDZ(sigaction(SIGALRM,&sigbcast,NULL),"sigaction(SIGALRM)");
+   GUARDZ(sigaction(SIGTERM,&sigbcast,NULL),"sigaction(SIGTERM)");
+/* GUARDZ(sigaction(SIGCONT,&sigbcast,NULL),"sigaction(SIGCONT)");
+   GUARDZ(sigaction(SIGTSTP,&sigbcast,NULL),"sigaction(SIGTSTP)");
+   GUARDZ(sigaction(SIGTTIN,&sigbcast,NULL),"sigaction(SIGTTIN)");
+   GUARDZ(sigaction(SIGTTOU,&sigbcast,NULL),"sigaction(SIGTTOU)");
+   GUARDZ(sigaction(SIGURG,&sigbcast,NULL),"sigaction(SIGURG)");
+   GUARDZ(sigaction(SIGXCPU,&sigbcast,NULL),"sigaction(SIGXCPU)");
+   GUARDZ(sigaction(SIGXFSZ,&sigbcast,NULL),"sigaction(SIGXFSZ)");
+   GUARDZ(sigaction(SIGVTALRM,&sigbcast,NULL),"sigaction(SIGVTALRM)");
+   GUARDZ(sigaction(SIGPROF,&sigbcast,NULL),"sigaction(SIGPROF)");
+   GUARDZ(sigaction(SIGIO,&sigbcast,NULL),"sigaction(SIGIO)");
+   GUARDZ(sigaction(SIGPWR,&sigbcast,NULL),"sigaction(SIGPWR)");
+*/
+\end{code}
+
+Get parameters from environment: Controlling pipe fds, SPMD program
+stdout and stderr read pipe end fds, SPMD program name, 
+number of BSP processors, ``well known'' port of BSP daemon,
+hostname file name, and the pid of the BSP process 0 PID.
+
+\begin{code}
+   dcpipe[0] = 2; ucpipe[1] = 2; /* shouldn't use these pipe ends */
+   GUARDEQ(sscanf(GUARDNZP(getenv("BSPTCP_CPIPE_READ"),"getenv(CPIPE_READ)"),
+           "%d",&ucpipe[0]),1,"sscanf(ucpipe[0])");
+   GUARDEQ(sscanf(GUARDNZP(getenv("BSPTCP_CPIPE_WRITE"),"getenv(CPIPE_WRITE)"),
+           "%d",&dcpipe[1]),1,"sscanf(dcpipe[1])");
+   GUARDEQ(sscanf(GUARDNZP(getenv("BSPTCP_SPMD_STDOUT"),"getenv(SPMD_STDOUT)"),
+           "%d",&spmd_stdout),1,"sscanf(spmd_stdout)");
+   GUARDEQ(sscanf(GUARDNZP(getenv("BSPTCP_SPMD_STDERR"),"getenv(SPMD_STDERR)"),
+           "%d",&spmd_stderr),1,"sscanf(spmd_stderr)");
+   strcpy(spmd_prog,GUARDNZP(getenv("BSPTCP_SPMD_PROGRAM"),
+           "getenv(SPMD_PROGRAM)"));
+
+   GUARDEQ(sscanf(GUARDNZP(getenv("BSPTCP_NPROCS"),"getenv(NPROCS)"),
+           "%d",&bsp_nprocs),1,"sscanf(NPROCS)");
+   GUARDEQ(sscanf(GUARDNZP(getenv("BSPTCP_PORTNUMBER"),"getenv(PORTNUMBER)"),
+           "%d",&bsp_dport),1,"sscanf(dport)");
+   strcpy(bsp_hostnames,GUARDNZP(getenv("BSPTCP_HOSTNAMES"),
+           "getenv(HOSTMAMES)"));
+   GUARDEQ(sscanf(GUARDNZP(getenv("BSPTCP_BSPPID0PID"),"getenv(BSPPID0PID)"),
+           "%d",&spmd_pid),1,"sscanf(spmd_pid)");
+
+   GUARDEQ(sscanf(GUARDNZP(getenv("BSP_SPLITOUTPUT"),"getenv(SPLITOUTPUT)"),
+           "%d",&splitoutput),1,"sscanf(splitoutput)");
+
+   /* set the stdout and stderr fds to non-blocking */
+   GUARDNN(fcntl(spmd_stdout,F_SETFL,O_NONBLOCK),"fcntl(spmd_stdout)");
+   GUARDNN(fcntl(spmd_stderr,F_SETFL,O_NONBLOCK),"fcntl(spmd_stderr)");
+   
+  /*
+   * Get current effective user's password file entry structure address.
+   */
+
+   passwdent = getpwuid(geteuid());
+   GUARDZ(passwdent == NULL,"getpwuid()");
+\end{code}
+
+Attempt to establish a slave process for each of the BSP processors
+requested. This is done by reading the hostname file and attempting to
+contact the required number of processes. The number of processors
+that managed to be contacted is communicated to the BSP pid 0.
+\begin{code}
+   /* open the file containing the list of host names */
+   hostnames = fopen(bsp_hostnames,"r");
+   if (!hostnames)
+      {
+      fprintf(stderr,"BSP/NOW Master: error opening host names file %s.\n",
+              bsp_hostnames);
+      exit(1);
+      }
+
+   /* load the host name data structures */
+   yyin = hostnames;
+   fprintf(stderr,"\n"); fflush(stderr);
+   yyout = stderr;
+   GUARDZ(yyparse(),"yyparse(host names file)");
+
+   /* allocate allocate socket fd array for number of procs requested */
+   GUARDNZP(csock = malloc(sizeof(int)*bsp_nprocs),"malloc(csock)");
+   for (i = 0; i < bsp_nprocs; i++)
+      csock[i] = 0;
+
+   /* allocate machine name array - for participating machines */
+   machines = (bsphost_t **)malloc(sizeof(bsphost_t *)*bsp_nprocs);
+   GUARDNZP((bsphost_t *)machines,"malloc(machines)");
+
+   machines[0] = NULL;
+   gethostname(hostname,BSPTCP_STR_LEN);
+   /* Contact the load daemon and sort the hostname information */
+   if (getenv("BSP_DOLOAD")) 
+      {
+      loadsock = open_connection_load_daemon(hostname);
+      if (loadsock>=0)
+         {
+	 msghdr.msgtype=BSPTCP_MSG_LD_ENQ;
+         msghdr.msglen =0;
+         if (sendall(loadsock,(char*)&msghdr,sizeof(msghdr),0)==
+	     sizeof(msghdr))
+            if (recvall(loadsock,(char*)&msghdr,sizeof(msghdr),MSG_WAITALL)==
+		sizeof(msghdr))
+	       {
+	       update_load_averages(lookup_remote_load_recv(loadsock,msghdr));
+	       using_load_daemon=1;
+	       }
+         close(loadsock); 
+         }
+      }
+  
+   /* Move local machine to bottom of host list if bsprun -nolocal*/
+   temps=getenv("BSP_LOCAL");
+   if (temps) 
+      {
+      host =gethostbyname(temps);
+      if (host) 
+         {
+         for (host_entry = bsptcp_host_list; host_entry; 
+	      host_entry = host_entry->link)
+	   if (!strcmp(host->h_name,host_entry->name))
+	      {
+              host_entry->load_avg+=BSPTCP_INFTY_LOAD;
+              }
+	 }
+      }
+
+   /* locate host entry for BSP pid 0 machines */
+   for (host_entry = bsptcp_host_list; host_entry; 
+        host_entry = host_entry->link)
+      if (!strcmp(hostname,host_entry->name))
+         {
+         machines[0] = host_entry;
+         host_entry->load_avg+=1.0;
+         }
+
+   /* 
+    * Register this process with the local (user) process daemon.
+    * This will allow a cleanup to kill this process as well as any 
+    * slaves.
+    */
+
+   attempts = 2; /* once for each type of processor daemon */
+   while (attempts)
+      {
+      attempts--;
+      /* create an internet socket */
+      msock = GUARDNN(socket(AF_INET,SOCK_STREAM,0),"socket()");
+      /* socket must linger on close in presence of data */
+      linger.l_onoff = 1;
+      linger.l_linger = BSPTCP_LINGER_INT;
+      GUARDZ(setsockopt(msock,SOL_SOCKET,SO_LINGER,
+         (char *)&linger,sizeof(linger)),"setsockopt(SO_LINGER)");
+      optval = 1;
+      GUARDZ(setsockopt(msock,IPPROTO_TCP,TCP_NODELAY,
+          (char *)&optval,sizeof(optval)),"setsockopt(TCP_NODELAY)");
+      /* setup addressing structure of host and attempt connect */
+      memset(&csockaddr,0,sizeof(struct sockaddr_in));
+      csockaddr.sin_family = AF_INET;
+      if (attempts)
+         csockaddr.sin_port = htons(bsp_dport);
+      else
+         csockaddr.sin_port = htons(bsp_uport);
+      csockaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+      if (!connect(msock,(struct sockaddr *)&csockaddr,
+                   sizeof(struct sockaddr_in)))
+         {
+         msghdr.msgtype = BSPTCP_MSG_MASTERPID;
+         msghdr.msgspid = getpid();
+         msghdr.msgdpid = 0;
+         /* send master pid registration request */
+         GUARDNN((sendall(msock,(char *)&msghdr,
+            sizeof(msghdr),0)),"sendall()");
+         msghdr.msgtype = BSPTCP_MSG_CDATA;
+         /* send the userid to the remote daemon */
+         msghdr.msglen = strlen(passwdent->pw_name);
+         GUARDNN((sendall(msock,(char *)&msghdr,
+            sizeof(msghdr),0)),"sendall()");
+         GUARDNN((sendall(msock,passwdent->pw_name,
+            msghdr.msglen,0)),"sendall()");
+
+         /* send the password to the local daemon */
+         msghdr.msglen = strlen(passwdent->pw_passwd);
+         GUARDNN((sendall(msock,(char *)&msghdr,
+            sizeof(msghdr),0)),"sendall()");
+         GUARDNN((sendall(msock,passwdent->pw_passwd,
+            msghdr.msglen,0)),"sendall()");
+
+         /* either an error message is returned, acknowledgement or
+            or a control data reply indicating that the host is
+            a port daemon (and not a processor daemon) */
+         GUARDEQ((recvall(msock,(char *)&msghdr,
+            sizeof(msghdr),MSG_WAITALL)),sizeof(msghdr),
+            "1-recvall()");
+
+         /* Error returned: Includes message text */
+         if (msghdr.msgtype == BSPTCP_MSG_STDERR)
+            {
+            GUARDEQ((recvall(msock,msgbuf,msghdr.msglen,
+               MSG_WAITALL)),msghdr.msglen,"recvall()");
+            msgbuf[msghdr.msglen] = 0;
+            MSG_HEADER(stderr,msghdr.msgspid);
+            fprintf(stderr,"%s\n",msgbuf);
+            attempts = 0;
+            }
+
+         /* Daemon has accepted connection */
+         if (msghdr.msgtype == BSPTCP_MSG_ACK)
+            /* the slave is running on the host */
+            attempts = 0;
+
+         /* Daemon has accepted connection but this daemon is
+            only a port daemon and the connection must be re-attempted
+            against the user processor daemon */
+         if (msghdr.msgtype == BSPTCP_MSG_CDATA)
+            {
+            GUARDEQ((recvall(msock,(char*) &bsp_uport,
+               sizeof(bsp_uport),
+               MSG_WAITALL)),sizeof(bsp_uport),"recvall()");
+            close(msock);
+            }
+         }
+      else /* connect() call failed */
+         {
+         perror("BSP/NOW Master: error connectng to local process daemon");
+         attempts = 0;
+         }
+      }
+
+   /* Make sure that BSP pid 0 moves down the load table */
+   sort_host_list();
+   /* attempt to contact the required number of processes */
+   j = 1;
+   host_entry = bsptcp_host_list;
+   for (i = 0; i < BSPTCP_MAX_ATTEMPTS && j < bsp_nprocs; i++)
+      if (host_entry)
+         {
+         host = gethostbyname(host_entry->name);
+         attempts = 2; /* Once for each type of processor daemon */
+         while (attempts)
+            {
+            attempts--;
+            if (host)
+               {
+               /* create an internet socket */
+               csock[j] = GUARDNN(socket(AF_INET,SOCK_STREAM,0),"socket()");
+               /* socket must linger on close in presence of data */
+               linger.l_onoff = 1;
+               linger.l_linger = BSPTCP_LINGER_INT;
+               GUARDZ(setsockopt(csock[j],SOL_SOCKET,SO_LINGER,
+                  (char *)&linger,sizeof(linger)),"setsockopt(SO_LINGER)");
+               optval = 1;
+               GUARDZ(setsockopt(csock[j],IPPROTO_TCP,TCP_NODELAY,
+                   (char *)&optval,sizeof(optval)),"setsockopt(TCP_NODELAY)");
+               /* setup addressing structure of host and attempt connect */ 
+               memset(&csockaddr,0,sizeof(struct sockaddr_in));
+               csockaddr.sin_family = AF_INET;
+               if (attempts)
+                  csockaddr.sin_port = htons(bsp_dport);
+               else
+                  csockaddr.sin_port = htons(bsp_uport);
+               memcpy(&csockaddr.sin_addr.s_addr,host->h_addr_list[0],
+                      sizeof(csockaddr.sin_addr.s_addr));
+               if (!connect(csock[j],(struct sockaddr *)&csockaddr,
+                            sizeof(struct sockaddr_in)))
+                  {
+                  msghdr.msgtype = BSPTCP_MSG_ACK;
+                  msghdr.msgspid = 0;
+                  msghdr.msgdpid = j;
+                  /* send ack indicating new session request */
+                  GUARDNN((sendall(csock[j],(char *)&msghdr,
+                     sizeof(msghdr),0)),"sendall()");
+                  msghdr.msgtype = BSPTCP_MSG_CDATA;
+                  /* send the userid to the remote daemon */
+                  msghdr.msglen = strlen(passwdent->pw_name);
+                  GUARDNN((sendall(csock[j],(char *)&msghdr,
+                     sizeof(msghdr),0)),"sendall()");
+                  GUARDNN((sendall(csock[j],passwdent->pw_name,
+                     msghdr.msglen,0)),"sendall()");
+   
+                  /* send the password to the remote daemon */
+                  msghdr.msglen = strlen(passwdent->pw_passwd);
+                  GUARDNN((sendall(csock[j],(char *)&msghdr,
+                     sizeof(msghdr),0)),"sendall()");
+                  GUARDNN((sendall(csock[j],passwdent->pw_passwd,
+                     msghdr.msglen,0)),"sendall()");
+   
+                  /* either an error message is returned, acknowledgement or 
+                     or a control data reply indicating that the host is 
+                     a port daemon (and not a processor daemon) */
+                  GUARDEQ((recvall(csock[j],(char *)&msghdr,
+                     sizeof(msghdr),MSG_WAITALL)),sizeof(msghdr),
+                     "1-recvall()"); 
+   
+                  /* Error returned: Includes message text */
+                  if (msghdr.msgtype == BSPTCP_MSG_STDERR)
+                     {
+                     GUARDEQ((recvall(csock[j],msgbuf,msghdr.msglen,
+                        MSG_WAITALL)),msghdr.msglen,"recvall()"); 
+                     msgbuf[msghdr.msglen] = 0;
+                     MSG_HEADER(stderr,msghdr.msgspid);
+                     fprintf(stderr,"%s\n",msgbuf);
+                     attempts = 0;
+                     }
+   
+                  /* Daemon has accepted connection */
+                  if (msghdr.msgtype == BSPTCP_MSG_ACK) 
+                     {
+                     /* the slave is running on the host 
+                       - BSP pid and SPMD program name can be sent */
+                     machines[j] = host_entry;
+                     j++;
+                     attempts = 0;
+		     
+                     }
+                  
+                  /* Daemon has accepted connection but this daemon is 
+                     only a port daemon and the connection must be re-attempted
+                     against the user processor daemon */
+                  if (msghdr.msgtype == BSPTCP_MSG_CDATA)
+                     {
+                     GUARDEQ((recvall(csock[j],(char*) &bsp_uport,
+                        sizeof(bsp_uport),
+                        MSG_WAITALL)),sizeof(bsp_uport),"recvall()"); 
+                     close(csock[j]);
+                     }
+
+                  }
+               else /* connect() call failed */
+                  {
+                  sprintf(msgbuf,
+                     "BSP/NOW Master: error trying to connect to %s:%d",
+                       host_entry->name,attempts?bsp_dport:bsp_uport);
+                  perror(msgbuf);
+                  attempts = 0;
+                  }
+               }
+            else 
+               {
+               /* gethostbyname() call failed */
+               fprintf(stderr,
+                  "BSP/NOW Master: hostname lookup failed for %s.\n",
+                   host_entry->name);
+               attempts = 0;
+               }
+            }
+	 if (using_load_daemon)
+	    {
+            host_entry->load_avg+=1.0;
+	    sort_host_list();
+	    host_entry=bsptcp_host_list;
+	    }
+	 else
+	   host_entry = host_entry->link;
+         }
+      else
+         i = BSPTCP_MAX_ATTEMPTS;
+\end{code}
+
+Environment variables specified in the hostnames file are sent 
+to the BSP pid 0 process so they can be set by that process.
+\begin{code}
+   msghdr.msgtype = BSPTCP_MSG_ENVSET;
+   msghdr.msgspid = 0;
+   msghdr.msgdpid = 0;
+
+   if (machines[0])
+      for (env_entry = machines[0]->envvars; env_entry;
+           env_entry = env_entry->link)
+         {
+         msghdr.msglen = strlen(env_entry->name)+strlen(env_entry->value)+1;
+	 memcpy(msgbuf,env_entry->name,strlen(env_entry->name)+1);
+	 memcpy(msgbuf+strlen(env_entry->name)+1,
+		env_entry->value,strlen(env_entry->value));
+         GUARDNN((writeall(dcpipe[1],&msghdr,sizeof(msghdr))),
+			 "allwrite(1)");
+         GUARDNN((writeall(dcpipe[1],msgbuf,msghdr.msglen)),
+			 "writeall(2)");
+         GUARDNN(setenv(env_entry->name,env_entry->value,1),"setenv()");
+         }
+
+   /*      
+    * The actual number of processes to be used must be communicated back  
+    * to the BSP pid 0 process.
+    */
+
+   bsp_nprocs = j;
+   msghdr.msgtype = BSPTCP_MSG_CDATA;
+   msghdr.msglen = sizeof(bsp_nprocs);
+   msghdr.msgspid = 0;
+   msghdr.msgdpid = 0;
+   GUARDNN((writeall(dcpipe[1],&msghdr,sizeof(msghdr))),"writeall(4)");
+   GUARDNN((writeall(dcpipe[1],&bsp_nprocs,sizeof(bsp_nprocs))),
+      "writeall(5)");
+   procs_left = bsp_nprocs;
+\end{code}
+
+The non-zero BSP pid processes are sent environment variables 
+sepcifie in the host files so that they can be set by the 
+the slave processes before the slave SPMD programs are forked.
+\begin{code}
+   for (i = 1; i < bsp_nprocs; i++)
+      {
+      msghdr.msgtype = BSPTCP_MSG_ENVSET;
+      msghdr.msgspid = 0;
+      msghdr.msgdpid = i;
+      for (env_entry = machines[i]->envvars; env_entry;
+           env_entry = env_entry->link)
+         {
+         msghdr.msglen = strlen(env_entry->name)+strlen(env_entry->value)+1;
+         GUARDNN((sendall(csock[i],(char *)&msghdr,sizeof(msghdr),0)),
+            "sendall()");
+         GUARDNN((sendall(csock[i],env_entry->name,
+            strlen(env_entry->name)+1,0)),"sendall()");
+         GUARDNN((sendall(csock[i],env_entry->value,
+            strlen(env_entry->value),0)),"sendall()");
+         }
+      temps=GUARDNZP(getenv("BSP_PWD"),"getenv(BSP_PWD)");
+      msghdr.msglen=1+strlen("BSP_PWD")+strlen(temps);
+      GUARDNN((sendall(csock[i],(char *)&msghdr,sizeof(msghdr),0)),
+		      "sendall()");
+      GUARDNN((sendall(csock[i],"BSP_PWD",
+			       strlen("BSP_PWD")+1,0)),"sendall()");
+      GUARDNN((sendall(csock[i],temps,strlen(temps),0)),"sendall()");
+      }
+\end{code}
+
+The non-zero BSP pid processes are forked by the slaves and when they
+reach the \texttt{bsp\_begin} point, all the processes communicate
+control information using the slave and master processes. The control
+information that is exchanged is used to setup sockets between all the
+copies of the SPMD programs in the BSP computation. These sockets are
+used to exchange data between the BSP processes only. Control
+information (e.g. signals) are still sent via the slave and master
+processes and their respective control pipes.
+
+\begin{code}
+   /* send the SPMD program name, BSP pid values and nprocs to the slaves */
+   for (i = 1; i < bsp_nprocs; i++)
+      {
+      msghdr.msgtype = BSPTCP_MSG_CDATA;
+      msghdr.msgspid = 0;
+      msghdr.msgdpid = i;
+      msghdr.msglen = strlen(spmd_prog);
+      GUARDNN((sendall(csock[i],(char *)&msghdr,sizeof(msghdr),0)),
+         "sendall()");
+      GUARDNN((sendall(csock[i],spmd_prog,msghdr.msglen,0)),
+         "sendall()");
+      msghdr.msglen = sizeof(int);
+      GUARDNN((sendall(csock[i],(char *)&msghdr,sizeof(msghdr),0)),
+         "sendall()");
+      GUARDNN((sendall(csock[i],(char *)&i,msghdr.msglen,0)),
+         "sendall()");
+      GUARDNN((sendall(csock[i],(char *)&msghdr,sizeof(msghdr),0)),
+         "sendall()");
+      GUARDNN((sendall(csock[i],(char *)&bsp_nprocs,msghdr.msglen,0)),
+         "sendall()");
+      }
+ 
+   maxfd = ucpipe[0];
+   for (i = 1; i < bsp_nprocs; i++) 
+      if (csock[i] > maxfd) maxfd = csock[i];
+   if (cxpipe[0] > maxfd) maxfd = cxpipe[0];
+   if (spmd_stdout > maxfd) maxfd = spmd_stdout;
+   if (spmd_stderr > maxfd) maxfd = spmd_stderr;
+   
+   while(procs_left)
+      {
+      setup_complete = 1;  /* pid 0 termination from now on is OK*/
+
+      FD_ZERO(&readfd);
+      FD_ZERO(&exceptfd);
+      if (ucpipe[0]) 
+         {
+         FD_SET(ucpipe[0],&readfd);
+         FD_SET(ucpipe[0],&exceptfd);
+         }
+      if (cxpipe[0]) 
+         {
+         FD_SET(cxpipe[0],&readfd);
+         FD_SET(cxpipe[0],&exceptfd);
+         }
+      if (spmd_stdout) 
+         {
+         FD_SET(spmd_stdout,&readfd);
+         FD_SET(spmd_stdout,&exceptfd);
+         }
+      if (spmd_stderr) 
+         {
+         FD_SET(spmd_stderr,&readfd);
+         FD_SET(spmd_stderr,&exceptfd);
+         }
+      for (i = 1; i < bsp_nprocs; i++) 
+         if (csock[i]) 
+            {
+            FD_SET(csock[i],&readfd);
+            FD_SET(csock[i],&exceptfd);
+            }
+     
+      timeout.tv_sec = BSPTCP_TIMEOUT_HIGH; 
+      timeout.tv_usec = 0;
+      cleanup = 0;
+
+      fd_count =select(maxfd+1,&readfd,NULL,&exceptfd,&timeout);
+      if (fd_count < 0 && errno == EINTR) continue;
+      GUARDNN(fd_count,"select()");
+
+      if (!fd_count) cleanup = 1; /* no activity for a while - cleanup */
+
+      if (fd_count && FD_ISSET(ucpipe[0],&exceptfd))
+         {
+#ifdef DEBUG
+         MSG_HEADER(stderr,0);
+         fprintf(stderr,"BSP/NOW Master: Control pipe exception.\n");
+#endif
+         close(ucpipe[0]); ucpipe[0] = 0;
+         close(dcpipe[1]); dcpipe[1] = 0;
+         fd_count--;
+         }
+
+      if (fd_count && FD_ISSET(cxpipe[0],&exceptfd))
+         {
+         MSG_HEADER(stderr,0);
+         fprintf(stderr,"BSP/NOW Master: Child exit pipe exception.\n");
+
+         cleanup = 1;
+         fd_count--;
+         }
+         
+      for (i = 1; i < bsp_nprocs && fd_count; i++)
+         if (FD_ISSET(csock[i],&exceptfd))
+            {
+            MSG_HEADER(stderr,0);
+            fprintf(stderr,"BSP/NOW Master: Control socket exception.\n");
+
+            cleanup = 1;
+            fd_count--;
+            }
+
+      if (fd_count && ucpipe[0] && FD_ISSET(ucpipe[0],&readfd))
+         {
+         GUARDNN((rc = read(ucpipe[0],&msghdr,sizeof(msghdr))), 
+            "read(ucpipe[0])");
+         if (rc == 0)
+            {
+            close(ucpipe[0]); ucpipe[0] = 0;
+            close(dcpipe[1]); dcpipe[1] = 0;
+#ifdef DEBUG
+            MSG_HEADER(stderr,0);
+            fprintf(stderr,"BSP/NOW Master: control pipe end-of-file.\n");
+#endif
+            fd_count--;
+            continue;
+            }
+         
+         switch (msghdr.msgtype)
+            {
+            case BSPTCP_MSG_ABORT:
+               GUARDNN((readall(ucpipe[0],&rc,msghdr.msglen)),
+                  "1-readall(ucpipe)");
+               msghdr.msglen = 0;
+               for (i = 1; i < bsp_nprocs; i++)
+                  {
+                  msghdr.msgspid = 0;
+                  msghdr.msgdpid = i;
+                  sendall(csock[i],(char *)&msghdr,sizeof(msghdr),0);
+                  close(csock[i]); csock[i] = 0;
+                  }
+               writeall(dcpipe[1],&msghdr,sizeof(msghdr)); /* ack */
+               wait(NULL);
+               close(ucpipe[0]); ucpipe[0] = 0;
+               close(dcpipe[1]); dcpipe[1] = 0;
+               MSG_HEADER(stderr,0);
+               fprintf(stderr,
+                  "BSP/NOW Master: computation aborted (code = %d).\n", rc);
+               exit(rc);
+            
+            case BSPTCP_MSG_SIGNAL:
+               {
+               int sig = 9;
+   
+               if (msghdr.msglen == sizeof(sig))
+                  GUARDNN((readall(ucpipe[0],&sig,sizeof(sig))),
+                        "4-readall(ucpipe)");
+               else
+                  {
+                  MSG_HEADER(stderr,0);
+                  fprintf(stderr,
+                   "BSP/NOW Master: Message format error - assume sig = 9.\n");
+                  }
+               for (i = 1; i < bsp_nprocs; i++)
+                  {
+                  msghdr.msgspid = 0;
+                  msghdr.msgdpid = i;
+                  sendall(csock[i],(char *)&msghdr,sizeof(msghdr),0);
+                  sendall(csock[i],(char *)&sig,sizeof(sig),0);
+                  close(csock[i]); csock[i] = 0;
+                  }
+               MSG_HEADER(stderr,0);
+               fprintf(stderr,
+                  "BSP/NOW Master: Signal %d received from BSP pid 0.\n",sig);
+               writeall(dcpipe[1],&msghdr,sizeof(msghdr)); /* ack */
+               wait(NULL);
+               close(ucpipe[0]); ucpipe[0] = 0;
+               close(dcpipe[1]); dcpipe[1] = 0;
+               close(cxpipe[0]); cxpipe[0] = 0;
+               close(cxpipe[1]); cxpipe[1] = 0;
+               cleanup = 1;
+               } 
+              break;
+            
+            case BSPTCP_MSG_CDATA:
+               GUARDNN((sendall(csock[msghdr.msgdpid],(char *)&msghdr,
+                  sizeof(msghdr),0)),"sendall(csock1)");
+               if (msghdr.msglen)
+                  {
+                  GUARDNN((readall(ucpipe[0],msgbuf,msghdr.msglen)),
+                     "2-readall(ucpipe)");
+                  GUARDNN((sendall(csock[msghdr.msgdpid],msgbuf,
+                     msghdr.msglen,0)),
+                     "sendall(csock2)");
+                  }
+               break;
+
+            case BSPTCP_MSG_EXIT:
+               GUARDNN((readall(ucpipe[0],&rc,sizeof(rc))),
+                  "3-readall(ucpipe)");
+               GUARDNN((writeall(dcpipe[1],&msghdr,sizeof(msghdr))),
+                  "writeall(dcpipe[1])");
+               close(ucpipe[0]); ucpipe[0] = 0;
+               close(dcpipe[1]); dcpipe[1] = 0;
+               break;
+            }
+
+         fd_count--;
+         }
+
+      if (fd_count && cxpipe[0] && FD_ISSET(cxpipe[0],&readfd))
+         {
+         /* child issued improper exit or child or imaster received a signal */
+         GUARDNN((readall(cxpipe[0],&msghdr,sizeof(msghdr))),
+            "readall(cxpipe[0])");
+
+         switch (msghdr.msgtype)
+            {
+            case BSPTCP_MSG_SIGNAL:
+               {
+               int sig,usesig=9;
+
+               GUARDNN((readall(cxpipe[0],&sig,sizeof(sig))),
+                  "readall(cxpipe sig)");
+               for (i = 1; i < bsp_nprocs; i++)
+                  {
+                  msghdr.msgspid = 0;
+                  msghdr.msgdpid = i;
+                  sendall(csock[i],(char *)&msghdr,sizeof(msghdr),0);
+                  sendall(csock[i],(char *)&usesig,sizeof(usesig),0);
+                  close(csock[i]); csock[i] = 0;
+                  }
+               MSG_HEADER(stderr,0);
+               fprintf(stderr,
+                  "BSP/NOW Master: BSP pid 0 received sig %d.\n",sig);
+               fprintf(stderr,"BSP/NOW Master: Sig %d sent to all pids.\n",
+		       usesig);
+               exit(1);
+               }
+               break;
+
+            case BSPTCP_MSG_EXIT:
+               {
+
+               GUARDNN((readall(cxpipe[0],&pid0_status,sizeof(pid0_status))),
+                  "readall(cxpipe status)");
+               close(ucpipe[0]); ucpipe[0] = 0;
+               close(dcpipe[1]); dcpipe[1] = 0;
+               close(cxpipe[0]); cxpipe[0] = 0;
+               close(cxpipe[1]); cxpipe[1] = 0;
+               procs_left--;
+               MSG_HEADER(stderr,0);
+#ifdef DEBUG
+               fprintf(stderr,
+                  "BSP/NOW Master: BSP pid 0 ended (status = %d).\n",
+                  pid0_status);
+#endif
+               }
+               break;
+             }
+         fd_count--;
+         }
+
+      /* if exceptions on stderr/stdout the then just close them */
+      if (fd_count && FD_ISSET(spmd_stdout,&exceptfd))
+         {
+         close(spmd_stdout); spmd_stdout = 0;
+         fd_count--;
+         }
+      if (fd_count && FD_ISSET(spmd_stderr,&exceptfd))
+         {
+         close(spmd_stderr); spmd_stderr = 0;
+         fd_count--;
+         }
+
+      if (fd_count && spmd_stdout && FD_ISSET(spmd_stdout,&readfd))
+         {
+         /* SPMD program has stdout data */
+         while((msghdr.msglen = read(spmd_stdout,msgbuf,
+               sizeof(msgbuf))) > 0)
+            { 
+            MSG_HEADER(stdout,0);
+            writeall(1,msgbuf,msghdr.msglen);
+            }
+         fd_count--;
+         }
+
+      if (fd_count && spmd_stderr && FD_ISSET(spmd_stderr,&readfd))
+         {
+         /* SPMD program has stderr data */
+         while((msghdr.msglen = read(spmd_stderr,msgbuf,
+               sizeof(msgbuf))) > 0)
+            { 
+            MSG_HEADER(stderr,0);
+            writeall(2,msgbuf,msghdr.msglen);
+            }
+         fd_count--;
+         }
+
+      for (i = 1; i < bsp_nprocs && fd_count; i++)
+         if (csock[i] && FD_ISSET(csock[i],&readfd))
+            {
+            GUARDNN((rc = recvall(csock[i],(char *)&msghdr,
+               sizeof(msghdr),MSG_WAITALL)),"2-recvall(csock)");
+            GUARDNZ(msghdr.msgtype >= BSPTCP_MIN_TYPE && 
+                    msghdr.msgtype <= BSPTCP_MAX_TYPE,
+               "recvall(csock) type out of range");
+            switch (msghdr.msgtype)
+               {
+               case BSPTCP_MSG_ABORT:
+                  GUARDEQ(recvall(csock[i],(char *)&rc,sizeof(int),
+                     MSG_WAITALL),sizeof(int),"3-recvall(csock)");
+                  for (j = 1; j < bsp_nprocs; j++)
+                     {
+                     msghdr.msgspid = 0;
+                     msghdr.msgdpid = j;
+                     if (csock[j]) 
+                        {
+                        sendall(csock[j],(char *)&msghdr,sizeof(msghdr),0);
+                        close(csock[j]); csock[j] = 0;
+                        }
+                     }
+                  if (spmd_pid>0) kill(spmd_pid,9); 
+                  wait(NULL);
+                  MSG_HEADER(stderr,0);
+                  fprintf(stderr,
+                     "BSP/NOW Master: Abort received from BSP pid %d",i);
+                  fprintf(stderr," (code = %d).\n",rc);
+                  exit(1);
+
+               case BSPTCP_MSG_SIGNAL:
+                  {
+                  int sig = 9;
+
+                  if (msghdr.msglen == sizeof(sig))
+                     GUARDNN((recvall(csock[i],(char*)&sig,sizeof(sig),
+                        MSG_WAITALL)),"4-recvall(csock)");
+                  else
+                     {
+                     MSG_HEADER(stderr,0);
+                     fprintf(stderr,"BSP/NOW Master: Message format "
+                                    "error - assume sig = 9.\n");
+                     }
+                  MSG_HEADER(stderr,0);
+                  fprintf(stderr,"BSP/NOW Master: BSP pid %d requested sig ",
+                     msghdr.msgspid);
+                  fprintf(stderr,"%d to be sent to all BSP pids.\n",sig);
+                  for (j = 1; j < bsp_nprocs; j++)
+                     if (j != i) 
+                        {
+                        msghdr.msgspid = 0;
+                        msghdr.msgdpid = j;
+                        if (csock[j])
+                           {
+                           GUARDNN((sendall(csock[j],(char *)&msghdr,
+                              sizeof(msghdr),0)),"sendall(csock3)");
+                           GUARDNN((sendall(csock[j],(char *)&sig,
+                              sizeof(sig),0)),"sendall(csock4)");
+                           close(csock[j]); csock[j] = 0;
+                           }
+                        }
+                  close(csock[i]); csock[i] = 0;
+                  close(ucpipe[0]); ucpipe[0] = 0;
+                  close(dcpipe[1]); dcpipe[1] = 0;
+                  if (spmd_pid>0) kill(spmd_pid,sig); 
+                  } 
+                  break;
+
+               case BSPTCP_MSG_CDATA:
+                  if (msghdr.msgdpid)
+                     GUARDNN((sendall(csock[msghdr.msgdpid],
+                        (char *)&msghdr,sizeof(msghdr),0)),"sendall(csock5)");
+                  else
+                     GUARDNN((writeall(dcpipe[1],&msghdr,
+					       sizeof(msghdr))),
+				     "writeall(dcpipe[1]");
+                  if (msghdr.msglen)
+                     {
+                     GUARDNN((recvall(csock[i],msgbuf,msghdr.msglen,
+                        MSG_WAITALL)),"5-recvall(csock)");
+                     if (msghdr.msgdpid)
+                        GUARDNN((sendall(csock[msghdr.msgdpid],msgbuf,
+                           msghdr.msglen,0)),"sendall(csock6)");
+                     else
+                        GUARDNN((writeall(dcpipe[1],
+                                               msgbuf,msghdr.msglen)),
+                                        "writeall(dcpipe[1])");
+                     }
+                  break;
+           
+               case BSPTCP_MSG_STDOUT:   
+                  if (msghdr.msglen)
+                     {
+                     GUARDNN((recvall(csock[i],msgbuf,msghdr.msglen,
+                        MSG_WAITALL)),"6-recvall(csock)");
+                     MSG_HEADER(stdout,i); 
+                     writeall(1,msgbuf,msghdr.msglen);
+                     }
+                  break;
+            
+               case BSPTCP_MSG_STDERR:   
+                  if (msghdr.msglen)
+                     {
+                     GUARDNN((recvall(csock[i],msgbuf,msghdr.msglen,
+                        MSG_WAITALL)),"7-recvall(csock)");
+                     MSG_HEADER(stderr,i);
+                     writeall(2,msgbuf,msghdr.msglen);
+                     }
+                  break;
+
+               case BSPTCP_MSG_EXIT:   
+                  GUARDEQ(recvall(csock[i],(char *)&rc,sizeof(int),
+                     MSG_WAITALL),sizeof(int),"8-recvall(csock)");
+                  MSG_HEADER(stderr,0);
+#ifdef DEBUG
+                  fprintf(stderr,
+                     "BSP/NOW Master: BSP pid %d ended (status = %d).\n",
+                     msghdr.msgspid,rc);
+#endif
+                  close(csock[i]); csock[i] = 0;
+                  procs_left--;
+                  break;
+               }
+             
+            fd_count--;
+            }
+
+      /* if cleanup initiated then send kill to all and shut down */ 
+      if (cleanup)
+         {
+         int sig;
+         int status;
+
+         msghdr.msgtype = BSPTCP_MSG_SIGNAL;
+         msghdr.msglen = sizeof(sig);
+         sig = 9;
+         for (i = 1; i < bsp_nprocs; i++)
+            if (csock[i])
+               {
+               msghdr.msgspid = 0;
+               msghdr.msgdpid = i;
+               GUARDNN((sendall(csock[i],(char *)&msghdr,
+                  sizeof(msghdr),0)),"sendall(csock7)");
+               GUARDNN((sendall(csock[i],(char *)&sig,sizeof(sig),0)),
+                  "sendall(csock8)");
+               close(csock[i]); csock[i] = 0;
+               }
+
+         if (spmd_pid>0) kill(spmd_pid,9); 
+         if (spmd_pid && waitpid(spmd_pid,&status,0) > 0)
+            {
+            if (WIFEXITED(status))
+               {
+               MSG_HEADER(stderr,0);
+               fprintf(stderr,"BSP/NOW Master: BSP pid 0 issued exit(%d).\n",
+                  WEXITSTATUS(status)); 
+               }
+            else
+               if (WIFSIGNALED(status))
+                  {
+                  MSG_HEADER(stderr,0);
+                  fprintf(stderr,"BSP/NOW Master: BSP pid 0 received sig %d.\n",
+                     WTERMSIG(status)); 
+                  }
+               }
+
+         close(ucpipe[0]); ucpipe[0] = 0;
+         close(dcpipe[1]); dcpipe[1] = 0;
+         close(cxpipe[0]); cxpipe[0] = 0;
+         close(cxpipe[1]); cxpipe[1] = 0;
+         exit(1);
+         } 
+
+      } /* end of while (procs_left) */
+
+   /* Final exit */ 
+   close(cxpipe[0]); cxpipe[0] = 0;
+   close(cxpipe[1]); cxpipe[1] = 0;
+   wait(NULL);
+   MSG_HEADER(stderr,0);
+#ifdef DEBUG
+   fprintf(stderr,"BSP/NOW Master: BSP computation finished.\n");
+#endif
+
+   exit(pid0_status);
+   }
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%
+\section{Kill the spmd program and broadcast signal}
+%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+void spmdkill(int sig)
+   {
+   bsptcp_msghdr_t msghdr;           /* sending message to mainline */
+
+   if (spmd_pid>0) kill(spmd_pid,9);
+   msghdr.msgtype = BSPTCP_MSG_SIGNAL;
+   msghdr.msglen = sizeof(sig);
+   msghdr.msgspid = 0;
+   msghdr.msgspid = 0;
+   writeall(cxpipe[1],&msghdr,sizeof(msghdr));
+   writeall(cxpipe[1],&sig,sizeof(sig));
+   }
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Reap Exiting children}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+When the BSP process ends, no message is sent on a pipe. This
+signal handler sends the notification of the child exit or signal to
+the mainline Master or Slave routine.
+
+\begin{code}
+void spmdreap(int sig)
+   {
+   int status;                       /* process exit status */
+   bsptcp_msghdr_t msghdr;           /* sending message to mainline */
+   int value,olderrno,isexit=0;
+  
+   olderrno=errno;
+   waitpid(spmd_pid,&status,0);
+   value = -1;
+   if (WIFEXITED(status))
+      {
+      msghdr.msgtype = BSPTCP_MSG_EXIT;
+      value = WEXITSTATUS(status);
+      isexit=1;
+      }
+   else
+      if (WIFSIGNALED(status))
+         {
+         msghdr.msgtype = BSPTCP_MSG_SIGNAL;
+         value = WTERMSIG(status);
+         }
+
+   spmd_pid = 0;
+   msghdr.msglen = sizeof(value);
+   msghdr.msgspid = 0;
+   msghdr.msgspid = 0;
+   writeall(cxpipe[1],&msghdr,sizeof(msghdr));
+   writeall(cxpipe[1],&value,sizeof(msghdr));
+   if (!setup_complete) {
+     fprintf(stderr,"BSP/NOW Master unexpected spmdreap(%s=%d)",
+	     (isexit?"exit":"signal"),value);
+     fflush(stderr);
+   }
+   errno=olderrno;
+   }
+\end{code}

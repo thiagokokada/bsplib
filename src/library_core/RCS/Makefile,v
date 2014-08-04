@@ -1,0 +1,308 @@
+head	1.1;
+access;
+symbols;
+locks
+	jonh:1.1; strict;
+comment	@# @;
+
+
+1.1
+date	95.11.07.10.03.22;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@###########################################################################
+##      Copyright (C) 1995, University of Oxford                         ##
+##                                                                       ##
+## Permission to use, copy, modify, and distribute this software,        ##
+## and to incorporate it, in whole or in part, into other software,      ##
+## is hereby granted without fee, provided that                          ##
+##   (1) the above copyright notice and this permission notice appear in ##
+##       all copies of the source code, and the above copyright notice   ##
+##       appear in clearly visible form on all supporting documentation  ##
+##       and distribution media;                                         ##
+##   (2) modified versions of this software be accompanied by a complete ##
+##       change history describing author, date, and modifications made; ##
+##       and                                                             ##
+##   (3) any redistribution of the software, in original or modified     ##
+##       form, be without fee and subject to these same conditions.      ##
+###########################################################################
+
+SHELL = /bin/sh
+
+ROOT_DIR        = /users/jonh/BSP
+LIB_DIR         = ${ROOT_DIR}/lib
+INCLUDE_DIR     = ${ROOT_DIR}/include
+MPI_INCLUDE_DIR = /usr/local/mpich/include
+
+# Architecture independent modules
+SRCS_ANY_LC   = bsp_scan.lc bsp_sort.lc bsp_profile.lc bsp_lib_f77.lc \
+                bsp_timer.lc bsp_combine_stores.lc
+
+SRCS_ANY_LH   = bsp_lib_f77_user.lh bsp_lib_user.lh bsp_lib.lh bsp_profile.lh
+
+# Modules with hacks for shared memory machines
+SRCS_MPASS_LC = bsp_misc_mpass.lc bsp_lib_mpass.lc  bsp_collcom_mpass.lc \
+                bsp_scan_mpass.lc ${SRCS_ANY_LC}
+
+SRCS_MPASS_LH = bsp_lib_mpass.lh ${SRCS_ANY_LH}
+
+# Modules with hacks for distibuted memory machines
+SRCS_SHMEM_LC = bsp_misc_shmem.lc bsp_lib_shmem.lc bsp_collcom_shmem.lc \
+                bsp_scan_shmem.lc ${SRCS_ANY_LC}
+
+SRCS_SHMEM_LH = bsp_lib_shmem.lh ${SRCS_ANY_LH}
+
+SRCS_LC       = ${SRCS_SHMEM_LC}
+SRCS_LH       = ${SRCS_SHMEM_LH}
+SRCS_S        =
+LIBRARIES     = 
+INCLUDES      = 
+
+#############################################################
+##             Flags and conversions                       ##
+#############################################################
+
+SRCS_O   = $(SRCS_LC:.lc=.o) $(SRCS_S:.s=.o)
+SRCS_C   = $(SRCS_LC:.lc=.c)
+SRCS_H   = $(SRCS_LH:.lh=.h)
+SRCS_TEX = $(SRCS_LC:.lc=.c.tex) $(SRCS_LH:.lh=.h.tex)
+
+CC     = cc
+CFLAGS_DEBUG    = ${BUILD_DEFINES}  -DSTATISTICS -DSANITY_CHECK -DDEBUG  
+CFLAGS_REALDEBUG= ${BUILD_DEFINES}  -DSTATISTICS -DSANITY_CHECK -g 
+CFLAGS_PROF     = ${BUILD_DEFINES}  -DSTATISTICS -DSANITY_CHECK -DPROFILE -g
+CFLAGS_REALPROF = ${BUILD_DEFINES}  -DSTATISTICS -DSANITY_CHECK -DPROFILE  -p
+CFLAGS_STANDARD = ${BUILD_DEFINES}  -DSTATISTICS -DSANITY_CHECK             
+CFLAGS_OPT      = ${BUILD_DEFINES}  -DTURBO -O2 
+CFLAGS_PROFOPT  = ${BUILD_DEFINES}  -DSTATISTICS -DPROFILE -DTURBO -O2
+
+CFLAGS          = ${CFLAGS_STANDARD}
+### CFLAGS          = ${CFLAGS_OPT}
+
+.SUFFIXES: .lc .lh .c .tex .c.tex .h.tex
+
+#############################################################
+##             Compilation rules                           ##
+#############################################################
+
+.lh.h:
+	litToPgm $<
+
+.lc.c:
+	litToPgm $<
+
+.c.o:
+	${CC} ${CFLAGS} $(INCLUDES) -c $*.c -o $*.o
+.lc.o:
+	litToPgm $<
+	${CC} ${CFLAGS} $(INCLUDES) -c $*.c -o $*.o
+
+.lh.h.tex:
+	litToTex $<
+
+.lc.c.tex:
+	litToTex $<
+
+#############################################################
+##             Compilation targets                         ##
+#############################################################
+
+all: $(SRCS_O) $(SRCS_H) 
+	if [ ! -d ${LIB_DIR}/`uname -s`  ];                                 \
+        then mkdir -p ${LIB_DIR}/`uname -s`; fi;                            \
+	rm -f ${LIB_DIR}/`uname -s`/libbspfront${LIBPREFIX}${LIBNAME}.a;    \
+	ar crv ${LIB_DIR}/`uname -s`/libbspfront${LIBPREFIX}${LIBNAME}.a $(SRCS_O);   \
+        cp bsp_lib_user.h ${INCLUDE_DIR};           \
+        cp bsp_lib_user.h ${INCLUDE_DIR}/bsp.h;     \
+        cp bsp_lib_f77_user.h ${INCLUDE_DIR}/fbsp.h
+	
+
+objects: $(SRCS_O) $(SRCS_H)
+
+delit: $(SRCS_C) $(SRCS_H)
+
+root.dvi: root.aux $(SRCS_TEX)
+	latex root.tex
+
+build:
+	@@make lib ARCH="`uname -s`" CC=${CC} SRCS_LC="${SRCS_LC}"     \
+              SRCS_LH="${SRCS_LH}" SRCS_S="${SRCS_S}"                 \
+              CFLAGS="${CFLAGS_STANDARD}"                             \
+              LIBPREFIX="${LIBPREFIX}" LIBNAME="";                    \
+                                                                      \
+        make  lib ARCH="`uname -s`" CC=${CC} SRCS_LC="${SRCS_LC}"     \
+              SRCS_LH="${SRCS_LH}" SRCS_S="${SRCS_S}"                 \
+              CFLAGS="${CFLAGS_DEBUG}"                                \
+              LIBPREFIX="${LIBPREFIX}" LIBNAME="_G";                  \
+                                                                      \
+        make  lib ARCH="`uname -s`" CC=${CC} SRCS_LC="${SRCS_LC}"     \
+              SRCS_LH="${SRCS_LH}" SRCS_S="${SRCS_S}"                 \
+              CFLAGS="${CFLAGS_REALDEBUG}"                            \
+              LIBPREFIX="${LIBPREFIX}" LIBNAME="_g";                  \
+                                                                      \
+        make  lib ARCH="`uname -s`" CC=${CC} SRCS_LC="${SRCS_LC}"     \
+              SRCS_LH="${SRCS_LH}" SRCS_S="${SRCS_S}"                 \
+              CFLAGS="${CFLAGS_PROF}"                                 \
+              LIBPREFIX="${LIBPREFIX}" LIBNAME="_P";                  \
+                                                                      \
+        make  lib ARCH="`uname -s`" CC=${CC} SRCS_LC="${SRCS_LC}"     \
+              SRCS_LH="${SRCS_LH}" SRCS_S="${SRCS_S}"                 \
+              CFLAGS="${CFLAGS_REALPROF}"                             \
+              LIBPREFIX="${LIBPREFIX}" LIBNAME="_p";                  \
+                                                                      \
+        make  lib ARCH="`uname -s`" CC=${CC} SRCS_LC="${SRCS_LC}"     \
+              SRCS_LH="${SRCS_LH}" SRCS_S="${SRCS_S}"                 \
+              CFLAGS="${CFLAGS_OPT}"                                  \
+              LIBPREFIX="${LIBPREFIX}" LIBNAME="_O";                  \
+                                                                      \
+        make  lib ARCH="`uname -s`" CC=${CC} SRCS_LC="${SRCS_LC}"     \
+              SRCS_LH="${SRCS_LH}" SRCS_S="${SRCS_S}"                 \
+              CFLAGS="${CFLAGS_PROFOPT}"                              \
+              LIBPREFIX="${LIBPREFIX}" LIBNAME="_PO";                 \
+        cp bsp_lib_user.h ${INCLUDE_DIR};                             \
+        cp bsp_lib_user.h ${INCLUDE_DIR}/bsp.h;                       \
+        cp bsp_lib_f77_user.h ${INCLUDE_DIR}/fbsp.h
+
+
+debug:
+	@@make all ARCH="`uname -s`" CC=${CC} SRCS_LC="${SRCS_LC}"          \
+         SRCS_LH="${SRCS_LH}" SRCS_S="${SRCS_S}" CFLAGS="${CFLAGS_REALDEBUG}"  \
+         LIBPREFIX="${LIBPREFIX}" LIBNAME="_G"
+
+prof:
+	@@make all ARCH="`uname -s`" CC=${CC} SRCS_LC="${SRCS_LC}"    \
+                  SRCS_LH="${SRCS_LH}" SRCS_S="${SRCS_S}"            \
+                  CFLAGS="${CFLAGS_PROF}"                            \
+                  LIBPREFIX="${LIBPREFIX}" LIBNAME="_P"
+
+opt:
+	@@make lib ARCH="`uname -s`" SRCS_S="${SRCS_S}"   \
+                  CFLAGS="${CFLAGS_OPT}"                 \
+                  LIBPREFIX="${LIBPREFIX}" LIBNAME="_O"
+
+lib:
+	@@echo   "===================================================";       \
+	echo -n "=== Making library \"${LIBPREFIX}${LIBNAME}\"";             \
+        echo   " with flags ${CFLAGS}";                                      \
+	echo   "===================================================";        \
+	if [ ! -d ${LIB_DIR}/`uname -s` ] ;                                  \
+        then  mkdir -p ${LIB_DIR}/`uname -s`; fi;                            \
+	rm -f ${LIB_DIR}/`uname -s`/libbspfront${LIBPREFIX}${LIBNAME}.a;     \
+	make clean SRCS_O="${SRCS_O}" SRCS_C="${SRCS_C}" SRCS_H="${SRCS_H}"; \
+	make objects SRCS_LC="${SRCS_LC}" SRCS_LH="${SRCS_LH}"               \
+                     SRCS_S="${SRCS_S}" CFLAGS="${CFLAGS}"   CC="${CC}";     \
+	ar crv ${LIB_DIR}/`uname -s`/libbspfront${LIBPREFIX}$${LIBNAME}.a    \
+           $(SRCS_O)
+
+clean::
+	rm -f $(SRCS_O) $(BINARY_TARGET) $(SRCS_SHMEM_LC:.lc=.o) \
+              $(SRCS_SHMEM_LC:.lc=.c) $(SRCS_MPASS_LC:.lc=.o)    \
+              $(SRCS_MPASS_LC:.lc=.c) $(SRCS_MPASS_LH:.lh=.h)    \
+              $(SRCS_SHMEM_LH:.lh=.h) ${SRCS_SL.s:.o)            \
+              $(SRCS_TEX) mon.out                                \
+              $(BINARY_TARGET).mon.*
+
+#############################################################
+##             All-type targets for each platform          ##
+#############################################################
+
+sgi:
+	make all SRCS_LC="${SRCS_SHMEM_LC}" SRCS_LH="${SRCS_SHMEM_LH}" \
+	BUILD_DEFINES="-DUNDERSCORE -DBSP_SHMEM -ansi" CC=cc
+
+sgimpi: 
+	make all SRCS_LC="${SRCS_MPASS_LC}" SRCS_LH="${SRCS_MPASS_LH}"      \
+	BUILD_DEFINES="-I ${MPI_INCLUDE_DIR} -DUNDERSCORE -DMPASS_MPI -ansi"\
+        LIBPREFIX="mpi" CC=cc
+	
+sp2:
+	make all SRCS_LC="${SRCS_MPASS_LC}" SRCS_LH="${SRCS_MPASS_LH}"    \
+		 SRCS_S="bsp_timer_rs6.s" BUILD_DEFINES="-DMPASS_MPL" CC=mpcc 
+
+#############################################################
+##            Debug-type targets for each platform         ##
+#############################################################
+
+sgidebug:
+	make debug SRCS_LC="${SRCS_SHMEM_LC}" SRCS_LH="${SRCS_SHMEM_LH}"\
+              BUILD_DEFINES="-DUNDERSCORE -DBSP_SHMEM -ansi" CC=cc
+
+sgimpidebug: 
+	make debug SRCS_LC="${SRCS_MPASS_LC}" SRCS_LH="${SRCS_MPASS_LH}"    \
+	BUILD_DEFINES="-I ${MPI_INCLUDE_DIR} -DUNDERSCORE -DMPASS_MPI -ansi"\
+        LIBPREFIX="mpi" CC=cc
+	
+sp2debug:
+	make debug SRCS_LC="${SRCS_MPASS_LC}" SRCS_LH="${SRCS_MPASS_LH}" \
+		   SRCS_S="bsp_timer_rs6.s" 			         \
+		   BUILD_DEFINES="-DMPASS_MPL" CC=mpcc
+
+#############################################################
+##            Prof-type targets for each platform          ##
+#############################################################
+
+sgiprof:
+	make prof SRCS_LC="${SRCS_SHMEM_LC}" SRCS_LH="${SRCS_SHMEM_LH}"\
+        BUILD_DEFINES="-DUNDERSCORE -DBSP_SHMEM -ansi" CC=cc
+
+sp2prof:
+	make prof SRCS_LC="${SRCS_MPASS_LC}" SRCS_LH="${SRCS_MPASS_LH}" \
+        SRCS_S="bsp_timer_rs6.s" BUILD_DEFINES="-DMPASS_MPL" CC=mpcc
+
+
+#############################################################
+##            Opt-type targets for each platform          ##
+#############################################################
+
+sgiopt:
+	make opt SRCS_LC="${SRCS_SHMEM_LC}" SRCS_LH="${SRCS_SHMEM_LH}"\
+        BUILD_DEFINES="-DUNDERSCORE -DBSP_SHMEM -ansi" CC=cc
+
+
+#############################################################
+##             BUILD Targets for each kind of platform      ##
+#############################################################
+
+sgibuild:
+	make build SRCS_LC="${SRCS_SHMEM_LC}" SRCS_LH="${SRCS_SHMEM_LH}" \
+        BUILD_DEFINES="-DUNDERSCORE -DBSP_SHMEM -ansi" CC=cc
+
+sgimpibuild:
+	make build SRCS_LC="${SRCS_MPASS_LC}" SRCS_LH="${SRCS_MPASS_LH}"     \
+        BUILD_DEFINES="-I ${MPI_INCLUDE_DIR} -DUNDERSCORE -DMPASS_MPI -ansi" \
+        LIBPREFIX="mpi" CC=cc
+
+
+
+sp2build:
+	make build SRCS_LC="${SRCS_MPASS_LC}" SRCS_LH="${SRCS_MPASS_LH}" \
+        SRCS_S="bsp_timer_rs6.s" BUILD_DEFINES="-DMPASS_MPL" CC=mpcc
+
+
+#############################################################
+##             Dependencies                                ##
+#############################################################
+
+bsp_lib_f77_user.h: bsp_lib_f77_user.lh
+bsp_lib_mpass.h: bsp_lib.h
+bsp_lib_shmem.h: bsp_lib.h
+bsp_lib_mpass.h: bsp_lib_user.h
+bsp_lib_shmem.h: bsp_lib_user.h
+bsp_lib_mpass.o: bsp_lib_mpass.h bsp_profile.h 
+bsp_lib_shmem.o: bsp_lib_shmem.h bsp_profile.h 
+bsp_misc_mpass.o:     bsp_lib_mpass.h  bsp_lib.h
+bsp_misc_shmem.o:     bsp_lib_shmem.h  bsp_lib.h
+bsp_collcom_mpass.o: bsp_lib_mpass.h bsp_lib.h
+bsp_collcom_shmem.o: bsp_lib_shmem.h bsp_lib.h
+@

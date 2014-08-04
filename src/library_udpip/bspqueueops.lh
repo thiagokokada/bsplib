@@ -1,0 +1,444 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1997, 1998 Stephen Donaldson                       %%
+%%                      &  The University of Oxford                      %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it into other software, is hereby granted          %%
+%% without fee, provided that                                            %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+The following routines can be called from user or kernel space. The
+invarient that all the structures are held in \emph{user} space is
+guarenteed by the functions. All arguments to functions are assumed to
+be in user space, however, any results from a kernel call will be in
+\emph{kernel space}.
+
+\begin{code}
+extern bspudp_anch_t  *bspudp_anchor; 
+extern bspudp_sess_t  *bspudp_sess;
+
+void socketio(int sig);
+#ifdef __KERNEL__
+#define socketio(sig) /* do nothing */
+#endif
+
+#define recvq_high_in_seq(from) (bspudp_sess[from].recv.high_in_seq)
+#define recvq_highest_seen(from) (bspudp_sess[from].recv.highest_seen)
+#define queue_type(queue) (queue.headtype)
+#define queue_size(queue)  (queue.enqueue_count-queue.dequeue_count)
+#define queue_lessthan(queue,x) ((queue.dequeue_count+(x)) >= \
+                                 queue.enqueue_count)
+
+#ifdef __KERNEL__
+#define lock_queue() /* do nothing */
+#else
+#define lock_queue()                             \
+  do {                                           \
+     if (!bspudp_anchor->glock_q)                \
+      /* queues not protected by global lock */  \
+      bspudp_anchor->llock_q++;                  \
+  } while(0)
+#endif
+
+#ifdef __KERNEL__
+#define unlock_queue() /* do nothing */
+#else
+#define unlock_queue()                              \
+  do {                                              \
+     if (!bspudp_anchor->glock_q)                   \
+     {                                              \
+     /* queues not pretected by global lock */      \
+     if (bspudp_anchor->io_pending)                 \
+        socketio(0);                                \
+     bspudp_anchor->llock_q--;                      \
+     }                                              \
+  } while(0)
+#endif
+\end{code}
+
+
+\begin{code}
+#ifndef LINUX
+#define enqueue_freeq(element) enqueue(&bspudp_anchor->freeq,element)
+
+#else
+#if !defined(__KERNEL__)
+#define enqueue_freeq(element)                          \
+  do {                                                  \
+     char *qhead_addr=(char*)&bspudp_anchor->freeq.head;\
+     char *newelement=(char*)(element);                 \
+     __asm__ __volatile__(                              \
+          "movl %1,%%esi\n\t"                           \
+          "movl %%eax,%%ebx\n\t"                        \
+          "movl %%edx,%%ecx\n\t"                        \
+          "cmpxchg8b (%%esi)\n\t"                       \
+          "movl %0,%%ebx\n\t"                           \
+          "1: movl %%eax,(%%ebx)\n\t"                   \
+          "movl %%edx,%%ecx\n\t"                        \
+          "incl %%ecx\n\t"                              \
+          "cmpxchg8b (%%esi)\n\t"                       \
+          "jne 1b\n\t"                                  \
+          :                                             \
+          : "m" (newelement), "m"  (qhead_addr)         \
+          : "eax", "edx", "ecx", "ebx", "esi");         \
+     bspudp_anchor->freeq.enqueue_count++;              \
+  } while(0)
+
+#else
+#define enqueue_freeq(element)                                 \
+  do {                                                         \
+     bspudp_buff_t *elementk;                                  \
+     lock_queue();                                             \
+     elementk = USER_TO_PHYS(bspudp_buff_t,element);           \
+     elementk->link=bspudp_anchor->freeq.head;                 \
+     bspudp_anchor->freeq.head = element;                      \
+     ((int)bspudp_anchor->freeq.tail)++;                       \
+     bspudp_anchor->freeq.enqueue_count++;                     \
+     unlock_queue();                                           \
+  } while(0)
+#endif
+#endif
+\end{code}
+
+\begin{code}
+#ifndef LINUX
+#define dequeue_freeq(element)  (element)=dequeue(&bspudp_anchor->freeq)
+
+#else
+#if !defined(__KERNEL__)
+#define dequeue_freeq(element)                          \
+  do {                                                  \
+     char *qhead_addr=(char*)&bspudp_anchor->freeq.head;\
+     char *res;                                         \
+     bspudp_anchor->freeq.dequeue_count++;              \
+     __asm__ __volatile__(                              \
+          "movl %1,%%esi\n\t"                           \
+          "movl %%eax,%%ebx\n\t"                        \
+          "movl %%edx,%%ecx\n\t"                        \
+          "cmpxchg8b (%%esi)\n\t"                       \
+          "1: cmpl $0,%%eax\n\t"                        \
+          "je 2f\n\t"                                   \
+          "movl (%%eax),%%ebx\n\t"                      \
+          "cmpxchg8b (%%esi)\n\t"                       \
+          "jne 1b\n\t"                                  \
+          "2: movl %%eax,%0\n\t"                        \
+          : "=m" (res)                                  \
+          : "m"  (qhead_addr)                           \
+          : "eax", "edx", "ecx", "ebx", "esi");         \
+     if (!res)						\
+        bspudp_anchor->freeq.dequeue_count--;           \
+     (element)=(bspudp_buff_t*)res;                     \
+  } while(0)
+
+#else
+#define dequeue_freeq(element)                          \
+  do {                                                  \
+     bspudp_buff_t *result;                             \
+     lock_queue();                                      \
+     if (bspudp_anchor->freeq.head)                     \
+        {                                               \
+        result=USER_TO_PHYS(bspudp_buff_t,              \
+                            bspudp_anchor->freeq.head); \
+        bspudp_anchor->freeq.head = result->link;       \
+        bspudp_anchor->freeq.dequeue_count++;           \
+        }                                               \
+     else                                               \
+        result=NULL;                                    \
+     (element)=result;                                  \
+     unlock_queue();                                    \
+  } while(0)
+#endif
+#endif
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%
+\section{Buffer queue and session management}
+%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+#ifndef lock_queue
+static void lock_queue(void)
+   {
+   if (!bspudp_anchor->glock_q)
+      /* queues not protected by global lock */
+      bspudp_anchor->llock_q++;
+   } /* lock_queue */
+#endif
+
+#ifndef unlock_queue
+static void unlock_queue(void)
+   {
+   if (!bspudp_anchor->glock_q)
+      {
+      /* queues not pretected by global lock */
+      if (bspudp_anchor->io_pending)
+         socketio(0);
+      bspudp_anchor->llock_q--;
+      }
+   } /* unlock_queue */
+#endif
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%
+\subsection{Enqueue a buffer}
+%%%%%%%%%%%%%%%%%%%%%
+
+Arguments to \verb!enqueue! are all assumed to be in user space.
+\begin{code}
+static int enqueue(bspudp_queue_t *queue, bspudp_buff_t *element)
+   {
+   int rc, qordered, element_msgspid,this_msgseq;
+   int queue_tail_msgseq;
+   bspudp_buff_t   *this;
+   bspudp_buff_t   *prev;
+   bspudp_buff_t   *elementk;
+   bspudp_buff_t   *queue_tail;
+   bspudp_msghdr_t *qhead_buffer;
+   bspudp_msghdr_t *element_buffer;
+   unsigned long last_high_in_seq, last_highest_seen, element_msgseq;
+   
+   rc = 0;
+   lock_queue();
+   elementk = USER_TO_PHYS(bspudp_buff_t,element);
+   elementk->link = NULL;
+   element_buffer = USER_TO_PHYS(bspudp_msghdr_t,elementk->buffer);
+   element_msgseq = element_buffer->msgseq;
+
+   qordered = queue->flags & QUEUE_ORDERED;
+   if (queue->head)
+      {
+      if (!qordered)
+         {
+         USER_TO_PHYS(bspudp_buff_t,queue->tail)->link = element;
+         queue->tail       = element;
+         }
+      else /* insert message in seq no order */
+         {
+	 last_high_in_seq  = queue->high_in_seq;
+	 last_highest_seen = queue->highest_seen;
+         queue_tail        = USER_TO_PHYS(bspudp_buff_t,queue->tail);
+	 queue_tail_msgseq 
+            = USER_TO_PHYS(bspudp_msghdr_t,queue_tail->buffer)->msgseq;
+         if (element_msgseq > queue_tail_msgseq)
+            {
+            /* insert message at end of queue */
+            if (last_high_in_seq == element_msgseq-1)
+	       queue->high_in_seq++;
+
+	    if (last_highest_seen==last_high_in_seq)
+	       queue->highest_seen=element_msgseq;
+
+            queue_tail->link = element;
+            queue->tail      = element;	    
+            }
+         else 
+            if ((element_msgseq == queue_tail_msgseq)
+               ||element_msgseq < bspudp_sess[element_buffer->msgspid].seq_in)
+               /* message is a duplicate */
+               rc = -1;
+            else /* scan queue for buffer position */
+               {
+               prev = NULL;
+               for (this = USER_TO_PHYS(bspudp_buff_t,queue->head); 
+		    this; 
+		    this = USER_TO_PHYS(bspudp_buff_t,this->link))
+                  {
+		  this_msgseq = USER_TO_PHYS(bspudp_msghdr_t,
+					     this->buffer)->msgseq;
+                  if (element_msgseq < this_msgseq)
+                     {
+                     if (prev)
+                        {
+                        elementk->link = PHYS_TO_USER(bspudp_buff_t,this);
+                        prev->link = element;
+			break;
+                        }
+                     else
+                        {
+                        elementk->link = PHYS_TO_USER(bspudp_buff_t,this);
+                        queue->head = element;
+			break;
+                        }
+                     }  
+                  else
+                     if (element_msgseq == this_msgseq)
+                        { /* message is a duplicate */
+                        rc = -1;
+                        break;
+                        }
+                  prev = this;
+                  }
+	       if (rc!=-1) 
+	          {
+		  for(this=elementk;
+		      this;
+		      this=USER_TO_PHYS(bspudp_buff_t,this->link))
+		     if (queue->high_in_seq==
+			 USER_TO_PHYS(bspudp_msghdr_t,
+				      this->buffer)->msgseq-1)
+		        queue->high_in_seq++;
+		     else
+		        break;
+
+		  if (queue->high_in_seq > last_high_in_seq)
+		     {
+		     if (this)
+		        queue->highest_seen
+                           = USER_TO_PHYS(bspudp_msghdr_t,this->buffer)->msgseq;
+		     else
+		        queue->highest_seen = queue->high_in_seq;
+                     }
+		  else		     
+		     if (element_msgseq < last_highest_seen)
+		        queue->highest_seen=element_msgseq;
+                  }
+	       }
+         }
+      }
+   else 
+      {
+      element_msgspid=element_buffer->msgspid;
+      if (!qordered
+         || (qordered && (element_msgseq >=
+                          bspudp_sess[element_msgspid].seq_in)))
+         {
+         queue->head = element;
+         queue->tail = element;
+         if (qordered && (bspudp_sess[element_msgspid].seq_in==element_msgseq))
+            queue->high_in_seq = element_msgseq;
+         queue->highest_seen = element_msgseq;
+         } 
+      else
+         /* message is a duplicate */
+         rc = -1;
+      }
+
+   if (!rc) queue->enqueue_count++;
+
+   
+   if ((queue->flags & QUEUE_ORDDEQ) && queue->head)
+      {
+      qhead_buffer = USER_TO_PHYS(bspudp_msghdr_t,
+	                          USER_TO_PHYS(bspudp_buff_t,
+				              queue->head)->buffer);
+      if (qhead_buffer->msgseq==bspudp_sess[queue->pid].seq_in)
+	queue->headtype=qhead_buffer->msgtype;
+      else
+	queue->headtype = -1;
+      }
+   else
+      queue->headtype = -1;
+
+   unlock_queue();
+   
+   if (rc) enqueue_freeq(element);
+
+#ifdef SANITY_CHECK
+   if (queue->flags & QUEUE_ORDDEQ)
+      {
+      GUARDEQ(recvq_highest_seen(queue->pid),traverse_highest_seen(queue->pid),
+	      "enqueue(sanity check highest seen)");
+      GUARDEQ(recvq_high_in_seq(queue->pid),traverse_high_in_seq(queue->pid),
+	      "enqueue(sanity check high in seq)");
+      }
+#endif
+   return rc;
+   } /* enqueue */
+\end{code}
+
+The arguments to dequeue and enqueue will be queues which are held in
+the session or anchor blocks. As the queues are structures, and the
+user and kernel has its own pointers to the correct piece of memory
+that represents an anchor block/session block, then the queues don't
+need converting between user/physical addresses. The result of these
+functions will be in the space of the callee. The arguments are
+assumed to be in user space.
+
+\begin{code}
+static bspudp_buff_t *dequeue(bspudp_queue_t *queue)
+   {
+   bspudp_buff_t *element;
+   bspudp_buff_t *ret;
+   bspudp_msghdr_t *qhead_buffer;
+   bspudp_sess_t *queue_sess;
+
+#if defined(__KERNEL__) && BSP_DEBUG >= 3
+   printk("BSP/Eth: dequeue(0x%x) queue->head=0x%x\n",queue,queue->head);
+   printk("BSP/Eth: dequeue count: +%d -%d\n",
+          queue->enqueue_count,queue->dequeue_count);
+#endif
+   lock_queue();
+   queue_sess = &bspudp_sess[queue->pid];
+   if (queue->head)
+      {
+      element = USER_TO_PHYS(bspudp_buff_t,queue->head);
+      if ((queue->flags & QUEUE_ORDDEQ) && 
+          (USER_TO_PHYS(bspudp_msghdr_t,element->buffer)->msgseq != 
+	   queue_sess->seq_in))
+         ret = NULL;
+      else
+         {
+         queue->head = element->link;
+         ret = element;
+         if (queue->flags & QUEUE_ORDDEQ)
+            queue_sess->seq_in++;
+         }
+      }
+   else
+      ret = NULL;
+
+   if (element && (queue->flags & QUEUE_ORDDEQ))
+      {
+      bspudp_msghdr_t *bsppkt;
+      bsppkt = USER_TO_PHYS(bspudp_msghdr_t,element->buffer);
+#if defined(__KERNEL__) && BSP_DEBUG >= 2
+      printk("BSP/Eth: dequeue(seq=%d)\n",bsppkt->msgseq);
+#endif
+#ifdef DEBUG
+      fprintf(stderr,"BSP/Eth: dequeue(seq=%d)\n",bsppkt->msgseq);
+#endif
+      }
+   if (ret) queue->dequeue_count++;
+
+   if ((queue->flags & QUEUE_ORDDEQ) && queue->head)
+      {
+      qhead_buffer = USER_TO_PHYS(bspudp_msghdr_t,
+		                  USER_TO_PHYS(bspudp_buff_t,
+				               queue->head)->buffer);
+      if (qhead_buffer->msgseq == queue_sess->seq_in)
+         queue->headtype = qhead_buffer->msgtype;
+      else
+         queue->headtype = -1;
+      }
+   else
+      queue->headtype = -1;
+
+   unlock_queue();
+
+   return ret;
+   } /* dequeue */
+\end{code}
+
+
+\begin{code}
+static int queue_count(bspudp_queue_t queue)
+   {
+   int i;
+   bspudp_buff_t *ptr;
+
+   for((i=0,ptr=queue.head) ;ptr;ptr=ptr->link) i++;
+   return i;
+   }
+\end{code}
+

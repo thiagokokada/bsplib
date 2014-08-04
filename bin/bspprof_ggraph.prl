@@ -1,0 +1,130 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+sub createGGraph {
+  local($i,$inc,$xticks,$yticks,$label,$max_x,$trash,$scale,$max_g);
+  local($cost_comm,$cost_comp,$real_comm,$gticks);
+  local($time_start,$time_end,$h_cost,$h_rel,$min_hrel);
+  local($dtime,$cost);
+  local(@keys);
+  local(@g_list);
+
+  ($xticks,$yticks,$label,$max_x,$scale) = &setupStrataGraph();
+  if ($Verbose) {
+    printf STDERR "\nG graph:\n\tHeight=%d Width=%d\n",$height,$width;
+    printf STDERR "\tTime = %f -> %f (%d ticks)\n",$min_time,$max_time,$yticks;
+    printf STDERR "\tCommunication = 0 -> %d/%d(%d ticks)\n",
+         	$max_x,$scale,$xticks;
+  }
+  @strata_hrelcost = grep(($_ =~ /^(.*)@@(.*)@@(.*)@@(.*)$/)&&
+                          ($2/1.0 <= $max_time),@strata_hrelcost);
+  ($cost_comm,$cost_comp,$real_comm) = &totalTheoryCost(0.0);
+  $max_s= $cost_comm + $cost_comp;
+
+  @strata_hrelcost = grep(($_ =~ /^(.*)@@(.*)@@(.*)@@(.*)$/)&&
+			  ($1/1.0 >= $min_time),@strata_hrelcost);
+  ($cost_comm,$cost_comp,$real_comm) = &totalTheoryCost($min_time);
+  $min_s = $max_s - ($cost_comm + $cost_comp);
+
+  
+  print PSFILE "gsave 2.2 cm 0 translate\n";
+  # Ignore peculiarites where g suddenly shoots up...
+  if ($ceiling_g==0) {
+    $ceiling_g = 1000000;
+    $max_g     = &maxGperSuperStep();
+  } else {
+    $max_g     = $ceiling_g;
+  }   
+  $max_g     = $bsp_g if ($bsp_g > $max_g);
+
+  ($trash,$max_g,$gticks) = &axisScale(0.0,$max_g);
+  $gticks = int($max_g) if ($max_g < $gticks);
+  
+  &drawStrataAxis($height,$width,$min_time,$max_time,$yticks,
+                  $max_g,$gticks, " BSP g",0);
+
+  $dtime    = $max_time - $min_time;
+  $min_hrel = int($bsp_l / $bsp_g);
+  for($i=0;$i<=$#strata_hrelcost;$i++) {
+    ($time_start,$time_end,$h_cost,$h_rel)
+      =split(/\s+@@\s+/,$strata_hrelcost[$i]);
+    $cost = ((($time_end - $time_start) * 1000000 * $bsp_s) - $bsp_l);
+    if ($h_rel>0) {
+      $cost = $cost / $h_rel;
+      $cost = 0 if ($cost < 0);
+      if ($cost < $max_g) {
+        if ($h_rel > $min_hrel) {
+          printf PSFILE "%d %d gx\n", 
+                        int((($time_start-$min_time)*$width)/$dtime),
+                        int(($cost*$height)/$max_g);
+        } elsif ($hrel_gl) {
+          printf PSFILE "%d %d go\n", 
+                         int((($time_start-$min_time)*$width)/$dtime),
+                        int(($cost*$height)/$max_g);
+        }
+      }       
+    } 
+  }
+
+  printf PSFILE "0 %d moveto %d 0 rlineto\n",
+	int(($bsp_g/$max_g)*$height), $width;
+  print  PSFILE "[0.25 cm  0.25 cm] 0 setdash 1 setlinewidth stroke\n";
+
+  print PSFILE "grestore gsave\n 2.2 cm  ", 
+               int((($graphheight-$strata_ind)/2)+$strata_ind), 
+               " translate\n";
+  &drawStrataAxis($height,$width,$min_time,$max_time,$yticks,
+                  $max_x/$scale,$xticks,$label. " out",0);
+  &drawStrata($height,$width,$max_x,1,0);
+  @keys = &drawStrataSsteps($height,$width,$max_x,1);
+  printf PSFILE "grestore %d 0 translate\n",$graphwidth - $strata_key_ind;
+  &drawStrataKey(@keys);
+  print PSFILE "showpage\n";
+}
+
+sub maxGperSuperStep {
+  local($i,$j,$time_start,$time_end,$h_cost,$h_rel,$max_g);
+  local($min_hrel);
+  $max_g     = 0.0;
+  $min_hrel  = int($bsp_l / $bsp_g);
+  for($i=0;$i<=$#strata_hrelcost;$i++) {
+    ($time_start,$time_end,$h_cost,$h_rel)
+      =split(/\s+@@\s+/,$strata_hrelcost[$i]);
+    
+    $j = ((($time_end-$time_start)*1000000*$bsp_s)- $bsp_l);
+    if ($h_rel>0) {
+      $j = $j / $h_rel;
+      if ($hrel_gl) {
+        $max_g = $j if (($j> $max_g) && ($j < $ceiling_g));
+      } else {
+        $max_g = $j if (($j> $max_g) && ($j < $ceiling_g) && 
+                        ($h_rel > $min_hrel));
+      }
+    }
+ }
+ return($max_g);
+  
+}
+
+
+
+
+
+1;
+
+

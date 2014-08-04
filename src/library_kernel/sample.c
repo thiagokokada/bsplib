@@ -1,0 +1,61 @@
+
+#include <unistd.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <errno.h>
+
+#include "../library_shared/bsp_types.h"
+#include "../library_udpip/bspudpdefs.h"
+#include "../library_udpip/bspqueueops.h"
+#include "bspdev.h"
+
+void main(void)
+   {
+   int fd;
+   int i;
+   char *buff;
+   char *mapped;
+
+   bspeth_parms_t parms;
+
+   fd = open("/dev/bsp",O_RDWR);
+   
+   if (fd < 0)
+      {
+      perror("open of /dev/bsp failed");
+      exit(1);
+      }
+
+   parms.nprocs = 8;
+   parms.buff_size = 1500;
+   parms.buff_count = 800; 
+   printf("fd = %d\n",fd);
+   printf("BSPETH_IOCSPARMS=%d, errno= %d\n",
+      ioctl(fd,BSPETH_IOCSPARMS,&parms),errno);
+
+   buff = mmap(0,7*1024*1024-1,PROT_READ|PROT_WRITE,MAP_PRIVATE,fd,0);
+   printf("buff=%08x, errno=%d.\n",buff,errno);
+   memset(buff,1,7*1024*1024-1);
+
+   i = -1;
+   do {
+      buff = (char *) ioctl(fd,BSPETH_IOCQGETBF);
+      if (buff) memset(buff,1,1500);
+      i++;
+      printf("buffer %d at %08x\n",i,buff);
+      }
+   while (buff);
+
+   printf("%d buffers allocated\n",i);
+   close(fd);
+   printf("Device closed.\n");
+  
+   exit(0);
+   }
+

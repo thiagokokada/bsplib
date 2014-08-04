@@ -1,0 +1,1381 @@
+
+cgprof/cgprof.lc,226
+void enlargeRawProfile(41,1693
+void add_costs(65,2399
+int ignore_function(96,3485
+void readRawProfile(106,3748
+void printRawProfile(209,7724
+void createConnectivityMatrix(233,8313
+void printConnectivityMatrix(295,10151
+
+cgprof/daVinci.lc,25
+Function that 603,20480
+
+cgprof/main.lc,46
+#define NoDeletes 26,1327
+void main(64,2315
+
+cgprof/matrix.lc,88
+Matrix newMat(27,1406
+void freeMat(43,1739
+void *_Mat(55,1935
+int Mat_dense(89,2821
+
+cgprof/pie.lc,139
+#define MAX_COMBINE 25,1355
+#define CAN_COMBINE 26,1381
+void tclPieInit(28,1408
+void tclPieSegment(41,1704
+void tclPieUpdate(102,3671
+
+cgprof/symbol.lc,136
+void enlargeSymbolTable(39,1594
+name_id lookupSymbolTable(62,2233
+int cmp_symbol_entry(91,3224
+void printSymbolTable_entry(111,3707
+
+library_core/bsp_callstack.lc,143
+function should 49,1997
+                                           subroutine is 184,7348
+function name,255,10642
+function names 307,12458
+
+library_core/bsp_contentionfree.lc,51
+void config_contention_free_communication(35,1706
+
+library_core/bsp_lib_drma.lc,525
+of static arrays 60,2441
+STATIC void bsp_init_setup(75,2933
+void BSPINIT(103,3788
+void bsp_init_cpp(111,3945
+void _bsp_init(120,4183
+void BSPBEGIN(139,4776
+void bsp_begin(149,4986
+void _bsp_begin(163,5336
+void bsp_end(311,10381
+void bsp_sync_cpp(352,11365
+communications. \texttt{661,22161
+STATIC void bspEnlargeFifo(666,22319
+STATIC void dumpFifoCommTable(683,22940
+STATIC void  bsmp_buffersizes(725,24460
+size of \texttt{752,25293
+void _bsp_get(756,25459
+size of \texttt{815,27611
+void _bsp_put(819,27777
+
+library_core/bsp_lib_f77.lc,996
+#define F77STRHEADER(F77STRHEADER30,1425
+#define F77STR(F77STR31,1458
+#define F77STRHEADER(F77STRHEADER33,1504
+#define F77STR(F77STR34,1545
+int BSPPID(43,1717
+int BSPNPROCS(47,1757
+   void BSPINIT(58,1988
+void BSPEND(62,2058
+void BSPSYNC(70,2223
+void BSPSYNC_CPP(74,2277
+void BSPPUSHREGISTER(86,2527
+void BSPPUSHREG(90,2622
+void BSPPUSHREG_CPP(94,2712
+void BSPPOPREG(107,3022
+void BSPPOPREGISTER(110,3093
+void BSPPOPREG_CPP(114,3170
+void BSPGET(126,3449
+void BSPGET_CPP(130,3584
+void BSPHPGET(143,3962
+void BSPHPGET_CPP(147,4099
+void BSPPUT(160,4485
+void BSPPUT_CPP(164,4620
+void BSPHPPUT(177,4998
+void BSPHPPUT_CPP(181,5137
+void BSPABORT(194,5521
+double BSPTIME(200,5624
+double BSPDTIME(201,5666
+void BSPSETTAGSIZE(206,5733
+void BSPSETTAGSIZE_CPP(210,5822
+void BSPQSIZE(223,6150
+void BSPQSIZE_CPP(227,6255
+void BSPGETTAG(241,6600
+void BSPGETTAG_CPP(245,6689
+void BSPSEND(258,7010
+void BSPSEND_CPP(263,7135
+void BSPMOVE(276,7500
+void BSPMOVE_CPP(280,7593
+
+library_core/bsp_lib_mpass.lc,743
+#define gethostname(gethostname50,2101
+of static arrays 115,4076
+#define STRINGIFY(STRINGIFY127,4428
+#define CMP_DEFINE(CMP_DEFINE128,4454
+STATIC void bsp_init_setup(130,4513
+void BSPINIT(162,5456
+void bsp_init_cpp(169,5593
+void _bsp_init(177,5797
+void BSPBEGIN(206,6709
+void bsp_begin(219,6992
+void _bsp_begin(232,7274
+void bsp_end_atexit(377,12001
+void bsp_end(381,12045
+void bsp_sync_cpp(415,12629
+STATIC void bspEnlargeFifo(867,27317
+STATIC void receiveSomething(880,27768
+STATIC _BSPcomm_thunk *nextPacket(927,29408
+STATIC int sendPacket(942,29784
+STATIC void dumpFifoCommTable(973,30649
+STATIC void bufferGets(1011,31940
+STATIC void bsmp_buffersizes(1064,33806
+void _bsp_get(1093,34667
+void _bsp_put(1161,37106
+
+library_core/bsp_lib_shmem.lc,743
+union semun semun124,4472
+void BSPINIT(158,5682
+void bsp_init_cpp(162,5794
+void BSPBEGIN(176,6254
+void bsp_begin(180,6312
+void bsp_end(551,19343
+void bsp_sync_cpp(601,20790
+STATIC void copyFilledBufferToDestination(855,29270
+STATIC void copySourceToBuffer(888,30251
+STATIC void bufferGets(919,31199
+STATIC void bsmp_buffersizes(982,33493
+void _bsp_get(1005,34067
+void _bsp_put(1068,36131
+STATIC void bspEnlargeFifo(1122,37852
+void _bsp_dissemination_barrier(1142,38447
+void _bsp_busywait_counter_barrier(1169,39088
+void _bsp_nonbusywait_counter_barrier(1218,40327
+void _bsp_busywait_vector_counter_barrier(1288,42123
+void _bsp_atomic_counter_barrier(1322,43065
+char *shmem_malloc(1375,44215
+char *shmem_calloc(1396,44846
+
+library_core/bsp_miller.lc,1045
+#define BSP_START 24,1316
+#define BSP_FINISH 25,1351
+#define BSP_SSTEP 26,1387
+#define BSP_SSTEP_END 27,1424
+#define BSP_FETCH 28,1463
+#define BSP_STORE 29,1498
+#define BSP_TIME 30,1534
+#define BSP_DTIME 31,1568
+#define BSP_REDUCE 32,1603
+#define BSP_BROADCAST 33,1639
+#define BSP_START 39,1733
+#define BSP_FINISH 40,1767
+#define BSP_SSTEP 41,1802
+#define BSP_SSTEP_END 42,1838
+#define BSP_FETCH 43,1876
+#define BSP_STORE 44,1910
+#define BSP_TIME 45,1945
+#define BSP_DTIME 46,1993
+#define BSP_REDUCE 47,2042
+#define BSP_BROADCAST 48,2077
+void bspstart(61,2392
+void BSP_START(70,2656
+void bspfinish(80,2903
+void BSP_FINISH(84,2938
+void bspsstep(91,3014
+void BSP_SSTEP(95,3047
+void bspsstep_end(102,3126
+void BSP_SSTEP_END(106,3176
+void bspstore(114,3286
+void BSP_STORE(121,3476
+void bspfetch(133,3781
+void BSP_FETCH(139,3949
+double BSP_TIME(147,4146
+double BSP_DTIME(149,4188
+void millerophack(161,4513
+void bspreduce(165,4634
+void BSP_REDUCE(176,4881
+void bspbroadcast(191,5213
+void BSP_BROADCAST(200,5406
+
+library_core/bsp_misc.lc,309
+void bsp_sync_end(29,1429
+void bsp_begin_end(34,1456
+char *bsp_pprbytes(42,1539
+char *bsp_strdup(56,1935
+char *bsp_craystr_cstr(71,2190
+char *bsp_f77str_cstr(88,2526
+int hashpjw(106,2906
+void bsp_abort_fifo_too_small(121,3151
+#define FILENAME_SIZE 141,3975
+void bsp_error_sync_out_of_phase(142,4000
+
+library_core/bsp_misc_drma.lc,235
+void kill_all_processors(39,1761
+void bsp_abort(52,2030
+void bsp_debug_start(70,2436
+void bsp_debug_end(74,2533
+void bsp_debug_block(78,2628
+void bsp_debug(88,2815
+void drma_broadcast_nprocs(104,3125
+int _bsp_constant(123,3684
+
+library_core/bsp_misc_mpass.lc,486
+void kill_all_processors(39,1747
+void bsp_abort(52,2014
+void bsp_debug_start(70,2397
+void bsp_debug_end(74,2494
+void bsp_debug_block(78,2589
+void bsp_debug(88,2776
+int _bsp_constant(105,3195
+int messg_broadcast(186,6117
+int messg_gather(228,7175
+#define TREE_BARRIER303,9275
+void _bsp_software_barrier(305,9316
+void _bsp_software_barrier(326,9955
+void _bsp_software_barrier(345,10495
+void _bsp_software_nonblocksend_blockrecv(378,11368
+void mpass_argv_fromhost(434,13116
+
+library_core/bsp_misc_shmem.lc,254
+char *pprSignal(42,1898
+void kill_all_processors(53,2150
+void kill_process(78,2824
+void bsp_abort(91,3268
+void bsp_debug_start(112,3805
+void bsp_debug_end(117,3938
+void bsp_debug_block(122,4071
+void bsp_debug(132,4285
+int _bsp_constant(150,4771
+
+library_core/bsp_profile.lc,811
+void bspstat_init(96,3451
+void bspstat_create(132,4589
+void bspstat_incoming(148,4972
+void bspstat_outgoing(153,5096
+void bspstat_updateremote(163,5268
+void bspstat_finalise(186,6086
+void bspstat_close(202,6541
+void bspprof_init(325,11555
+void bspprof_create(356,12518
+void bspprof_close(374,13085
+STATIC _BSPprof_sstep_info *bspprof_lookup(393,13564
+identifier 480,16406
+STATIC _BSPprof_sstep_info *bspprof_lookup_sstep_id(482,16487
+void bspprof_sstep_start(496,16851
+void bspprof_sstep_fix(501,16925
+void bspprof_sstep_comm_end(505,16994
+void bspprof_sstep_end(511,17092
+STATIC void bspprof_flush_symbol_table(595,19925
+STATIC void bspprof_flush_supersteps(657,21725
+STATIC void bsp_gather_noprof(850,28723
+STATIC void bsp_gather_noprof(865,29074
+STATIC void bsp_gather_noprof(902,30039
+
+library_core/bsp_register.lc,1021
+#define BSP_REG_TABLE_GROW_SIZE 29,1526
+void bsp_error_reg_small(55,2460
+void bsp_error_reg_inconsitent(83,3640
+void bsp_error_reg_pop_empty(91,3861
+void bsp_error_dereg_comm_same_superstep(99,4065
+void bsp_error_unregistered(106,4309
+void bsp_error_reg_pop_push_gone(112,4484
+void bsp_error_reg_pop_inconsistent(118,4669
+#define bsp_register_invalidate_cache(bsp_register_invalidate_cache132,5102
+void bsp_register_init(138,5284
+int bsp_register_total(156,5774
+STATIC bsp_registration *bsp_register_lookup_local(166,5977
+STATIC bsp_registration *bsp_register_lookup_global(190,6607
+void bsp_pop_reg_cpp(220,7364
+void bsp_popregister(290,9158
+void bsp_pop_reg(295,9261
+void bsp_push_reg_cpp(305,9478
+void bsp_pushregister(380,11962
+void bsp_push_reg(385,12082
+void bsp_register_changetostatics(396,12329
+void bsp_changeregister(422,13207
+int _bsp_register_local_to_global(488,15405
+char *_bsp_register_global_to_local(499,15631
+void bsp_register_info(515,15952
+int bsp_register_nbytes(533,16387
+
+library_core/bsp_spmdhost.lc,177
+Some 18,1217
+#define _BSD_SIGNALS24,1408
+#define MPASS_PARMACS_HOST30,1512
+#define BSP_MPASS33,1547
+#define bsp_abort 41,1739
+void kill_process(43,1765
+void main(50,1899
+
+library_core/bsp_timer.lc,274
+void bsp_time_init(35,1777
+double bsp_time(55,2258
+double bsp_dtime(76,2761
+void bsp_time_stop(98,3331
+void bsp_time_restart(104,3413
+See \texttt{125,3822
+double bsp_time_init_sgi(128,3917
+TIMER_TYPE bsp_time_read_sp2(161,4871
+TIMER_TYPE bsp_time_read_bsd(186,5421
+
+library_core/getarg.lc,40
+void GETARG(24,1448
+int IARGC(28,1532
+
+library_level1/bsp_bcast.lc,152
+\label{38,1864
+void bsp_bcast_init(68,2808
+void bsp_bcast_stat(94,3456
+void bsp_bcast(111,4036
+void bsp_bcast_cpp(115,4156
+void BSPBCAST(186,6151
+
+library_level1/bsp_fold.lc,310
+#define FOLD_CACHE_SIZE 39,1745
+\begin{60,2604
+%                                    ln(84,3388
+%                     3ln(p) + ln(86,3500
+void bsp_fold_init(99,3815
+void bsp_fold_stat(128,4669
+static void bsp_fold_totex(144,5306
+void bsp_fold_cpp(194,6620
+void BSPFOLD(211,7120
+void bsp_fold(227,7558
+
+library_level1/bsp_fold_funs.lc,2017
+void _bsp_op_addI(39,1660
+void _bsp_op_andI(40,1739
+void _bsp_op_orI(41,1819
+void _bsp_op_addR(42,1899
+void _bsp_op_addD(43,1978
+void _bsp_op_multI(44,2057
+void _bsp_op_multR(45,2136
+void _bsp_op_multD(46,2215
+void _bsp_op_eqI(47,2294
+void _bsp_op_maxI(49,2374
+void _bsp_op_maxR(54,2470
+void _bsp_op_maxD(58,2565
+void _bsp_op_minI(62,2660
+void _bsp_op_minR(66,2755
+void _bsp_op_minD(70,2850
+void bsp_fold_funs_init(80,3026
+int bsp_any(92,3270
+int bsp_all(97,3355
+int bsp_any_prefix(102,3441
+int bsp_all_prefix(107,3533
+int bsp_constantI(118,3762
+int bsp_sumI(140,4274
+float bsp_sumR(146,4362
+double bsp_sumD(151,4455
+int bsp_sumI_prefix(156,4551
+float bsp_sumR_prefix(161,4645
+double bsp_sumD_prefix(166,4745
+int bsp_productI(176,4921
+float bsp_productR(181,5013
+double bsp_productD(186,5111
+int bsp_productI_prefix(191,5212
+float bsp_productR_prefix(196,5311
+double bsp_productD_prefix(201,5416
+int bsp_maxI(211,5597
+float bsp_maxR(216,5684
+double bsp_maxD(221,5777
+int bsp_maxI_prefix(226,5873
+float bsp_maxR_prefix(231,5967
+double bsp_maxD_prefix(236,6067
+int bsp_minI(246,6243
+float bsp_minR(251,6330
+double bsp_minD(256,6423
+int bsp_minI_prefix(261,6519
+float bsp_minR_prefix(266,6613
+double bsp_minD_prefix(271,6713
+int BSPALL(281,6947
+int BSPANY(282,7003
+int    BSPSUMI(284,7060
+float  BSPSUMR(285,7117
+double BSPSUMD(286,7174
+int    BSPSUMI_PREFIX(287,7231
+float  BSPSUMR_PREFIX(288,7295
+double BSPSUMD_PREFIX(289,7359
+int    BSPPRODUCTI(291,7424
+float  BSPPRODUCTR(292,7489
+double BSPPRODUCTD(293,7554
+int    BSPPRODUCTI_PREFIX(294,7619
+float  BSPPRODUCTR_PREFIX(295,7691
+double BSPPRODUCTD_PREFIX(296,7763
+int    BSPMAXI(298,7832
+float  BSPMAXR(299,7889
+double BSPMAXD(300,7946
+int    BSPMAXI_PREFIX(301,8003
+float  BSPMAXR_PREFIX(302,8067
+double BSPMAXD_PREFIX(303,8131
+int    BSPMINI(305,8196
+float  BSPMINR(306,8253
+double BSPMIND(307,8310
+int    BSPMINI_PREFIX(308,8367
+float  BSPMINR_PREFIX(309,8431
+double BSPMIND_PREFIX(310,8495
+
+library_level1/bsp_fortran77.lc,202
+void bsp_f77_init(35,1548
+void BSPPUT_COMMON(43,1798
+void BSPHPPUT_COMMON(47,1935
+void BSPGET_COMMON(51,2076
+void BSPHPGET_COMMON(56,2214
+void CPPSYNC_NUMBER(62,2371
+void BSPSYNC_NUMBER(114,3754
+
+library_level1/bsp_gather.lc,49
+void bsp_gather(26,1391
+void BSPGATHER(43,1839
+
+library_level1/bsp_scan.lc,243
+\label{60,2614
+%                                   ln(71,2967
+void bsp_scan_init(86,3445
+void bsp_scan_stat(109,4062
+static void bsp_scan_prefix(124,4661
+static void bsp_scan_totex(157,5463
+void bsp_scan(202,6616
+void BSPSCAN(215,7002
+
+library_level1/bsp_scatter.lc,26
+void bsp_scatter(26,1392
+
+library_level1/bsp_slg.lc,240
+#define MAX_LINE_LENGTH 23,1317
+double bsp_s(34,1594
+double bsp_g(35,1632
+double bsp_l(36,1670
+int   bsp_nhalf(37,1708
+double BSPS(44,1878
+double BSPG(45,1915
+double BSPL(46,1952
+int   BSPNHALF(47,1989
+void bspparams_init(54,2179
+
+library_level1/bsp_sort.lc,316
+small values of $N$ this will probably be the most efficient 32,1590
+void bsp_sort(35,1698
+int _bsp_op_lessThanI(71,2671
+int _bsp_op_lessThanR(72,2744
+int _bsp_op_lessThanD(73,2817
+int _bsp_op_lessThanC(74,2890
+int bsp_sortI(81,3105
+float bsp_sortR(88,3255
+double bsp_sortD(95,3413
+char bsp_sortC(102,3576
+
+library_level1/bsp_tcpstartup.lc,19
+void main(25,1327
+
+library_tcpip/bsploadd.lc,234
+#define INCLUDE_HOST_INFO22,1314
+#define BSPTCP_COMPONENT 41,1756
+void *GUARDNZP(42,1797
+int GUARDNZ(53,2000
+void main(78,2558
+void slavekill(809,24332
+void slavereap(828,24741
+void slaveadd(855,25548
+void slavedel(879,26008
+
+library_tcpip/bsploadfuns.lc,515
+#define INCLUDE_HOST_INFO19,1230
+int open_connection_load_daemon(40,1930
+char *lookup_remote_load_recv(86,3335
+double load_average(154,5142
+int time_oldest_load_average(184,5950
+char *random_host_name(204,6406
+double bsphost_t_cost(248,7342
+void sort_host_list(253,7438
+void update_load_average(304,8558
+void update_load_averages(328,9082
+void pr_load_averages(375,10346
+void ppr_load_averages(408,11177
+char *load_average_info(483,13501
+#define MATRIX_SIZE 526,14608
+double getMflopRating(528,14633
+
+library_tcpip/bspportd.lc,269
+%%      Copyright 2,76
+portnumber on which the daemon is listening. The other 42,2340
+typedef struct user_bsptcpd user_bsptcpd_t;user_bsptcpd_t97,4384
+struct user_bsptcpduser_bsptcpd98,4428
+void main(137,5597
+void exitchain(559,20389
+void shutdaemon(593,21496
+
+library_tcpip/bspshutd.lc,26
+Program bspshutd.25,1471
+
+library_tcpip/bsptcpd.lc,253
+program starts 32,1831
+%%      Copyright 2,76
+stderr 34,1959
+void main(92,3477
+void slavekill(549,19096
+void slaveadd(568,19539
+void slavedel(592,20083
+void slavereap(616,20573
+#define ERROREXIT(ERROREXIT651,21710
+void portregister(659,21864
+
+library_tcpip/bsptcpl.lc,747
+%%      Copyright 2,76
+#define BSPTCP_COMPONENT 91,4056
+#define ABORT_MSG_OK 92,4126
+#define ABORT_EXIT(ABORT_EXIT93,4205
+#define ABORT_MSG(ABORT_MSG108,4783
+int bsptcp_set_buffer_size(123,5240
+void bsptcp_env(150,6050
+void bsptcp_init(223,8598
+int bsptcp_recv(626,24276
+int bsptcp_okto_send(727,27274
+int bsptcp_nonblock_send(771,28620
+void bsptcp_block_recv(880,32156
+void bsptcp_wait_sends(958,34400
+int bsptcp_probe(990,35396
+void bsptcp_messg_stopall(1106,38557
+void bsptcp_messg_exit(1127,39152
+\verb!gettimeofday! call so that we 1170,40528
+int bsptcp_usecsleep(1174,40700
+#define RAND_MULT 1212,41524
+#define RAND_ADD 1213,41553
+#define RAND_MASK 1214,41576
+void bsptcp_srand(1216,41608
+int bsptcp_rand(1224,41836
+
+library_tcpip/bsptcpm.lc,22
+program when 34,1928
+
+library_tcpip/bsptcps.lc,42
+program is 31,1716
+program can 263,9973
+
+library_tcpip/bsptcpsio.lc,261
+Function sendall(72,2335
+Function recvall(155,5001
+%%      Copyright 2,76
+This file contains socket read and write functions sendall(23,1368
+int setenv(50,1927
+Function sendall(72,2335
+int sendall(83,2953
+Function recvall(155,5001
+int recvall(162,5396
+
+library_tcpip/massdata.lc,72
+#define BSP_NPROCS 14,220
+#define BLOCK_SIZE 15,241
+void main(17,263
+
+library_tcpip/sample.lc,18
+void main(13,215
+
+cgprof/cgprof.lh,195
+#define _CGPROF_H_36,1555
+} object_cost_proc;object_cost_proc44,1714
+} object_cost;object_cost53,2003
+} parsed_cost_object;parsed_cost_object65,2217
+#define RAW_PROFILE_INIT_SIZE 67,2240
+
+cgprof/daVinci.lh,830
+#define _DAVINCI_H_21,1264
+#define PAIRMAX(PAIRMAX26,1345
+#define SAFEDIV(SAFEDIV28,1387
+#define DAVINCI_ERROR 30,1436
+#define DAVINCI_OK 31,1467
+#define DAVINCI_NODE 32,1498
+#define DAVINCI_MENU 33,1529
+#define DAVINCI_ICON 34,1560
+#define DAVINCI_DOUBLE_CLICK 35,1591
+#define DAVINCI_QUIT 36,1622
+#define DAVINCI_TCL 37,1653
+#define TCL_HREL 39,1685
+#define TCL_COMP 40,1704
+#define TCL_COMM 41,1723
+#define TCL_WAIT 42,1742
+#define TCL_EXIT 43,1761
+#define INCLUDEDIR 45,1781
+} davinciCmd;davinciCmd51,1875
+#define CRITICAL_COMP 54,1891
+#define CRITICAL_COMM 55,1928
+#define CRITICAL_WAIT 56,1965
+#define CRITICAL_HREL 57,2002
+#define CRITICAL_SYNCS 58,2039
+#define CRITTYPE_ABSOLUTE 60,2077
+#define CRITTYPE_ABSDELTA 61,2109
+#define CRITTYPE_RELDELTA 62,2143
+#define CRITTYPE_WEIGHTDELTA 63,2177
+
+cgprof/matrix.lh,174
+#define _MATRIX_H_22,1264
+typedef struct _Matrix_element _Matrix_element23,1283
+} Matrix_element;Matrix_element27,1411
+} Matrix;Matrix34,1549
+#define Mat(Mat43,1748
+
+cgprof/symbol.lh,294
+#define _SYMBOL_H_31,1458
+#define CG_STACK 32,1477
+#define CG_SSTEP 33,1497
+#define MAX_PROFILE_LINE_LENGTH 36,1521
+#define MAX_STACK_DEPTH 37,1561
+#define MAX_FUNNAME 38,1598
+} name_object;name_object45,1741
+typedef int name_id;name_id47,1757
+#define SYMBOL_TABLE_INIT_SIZE 49,1814
+
+library_core/bsp_callstack.lh,46
+  function name.32,1681
+function if 47,2154
+
+library_core/bsp_contentionfree.lh,283
+#define CONTENTION_FREE_RANDOM_SIZE 29,1607
+#define CONTENTION_FREE_INIT_FREQ 30,1648
+#define init_contention_free_communication(init_contention_free_communication32,1689
+#define next_contention_free_pid(next_contention_free_pid49,2626
+} _BSPcontention;_BSPcontention60,2813
+
+library_core/bsp_lib.lh,23
+program doesn'53,2063
+
+library_core/bsp_lib_common.lh,1749
+typedef struct _BSPfreelist _BSPfreelist100,3780
+} BSPfreelist;BSPfreelist104,3897
+} _BSPcombinfo;_BSPcombinfo121,4409
+} _BSPcomb_accounting;_BSPcomb_accounting142,5175
+#define bspcombputs_resetin(bspcombputs_resetin157,5426
+#define bspcombputs_resetout(bspcombputs_resetout165,5812
+#define bspcombputs_applicable(bspcombputs_applicable180,6430
+#define bspcombputs_put(bspcombputs_put185,6609
+STATIC void bspcombputs_init(217,8360
+STATIC void bspcombputs_flush(281,10429
+STATIC void bspcombputs_finalise(334,12287
+int bsp_pid(388,14111
+int bsp_nprocs(392,14151
+#define deallocateFreeList(deallocateFreeList424,14840
+#define BSP_MALLOC(BSP_MALLOC444,15697
+void bsp_init(488,17537
+void bsp_sync(499,17845
+void bsp_put(509,18048
+void bsp_put_cpp(513,18184
+void bsp_hpput(563,19709
+void bsp_hpput_cpp(567,19848
+void bsp_get(626,21666
+void bsp_get_cpp(643,22171
+void bsp_hpget(667,22886
+void bsp_hpget_cpp(685,23414
+STATIC void bsmp_init(735,25142
+STATIC void bsmp_enlargebuffers(775,26500
+#define bsmp_resetincoming(bsmp_resetincoming818,27814
+#define bsmp_resetincoming(bsmp_resetincoming830,28453
+STATIC void bsmp_resetincoming(840,28913
+STATIC void bsmp_reregisterbuffers(873,29990
+void bsp_set_tagsize_cpp(893,30641
+void bsp_set_tag_size(922,31627
+void bsp_set_tagsize(927,31742
+void bsp_send(940,32062
+void bsp_send_cpp(946,32231
+void bsp_get_tag(1008,34414
+void bsp_get_tag_cpp(1012,34506
+void bsp_qsize(1051,35712
+void bsp_qsize_cpp(1055,35814
+void bsp_move(1112,37616
+void bsp_move_cpp(1116,37729
+int bsp_hpmove(1171,39572
+int bsp_hpmove_cpp(1175,39707
+void process_globals_init(1235,41877
+void bsplib_routines_init(1254,42320
+void bsp_fix_argv(1273,42799
+void checkDefines(1288,43141
+
+library_core/bsp_lib_drma.lh,1198
+following systems that provide Direct Remote Memory Access 22,1340
+#define BSP_MAX_PROCS 37,1714
+#define BSP_MAX_PROCS 39,1759
+void drma_put(74,2969
+#define cwhatis_nprocs_mypid(cwhatis_nprocs_mypid87,3286
+#define f77whatis_nprocs_mypid(f77whatis_nprocs_mypid92,3512
+when I change the division by \texttt{99,3830
+#define drma_put(drma_put103,3991
+#define drma_put(drma_put118,4933
+#define drma_put_int(drma_put_int123,5110
+#define drma_put_int(drma_put_int125,5184
+#define drma_get(drma_get135,5471
+#define drma_get(drma_get150,6381
+#define drma_get_int(drma_get_int155,6527
+#define drma_get_int(drma_get_int157,6601
+#define init_barrier(init_barrier170,7227
+#define barrier_sync(barrier_sync177,7409
+#define drma_exit(drma_exit189,7875
+#define drma_stopall(drma_stopall190,7914
+#define drma_lock_type 202,8258
+#define init_drma_lock(init_drma_lock203,8290
+#define drma_set_lock(drma_set_lock204,8321
+} _BSPinfo;_BSPinfo226,9232
+#define BSP_RANDOMISE_PIDS252,10336
+#define init_pid_mapping(init_pid_mapping255,10390
+#define pid_mapping(pid_mapping278,11854
+#define init_pid_mapping(init_pid_mapping280,11912
+#define pid_mapping(pid_mapping281,11969
+
+library_core/bsp_lib_f77.lh,3432
+#define BSPINIT 21,1262
+#define BSPBEGIN 22,1299
+#define BSPEND 23,1337
+#define BSPPID 24,1373
+#define BSPNPROCS 25,1409
+#define BSPTIME 26,1448
+#define BSPDTIME 27,1485
+#define BSPSYNC 28,1523
+#define BSPPUSHREGISTER 29,1560
+#define BSPPOPREGISTER 30,1605
+#define BSPPUSHREG 31,1649
+#define BSPPOPREG 32,1689
+#define BSPPUT 33,1728
+#define BSPHPPUT 34,1764
+#define BSPGET 35,1802
+#define BSPHPGET 36,1838
+#define BSPSETTAGSIZE 37,1876
+#define BSPQSIZE 38,1919
+#define BSPSEND 39,1957
+#define BSPGETTAG 40,1994
+#define BSPMOVE 41,2033
+#define BSPABORT 42,2070
+#define BSPSYNC_CPP 44,2109
+#define BSPPUSHREG_CPP 45,2146
+#define BSPPOPREG_CPP 46,2186
+#define BSPPUT_CPP 47,2225
+#define BSPHPPUT_CPP 48,2261
+#define BSPGET_CPP 49,2299
+#define BSPHPGET_CPP 50,2335
+#define BSPSETTAGSIZE_CPP 51,2373
+#define BSPQSIZE_CPP 52,2416
+#define BSPSEND_CPP 53,2454
+#define BSPGETTAG_CPP 54,2491
+#define BSPMOVE_CPP 55,2530
+#define GETARG 57,2568
+#define IARGC 58,2604
+#define BSPINIT 62,2670
+#define BSPBEGIN 63,2708
+#define BSPEND 64,2747
+#define BSPPID 65,2784
+#define BSPNPROCS 66,2821
+#define BSPTIME 67,2861
+#define BSPDTIME 68,2899
+#define BSPSYNC 69,2938
+#define BSPPUSHREGISTER 70,2976
+#define BSPPOPREGISTER 71,3022
+#define BSPPUSHREG 72,3067
+#define BSPPOPREG 73,3108
+#define BSPPUT 74,3148
+#define BSPHPPUT 75,3185
+#define BSPGET 76,3224
+#define BSPHPGET 77,3261
+#define BSPSETTAGSIZE 78,3300
+#define BSPQSIZE 79,3344
+#define BSPSEND 80,3383
+#define BSPGETTAG 81,3421
+#define BSPMOVE 82,3461
+#define BSPABORT 83,3499
+#define BSPSYNC_CPP 85,3539
+#define BSPPUSHREG_CPP 86,3577
+#define BSPPOPREG_CPP 87,3618
+#define BSPPUT_CPP 88,3658
+#define BSPHPPUT_CPP 89,3695
+#define BSPGET_CPP 90,3734
+#define BSPHPGET_CPP 91,3771
+#define BSPSETTAGSIZE_CPP 92,3810
+#define BSPQSIZE_CPP 93,3854
+#define BSPSEND_CPP 94,3893
+#define BSPGETTAG_CPP 95,3931
+#define BSPMOVE_CPP 96,3971
+#define GETARG 98,4010
+#define IARGC 99,4047
+#define BSPSYNC_CPP 104,4135
+#define BSPPUSHREG_CPP 105,4171
+#define BSPPOPREG_CPP 106,4210
+#define BSPPUT_CPP 107,4248
+#define BSPHPPUT_CPP 108,4283
+#define BSPGET_CPP 109,4320
+#define BSPHPGET_CPP 110,4355
+#define BSPSETTAGSIZE_CPP 111,4392
+#define BSPQSIZE_CPP 112,4434
+#define BSPSEND_CPP 113,4471
+#define BSPGETTAG_CPP 114,4507
+#define BSPMOVE_CPP 115,4545
+#define BSPINIT 118,4588
+#define BSPBEGIN 119,4624
+#define BSPEND 120,4661
+#define BSPPID 121,4696
+#define BSPNPROCS 122,4731
+#define BSPTIME 123,4769
+#define BSPDTIME 124,4805
+#define BSPSYNC 125,4842
+#define BSPPUSHREGISTER 126,4878
+#define BSPPOPREGISTER 127,4922
+#define BSPPUSHREG 128,4965
+#define BSPPOPREG 129,5004
+#define BSPPUT 130,5042
+#define BSPHPPUT 131,5077
+#define BSPGET 132,5114
+#define BSPHPGET 133,5149
+#define BSPSETTAGSIZE 134,5186
+#define BSPQSIZE 135,5228
+#define BSPSEND 136,5265
+#define BSPGETTAG 137,5301
+#define BSPMOVE 138,5339
+#define BSPABORT 139,5375
+#define GETARG 140,5412
+#define IARGC 141,5447
+#define BSPSYNC_CPP 143,5482
+#define BSPPUSHREG_CPP 144,5518
+#define BSPPOPREG_CPP 145,5557
+#define BSPPUT_CPP 146,5595
+#define BSPHPPUT_CPP 147,5630
+#define BSPGET_CPP 148,5667
+#define BSPHPGET_CPP 149,5702
+#define BSPSETTAGSIZE_CPP 150,5739
+#define BSPQSIZE_CPP 151,5781
+#define BSPSEND_CPP 152,5818
+#define BSPGETTAG_CPP 153,5854
+#define BSPMOVE_CPP 154,5892
+#define GETARG 156,5929
+#define IARGC 157,5964
+
+library_core/bsp_lib_f77_user.lh,9
+C 8,451
+
+library_core/bsp_lib_f77_user_cray.lh,9
+C 8,481
+
+library_core/bsp_lib_mpass.lh,7155
+#define BSP_MAX_PROCS 96,3116
+#define BSP_MAX_PROCS 98,3161
+#define BSP_MPASS_FORK 103,3219
+#define BSP_MPASS_SSTEP_COMM_ODD 104,3262
+#define BSP_MPASS_SSTEP_COMM_EVEN 105,3305
+#define BSP_MPASS_SSTEP_EXCHANGE_ODD 106,3348
+#define BSP_MPASS_SSTEP_EXCHANGE_EVEN 107,3391
+#define BSP_MPASS_DEBUG_WAIT 108,3434
+#define BSP_MPASS_SOFTWARE_BCAST 109,3477
+#define BSP_MPASS_SOFTWARE_GATHER 110,3520
+#define BSP_MPASS_SOFTWARE_CONSTANT_ODD 111,3563
+#define BSP_MPASS_SOFTWARE_CONSTANT_EVEN 112,3606
+#define BSP_MPASS_ARGV_SIZE 113,3650
+#define BSP_MPASS_ARGV_DATA 114,3694
+#define BSP_MPASS_ABORT 115,3738
+#define BSP_MPASS_LAST_DEFINE 116,3782
+#define BSP_MPASS_MAXBACKOFF 121,3908
+#define PID_DONTCARE 171,5422
+#define comm_handle 172,5448
+#define status_handle 173,5474
+#define cwhatis_nprocs_mypid(cwhatis_nprocs_mypid175,5501
+#define f77whatis_nprocs_mypid(f77whatis_nprocs_mypid180,5758
+#define setup_group_before_kill_unwanted(setup_group_before_kill_unwanted183,5868
+#define setup_group_after_kill_unwanted(setup_group_after_kill_unwanted185,5940
+#define setup_nonblocksend_buffersize(setup_nonblocksend_buffersize187,6012
+#define block_recv(block_recv190,6152
+#define nonblock_send(nonblock_send193,6260
+#define nonblocksend_blockrecv(nonblocksend_blockrecv200,6587
+#define wait_sends(wait_sends203,6698
+#define nonblock_probe(nonblock_probe205,6741
+#define block_probe(block_probe207,6810
+#define messg_active_procs(messg_active_procs210,6901
+#define messg_stopall(messg_stopall212,6955
+#define messg_exit(messg_exit214,7006
+#define barrier_sync(barrier_sync220,7177
+#define PID_DONTCARE 229,7366
+#define comm_handle 230,7398
+#define status_handle 231,7424
+#define cwhatis_nprocs_mypid(cwhatis_nprocs_mypid233,7451
+#define f77whatis_nprocs_mypid(f77whatis_nprocs_mypid236,7549
+#define setup_group_before_kill_unwanted(setup_group_before_kill_unwanted239,7659
+#define setup_group_after_kill_unwanted(setup_group_after_kill_unwanted241,7731
+#define setup_nonblocksend_buffersize(setup_nonblocksend_buffersize252,8239
+#define block_recv(block_recv266,8895
+#define block_recv(block_recv276,9442
+#define nonblock_send(nonblock_send285,9775
+#define nonblocksend_blockrecv(nonblocksend_blockrecv295,10166
+#define nonblocksend_blockrecv(nonblocksend_blockrecv303,10447
+#define wait_sends(wait_sends310,10590
+#define nonblock_probe(nonblock_probe318,10824
+#define block_probe(block_probe323,11001
+#define messg_active_procs(messg_active_procs332,11442
+#define messg_stopall(messg_stopall334,11490
+#define messg_exit(messg_exit336,11533
+#define barrier_sync(barrier_sync342,11700
+#define PID_DONTCARE 351,11907
+#define comm_handle 352,11935
+#define status_handle 353,11959
+#define cwhatis_nprocs_mypid(cwhatis_nprocs_mypid355,11986
+#define f77whatis_nprocs_mypid(f77whatis_nprocs_mypid360,12187
+#define setup_group_before_kill_unwanted(setup_group_before_kill_unwanted363,12297
+#define setup_group_after_kill_unwanted(setup_group_after_kill_unwanted364,12368
+#define setup_nonblocksend_buffersize(setup_nonblocksend_buffersize365,12439
+#define nonblock_send(nonblock_send370,12564
+#define block_recv(block_recv373,12683
+#define nonblocksend_blockrecv(nonblocksend_blockrecv394,13758
+#define wait_sends(wait_sends399,13893
+#define nonblock_probe(nonblock_probe403,13954
+#define block_probe(block_probe413,14513
+#define messg_active_procs(messg_active_procs426,15172
+#define messg_stopall(messg_stopall428,15220
+#define messg_exit(messg_exit430,15265
+#define barrier_sync(barrier_sync434,15327
+#define MPASS_NEEDS_HOST_PROGRAM444,15521
+#define MPASS_HOST_SWAP_BYTE_ORDERING445,15554
+#define PID_DONTCARE 446,15592
+#define PID_HOSTID 447,15627
+#define comm_handle 448,15665
+#define status_handle 449,15689
+#define cwhatis_nprocs_mypid(cwhatis_nprocs_mypid451,15716
+#define f77whatis_nprocs_mypid(f77whatis_nprocs_mypid457,16034
+#define setup_group_before_kill_unwanted(setup_group_before_kill_unwanted460,16144
+#define setup_group_after_kill_unwanted(setup_group_after_kill_unwanted461,16215
+#define setup_nonblocksend_buffersize(setup_nonblocksend_buffersize462,16286
+#define nonblock_send(nonblock_send468,16427
+#define nonblock_send(nonblock_send473,16669
+#define block_recv(block_recv479,16915
+#define nonblocksend_blockrecv(nonblocksend_blockrecv495,17805
+#define wait_sends(wait_sends500,17940
+#define nonblock_probe(nonblock_probe504,18001
+#define block_probe(block_probe507,18107
+#define messg_active_procs(messg_active_procs512,18232
+#define messg_stopall(messg_stopall514,18280
+#define MPASS_ATEXIT523,18644
+#define messg_exit(messg_exit524,18665
+#define barrier_sync(barrier_sync535,19067
+#define PID_DONTCARE 545,19276
+#define comm_handle 546,19308
+#define status_handle 547,19334
+#define cwhatis_nprocs_mypid(cwhatis_nprocs_mypid549,19361
+#define f77whatis_nprocs_mypid(f77whatis_nprocs_mypid557,19802
+#define setup_group_before_kill_unwanted(setup_group_before_kill_unwanted560,19922
+#define setup_group_after_kill_unwanted(setup_group_after_kill_unwanted562,19994
+#define setup_nonblocksend_buffersize(setup_nonblocksend_buffersize566,20090
+#define block_recv(block_recv571,20213
+#define block_recv(block_recv578,20472
+#define nonblock_send(nonblock_send587,20662
+#define nonblocksend_blockrecv(nonblocksend_blockrecv596,20986
+#define nonblocksend_blockrecv(nonblocksend_blockrecv606,21501
+#define wait_sends(wait_sends617,21808
+#define nonblock_probe(nonblock_probe621,21871
+#define block_probe(block_probe624,21952
+#define block_probe(block_probe630,22157
+#define messg_active_procs(messg_active_procs638,22335
+#define messg_stopall(messg_stopall640,22383
+#define messg_exit(messg_exit642,22420
+#define barrier_sync(barrier_sync647,22484
+#define PID_DONTCARE 657,22670
+#define comm_handle 658,22708
+#define status_handle 659,22741
+#define cwhatis_nprocs_mypid(cwhatis_nprocs_mypid661,22775
+#define f77MPI_Init 668,23106
+#define f77MPI_Init 671,23166
+#define f77MPI_Init 674,23220
+#define f77MPI_Init 676,23255
+#define f77whatis_nprocs_mypid(f77whatis_nprocs_mypid681,23306
+#define setup_group_before_kill_unwanted(setup_group_before_kill_unwanted687,23605
+#define setup_group_after_kill_unwanted(setup_group_after_kill_unwanted697,24227
+#define setup_nonblocksend_buffersize(setup_nonblocksend_buffersize698,24297
+#define block_recv(block_recv709,24853
+#define nonblock_send(nonblock_send722,25430
+#define nonblocksend_blockrecv(nonblocksend_blockrecv729,25685
+#define wait_sends(wait_sends734,25820
+#define nonblock_probe(nonblock_probe745,26291
+#define block_probe(block_probe753,26681
+#define messg_active_procs(messg_active_procs763,27120
+#define messg_stopall(messg_stopall765,27168
+#define MPASS_ATEXIT767,27221
+#define messg_exit(messg_exit768,27242
+#define barrier_sync(barrier_sync773,27329
+#define barrier_sync(barrier_sync779,27588
+#define messg_matrix_set(messg_matrix_set793,27923
+#define messg_matrix_unset(messg_matrix_unset799,28177
+#define messg_matrix_isset(messg_matrix_isset806,28437
+
+library_core/bsp_lib_shmem.lh,4155
+#define _BSD_SIGNALS41,1865
+#define BSP_MAX_PROCS 74,2602
+#define BSP_MAX_PROCS 77,2689
+#define BSP_MAX_PROCS 79,2720
+#define CACHE_LINE_SIZE 90,3064
+#define release_processor(release_processor100,3303
+#define reset_short_snooze(reset_short_snooze101,3346
+#define short_snooze(short_snooze102,3389
+#define release_processor(release_processor106,3485
+#define release_processor(release_processor109,3554
+#define release_processor(release_processor111,3598
+#define BSP_SNOOZE_TILL_SLEEP 116,3696
+#define BSP_SNOOZE_MIN 117,3730
+#define BSP_SNOOZE_TILL_SLEEP 119,3769
+#define BSP_SNOOZE_MIN 120,3805
+#define reset_short_snooze(reset_short_snooze123,3848
+#define short_snooze(short_snooze129,4047
+\item[P(147,4649
+#define semaphore_type 158,4958
+#define semaphore_type_size 159,4985
+#define new_sema(new_sema160,5028
+#define Vsema(Vsema161,5059
+#define Psema(Psema162,5105
+#define Tsema(Tsema163,5151
+#define CPsema(CPsema164,5182
+#define semaphore_type 173,5328
+#define semaphore_type_size 174,5366
+#define new_sema(new_sema175,5414
+#define Vsema(Vsema181,5715
+#define Psema(Psema182,5758
+#define Tsema(Tsema183,5801
+#define CPsema(CPsema184,5847
+#define SEMA_SET_SIZE 204,6498
+#define semaphore_type 205,6522
+#define semaphore_type_size 206,6557
+#define new_sema(new_sema207,6602
+#define Vsema(Vsema219,7297
+#define Psema(Psema230,7788
+#define CPsema(CPsema241,8279
+#define Tsema(Tsema253,8945
+#define spinlock_type 270,9396
+#define spinlock_type_size 271,9431
+#define new_spinlock(new_spinlock272,9476
+#define set_spinlock(set_spinlock274,9542
+#define conlongset_spinlock(conlongset_spinlock275,9599
+#define conshortset_spinlock(conshortset_spinlock276,9656
+#define set_spinlock(set_spinlock278,9716
+#define conlongset_spinlock(conlongset_spinlock279,9767
+#define conshortset_spinlock(conshortset_spinlock280,9821
+#define unset_spinlock(unset_spinlock283,9883
+#define test_spinlock(test_spinlock284,9931
+#define spinlock_type 293,10136
+#define spinlock_type_size 294,10169
+#define new_spinlock(new_spinlock295,10212
+#define test_spinlock(test_spinlock297,10261
+#define set_spinlock(set_spinlock299,10308
+#define unset_spinlock(unset_spinlock302,10370
+#define unset_spinlock(unset_spinlock307,10521
+#define conshortset_spinlock(conshortset_spinlock311,10571
+#define conlongset_spinlock(conlongset_spinlock312,10622
+#define BARRIER_NONBUSYWAIT_COUNTER367,12821
+#define BARRIER_ATOMIC_COUNTER371,12881
+#define BARRIER_BUSYWAIT_VECTOR_COUNTER373,12918
+#define no_semas_barrier(no_semas_barrier380,13000
+#define hardware_barrier_type 381,13037
+#define barrier_type_size(barrier_type_size382,13083
+#define barrier_sync(barrier_sync383,13157
+#define no_semas_barrier(no_semas_barrier387,13253
+#define barrier_type_size(barrier_type_size388,13304
+#define barrier_sync(barrier_sync389,13377
+#define no_semas_barrier(no_semas_barrier393,13486
+#define barrier_type_size(barrier_type_size394,13523
+#define barrier_sync(barrier_sync395,13577
+#define no_semas_barrier(no_semas_barrier400,13688
+#define barrier_type_size(barrier_type_size401,13725
+#define barrier_sync(barrier_sync402,13779
+#define VEC_SEP_DISTANCE 406,13893
+#define no_semas_barrier(no_semas_barrier407,13920
+#define barrier_type_size(barrier_type_size408,13958
+#define barrier_sync(barrier_sync409,14033
+#define no_semas_barrier(no_semas_barrier413,14145
+#define barrier_type_size(barrier_type_size414,14181
+#define barrier_sync(barrier_sync415,14217
+typedef volatile __uint32_t  atomic_swap_type;atomic_swap_type418,14307
+#define atomic_read(atomic_read420,14355
+#define atomic_inc(atomic_inc421,14427
+#define atomic_dec(atomic_dec422,14503
+#define atomic_write(atomic_write423,14580
+typedef fetchop_var_t atomic_swap_type;atomic_swap_type426,14684
+#define atomic_read(atomic_read427,14724
+#define atomic_inc(atomic_inc428,14772
+#define atomic_dec(atomic_dec429,14825
+#define atomic_write(atomic_write430,14878
+#define init_atomic_barrier(init_atomic_barrier432,14936
+#define barrier_sync(barrier_sync447,15789
+Some processors 455,15945
+
+library_core/bsp_lib_user.lh,973
+#define _BSP_H32,1651
+#define LINKAGE 35,1704
+#define LINKAGE 37,1730
+#define bsp_init(bsp_init200,8090
+#define bsp_sync(bsp_sync206,8316
+#define bsp_push_reg(bsp_push_reg207,8379
+#define bsp_pop_reg(bsp_pop_reg208,8451
+#define bsp_put(bsp_put209,8520
+#define bsp_hpput(bsp_hpput210,8592
+#define bsp_get(bsp_get211,8666
+#define bsp_hpget(bsp_hpget212,8738
+#define bsp_send(bsp_send213,8812
+#define bsp_get_tag(bsp_get_tag214,8883
+#define bsp_move(bsp_move215,8954
+#define bsp_hpmove(bsp_hpmove216,9021
+#define bsp_set_tagsize(bsp_set_tagsize217,9090
+#define bsp_qsize(bsp_qsize218,9162
+#define bsp_pushregister(bsp_pushregister223,9305
+#define bsp_popregister(bsp_popregister224,9377
+#define bsp_set_tag_size(bsp_set_tag_size225,9446
+#define bsp_bsmp_info(bsp_bsmp_info226,9518
+#define bspstore(bspstore247,10314
+#define bspfetch(bspfetch252,10518
+#define bspsstep(bspsstep257,10719
+#define bspsstep_end(bspsstep_end258,10766
+
+library_core/bsp_profile.lh,876
+#define PROFILE_COMM_BUFFER_SIZE 42,1972
+#define PROFILE_SSTEP_BUFFER_SIZE 43,2013
+#define PROF_FILETYPE 52,2275
+#define PROF_DATETYPE 53,2303
+#define prof_fopen(prof_fopen54,2329
+#define prof_fflush(prof_fflush55,2381
+#define prof_fclose(prof_fclose56,2425
+#define prof_datestring(prof_datestring57,2469
+#define PROF_FILETYPE 60,2524
+#define PROF_DATETYPE 61,2552
+#define prof_fopen(prof_fopen62,2590
+#define prof_fflush(prof_fflush63,2641
+#define prof_fclose(prof_fclose64,2685
+#define prof_datestring(prof_datestring65,2729
+ } _BSPstat_info;_BSPstat_info84,3221
+} _BSPprof_callgraph_proc;_BSPprof_callgraph_proc101,3574
+typedef struct __BSPprof_sstep_info __BSPprof_sstep_info104,3609
+} _BSPprof_sstep_info;_BSPprof_sstep_info118,4197
+typedef int _BSPprof_sstep_id;_BSPprof_sstep_id120,4221
+} _BSPprof_comm_info;_BSPprof_comm_info136,4707
+
+library_core/bsp_register.lh,442
+typedef struct _bsp_registration _bsp_registration18,1229
+} bsp_registration;bsp_registration32,1515
+#define REG_TABLE_SIZE 42,1800
+#define hash_local(hash_local44,1829
+#define hash_global(hash_global45,1901
+#define bsp_register_local_to_global(bsp_register_local_to_global47,1956
+#define bsp_register_global_to_local(bsp_register_global_to_local53,2151
+#define bsp_register_global_to_local(bsp_register_global_to_local59,2386
+
+library_core/bsp_timer.lh,1135
+#define TIMER_RESOLUTION 22,1256
+#define TIMER_READ(TIMER_READ23,1288
+typedef long long int TIMER_TYPE;TIMER_TYPE24,1329
+#define TIMER_RESOLUTION 30,1437
+#define TIMER_READ(TIMER_READ31,1488
+typedef unsigned long int TIMER_TYPE;TIMER_TYPE32,1516
+#define TIMER_RESOLUTION 37,1599
+#define TIMER_READ(TIMER_READ38,1631
+typedef long int TIMER_TYPE;TIMER_TYPE39,1662
+#define TIMER_RESOLUTION 44,1731
+#define TIMER_READ(TIMER_READ45,1760
+typedef double TIMER_TYPE;TIMER_TYPE46,1791
+#define TIMER_RESOLUTION 50,1843
+#define TIMER_READ(TIMER_READ51,1875
+typedef long int TIMER_TYPE;TIMER_TYPE52,1905
+#define TIMER_RESOLUTION 57,1999
+#define TIMER_READ(TIMER_READ58,2031
+typedef hrtime_t TIMER_TYPE;TIMER_TYPE59,2064
+#define CYCLE_COUNTER_IS_64BIT68,2254
+typedef unsigned long long TIMER_TYPE;TIMER_TYPE70,2315
+typedef unsigned int TIMER_TYPE;TIMER_TYPE72,2360
+#define TIMER_READ(TIMER_READ74,2400
+#define BSD_TIMER81,2581
+#define TIMER_RESOLUTION 83,2621
+#define TIMER_READ(TIMER_READ84,2653
+typedef unsigned long long int TIMER_TYPE;TIMER_TYPE86,2731
+typedef long int TIMER_TYPE;TIMER_TYPE88,2780
+
+library_level1/bsp_f77_names.lh,3476
+#define BSPBCAST 21,1262
+#define BSPGATHER 22,1304
+#define BSPSCAN 23,1347
+#define BSPFOLD 24,1388
+#define BSPALL 25,1429
+#define BSPANY 26,1469
+#define BSPSUMI 27,1509
+#define BSPSUMR 28,1550
+#define BSPSUMD 29,1591
+#define BSPSUMI_PREFIX 30,1632
+#define BSPSUMR_PREFIX 31,1680
+#define BSPSUMD_PREFIX 32,1728
+#define BSPPRODUCTI 33,1776
+#define BSPPRODUCTR 34,1821
+#define BSPPRODUCTD 35,1866
+#define BSPPRODUCTI_PREFIX 36,1911
+#define BSPPRODUCTR_PREFIX 37,1963
+#define BSPPRODUCTD_PREFIX 38,2015
+#define BSPMINI 39,2067
+#define BSPMINR 40,2108
+#define BSPMIND 41,2149
+#define BSPMINI_PREFIX 42,2190
+#define BSPMINR_PREFIX 43,2238
+#define BSPMIND_PREFIX 44,2286
+#define BSPMAXI 45,2334
+#define BSPMAXR 46,2375
+#define BSPMAXD 47,2416
+#define BSPMAXI_PREFIX 48,2457
+#define BSPMAXR_PREFIX 49,2505
+#define BSPMAXD_PREFIX 50,2553
+#define BSPPUT_COMMON 52,2602
+#define BSPHPPUT_COMMON 53,2649
+#define BSPGET_COMMON 54,2698
+#define BSPHPGET_COMMON 55,2745
+#define BSPSYNC_NUMBER 56,2794
+#define CPPSYNC_NUMBER 57,2842
+#define BSPS 59,2891
+#define BSPL 60,2929
+#define BSPG 61,2967
+#define BSPNHALF 62,3005
+#define BSPBCAST 66,3078
+#define BSPGATHER 67,3121
+#define BSPSCAN 68,3165
+#define BSPFOLD 69,3207
+#define BSPALL 70,3249
+#define BSPANY 71,3290
+#define BSPSUMI 72,3331
+#define BSPSUMR 73,3373
+#define BSPSUMD 74,3415
+#define BSPSUMI_PREFIX 75,3457
+#define BSPSUMR_PREFIX 76,3506
+#define BSPSUMD_PREFIX 77,3555
+#define BSPPRODUCTI 78,3604
+#define BSPPRODUCTR 79,3650
+#define BSPPRODUCTD 80,3696
+#define BSPPRODUCTI_PREFIX 81,3742
+#define BSPPRODUCTR_PREFIX 82,3795
+#define BSPPRODUCTD_PREFIX 83,3848
+#define BSPMINI 84,3901
+#define BSPMINR 85,3943
+#define BSPMIND 86,3985
+#define BSPMINI_PREFIX 87,4027
+#define BSPMINR_PREFIX 88,4076
+#define BSPMIND_PREFIX 89,4125
+#define BSPMAXI 90,4174
+#define BSPMAXR 91,4216
+#define BSPMAXD 92,4258
+#define BSPMAXI_PREFIX 93,4300
+#define BSPMAXR_PREFIX 94,4349
+#define BSPMAXD_PREFIX 95,4398
+#define BSPPUT_COMMON 97,4448
+#define BSPHPPUT_COMMON 98,4496
+#define BSPGET_COMMON 99,4546
+#define BSPHPGET_COMMON 100,4594
+#define BSPSYNC_NUMBER 101,4644
+#define CPPSYNC_NUMBER 102,4693
+#define BSPS 104,4743
+#define BSPL 105,4782
+#define BSPG 106,4821
+#define BSPNHALF 107,4860
+#define BSPBCAST 114,4958
+#define BSPGATHER 115,4999
+#define BSPSCAN 116,5041
+#define BSPFOLD 117,5081
+#define BSPALL 118,5121
+#define BSPANY 119,5160
+#define BSPSUMI 120,5199
+#define BSPSUMR 121,5239
+#define BSPSUMD 122,5279
+#define BSPSUMI_PREFIX 123,5319
+#define BSPSUMR_PREFIX 124,5366
+#define BSPSUMD_PREFIX 125,5413
+#define BSPPRODUCTI 126,5460
+#define BSPPRODUCTR 127,5504
+#define BSPPRODUCTD 128,5548
+#define BSPPRODUCTI_PREFIX 129,5592
+#define BSPPRODUCTR_PREFIX 130,5643
+#define BSPPRODUCTD_PREFIX 131,5694
+#define BSPMINI 132,5745
+#define BSPMINR 133,5785
+#define BSPMIND 134,5825
+#define BSPMINI_PREFIX 135,5865
+#define BSPMINR_PREFIX 136,5912
+#define BSPMIND_PREFIX 137,5959
+#define BSPMAXI 138,6006
+#define BSPMAXR 139,6046
+#define BSPMAXD 140,6086
+#define BSPMAXI_PREFIX 141,6126
+#define BSPMAXR_PREFIX 142,6173
+#define BSPMAXD_PREFIX 143,6220
+#define BSPPUT_COMMON 145,6268
+#define BSPHPPUT_COMMON 146,6314
+#define BSPGET_COMMON 147,6362
+#define BSPHPGET_COMMON 148,6408
+#define BSPSYNC_NUMBER 149,6456
+#define CPPSYNC_NUMBER 150,6503
+#define BSPS 152,6551
+#define BSPL 153,6588
+#define BSPG 154,6625
+#define BSPNHALF 155,6662
+
+library_level1/bsp_level1.lh,122
+#define LINKAGE 23,1366
+#define LINKAGE 25,1392
+#define bsp_bcast(bsp_bcast82,3391
+#define bsp_fold(bsp_fold83,3459
+
+library_level1/fbsp_level1.lh,9
+C 8,451
+
+library_tcpip/bsploadfuns.lh,135
+#define CLOCKS_PER_SEC 42,1678
+#define MALLOC(MALLOC45,1717
+#define INIT_RANDOM(INIT_RANDOM47,1773
+#define RANDOM(RANDOM54,1957
+
+library_tcpip/bsptcpdefs.lh,1891
+%%      Copyright 2,76
+#define MSG_WAITALL 36,1827
+#define MAC_HEADER_SIZE 54,2373
+#define IP_HEADER_SIZE 55,2430
+#define TCP_HEADER_SIZE 56,2465
+#define BSPTCP_LPORT 58,2501
+#define BSPTCP_LOADPORT 59,2581
+#define BSPTCP_BACKLOG 60,2661
+#define BSPTCP_TIMEOUT_HIGH 61,2731
+#define BSPTCP_TIMEOUT_LOW 62,2809
+#define BSPTCP_MAX_RETRIES 63,2887
+#define BSPTCP_MAXAGE_LOAD 65,2967
+#define BSPTCP_MAXTIMEOUT_LOAD 66,3042
+#define BSPTCP_MINTIMEOUT_LOAD 67,3118
+#define BSPTCP_LOAD_CONNECTS 68,3194
+#define BSPTCP_LOAD_CHILDREN 69,3270
+#define BSPTCP_TIMEOUT_ENQ 70,3341
+#define BSPTCP_MAX_ATTEMPTS 73,3482
+#define BSPTCP_LINGER_INT 74,3557
+#define BSPTCP_MAX_SESSIONS 75,3630
+#define BSPTCP_MAX_BACKOFF 76,3706
+#define BSPTCP_HOST_NAME_MAX 77,3779
+#define BSPTCP_STR_LEN 78,3847
+#define BSPTCP_BUFF_LEN 79,3919
+#define BSPTCP_INFTY_LOAD 80,3984
+#define BSPTCP_LOAD_MFLOP 81,4056
+#define BSPTCP_MASTER_PATH 90,4301
+#define BSPTCP_SLAVE_PATH 91,4356
+#define BSPTCP_MASTER_PATH 93,4417
+#define BSPTCP_SLAVE_PATH 94,4467
+typedef struct bsptcp_msghdr bsptcp_msghdr_t;bsptcp_msghdr_t102,4652
+struct bsptcp_msghdrbsptcp_msghdr103,4698
+#define BSPTCP_MSG_STDOUT 120,5159
+#define BSPTCP_MSG_STDERR 121,5231
+#define BSPTCP_MSG_PASSWD 122,5303
+#define BSPTCP_MSG_ACK 123,5374
+#define BSPTCP_MSG_CDATA 124,5442
+#define BSPTCP_MSG_ENVSET 125,5511
+#define BSPTCP_MSG_EXIT 126,5580
+#define BSPTCP_MSG_ABORT 127,5642
+#define BSPTCP_MSG_SIGNAL 128,5719
+#define BSPTCP_MSG_LD_ENQ 129,5786
+#define BSPTCP_MSG_LD_UPD 130,5849
+#define BSPTCP_MSG_LD_INFTY 131,5914
+#define BSPTCP_MSG_LD_RLD 132,5980
+#define BSPTCP_MSG_LD_DATA 133,6055
+#define BSPTCP_MIN_TYPE 135,6123
+#define BSPTCP_MAX_TYPE 136,6167
+typedef struct envvar envvar_t;envvar_t145,6362
+typedef struct bsphost bsphost_t;bsphost_t146,6434
+struct envvarenvvar148,6511
+struct bsphostbsphost155,6745
+
+library_tcpip/bsptcperrs.lh,133
+%%      Copyright 2,76
+int GUARDEQ(32,1874
+int GUARDZ(65,2707
+int GUARDNZ(95,3462
+int GUARDNN(125,4219
+void *GUARDNZP(155,4978
+
+library_tcpip/bsptcpl.lh,24
+%%      Copyright 2,76
+
+library_tcpip/bsptcpsio.lh,24
+%%      Copyright 2,76

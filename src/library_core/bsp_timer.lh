@@ -1,0 +1,113 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id$
+% $Log$
+
+\begin{code}
+#ifndef USE_BSD_TIMER
+#ifdef SP2
+#define TIMER_RESOLUTION 1.0e-9
+#define TIMER_READ() bsp_time_read_sp2()
+typedef long long int TIMER_TYPE;
+TIMER_TYPE bsp_time_read_sp2();
+#else
+
+#ifdef CRAYMPP
+extern int __cycle;
+#define TIMER_RESOLUTION (1.0e-12*(double)__cycle)
+#define TIMER_READ() IRTC()
+typedef unsigned long int TIMER_TYPE;
+#else
+
+#ifdef PARSYTEC
+#include <sys/time.h>
+#define TIMER_RESOLUTION 1.0e-6
+#define TIMER_READ() TimeNow()
+typedef long int TIMER_TYPE;
+#else
+
+#ifdef PARAMID
+double pm_time();
+#define TIMER_RESOLUTION 1.0
+#define TIMER_READ() pm_time()
+typedef double TIMER_TYPE;
+#else
+
+#ifdef HITACHIMPP
+#define TIMER_RESOLUTION 1.0e-6
+#define TIMER_READ() extime()
+typedef long int TIMER_TYPE;
+#else
+
+#if (defined(Solaris) || defined(SolarisX86)) && !(__GNUC__)
+#include <sys/time.h>
+#define TIMER_RESOLUTION 1.0e-9
+#define TIMER_READ() gethrtime()
+typedef hrtime_t TIMER_TYPE;
+#else
+
+#ifdef WIN32
+#include <time.h>
+#define TIMER_RESOLUTION ((double)(1.0/CLOCKS_PER_SEC))
+#define TIMER_READ() clock()
+typedef clock_t TIMER_TYPE;
+
+#else
+#if defined(SGICHALL64) || defined(SGIORIGIN)
+#include <stddef.h>
+#include <sys/types.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/syssgi.h>
+#define CYCLE_COUNTER_IS_64BIT
+#ifdef CYCLE_COUNTER_IS_64BIT
+typedef unsigned long long TIMER_TYPE;
+#else
+typedef unsigned int TIMER_TYPE;
+#endif
+#define TIMER_READ() (*iotimer_addr)
+double         bsp_time_init_sgi();
+volatile TIMER_TYPE *iotimer_addr;
+/* Global variables from sysgi(2) */
+#else
+#define USE_BSD_TIMER
+#endif
+#endif
+#endif
+#endif
+#endif
+#endif
+#endif
+#endif
+#endif
+
+#ifdef USE_BSD_TIMER
+/* Bog standard BSD Timer */
+#define BSD_TIMER
+#include <sys/time.h>
+#define TIMER_RESOLUTION 1.0e-6
+#define TIMER_READ() bsp_time_read_bsd()
+#if SIZEOF_UNSIGNED_LONG_LONG_INT==9
+typedef unsigned long long int TIMER_TYPE;
+#else
+typedef long int TIMER_TYPE;
+#endif
+extern  TIMER_TYPE  bsp_time_read_bsd();
+#endif
+\end{code}
+
+

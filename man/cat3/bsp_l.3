@@ -1,0 +1,132 @@
+
+
+
+BSP parameters(3)         BSPlib level1         BSP parameters(3)
+
+
+
+NAME
+     bsp_l, bsp_g, bsp_s, bsp_nhalf -  query  the  BSP's  machine
+     parameters
+
+
+
+C SYNOPSIS
+     #include "bsp_level1.h"
+
+     double _b_s_p__s();
+     double _b_s_p__l();
+     double _b_s_p__g();
+     int    _b_s_p__n_h_a_l_f();
+
+FORTRAN SYNOPSIS
+     DOUBLE PRECISION FUNCTION _b_s_p_s()
+     DOUBLE PRECISION FUNCTION _b_s_p_l()
+     DOUBLE PRECISION FUNCTION _b_s_p_g()
+     INTEGER          FUNCTION _b_s_p_n_h_a_l_f()
+
+
+DESCRIPTION
+     These function return the BSP parameters for a machine:
+
+     bsp_s
+          is the speed of computation  of  a  process  in  flop/s
+          (that  is  number  of  floating  point  operations  per
+          second).
+
+
+     bsp_l
+          is the synchronisation latency cost in units of  bsp_s.
+          i.e.,  if  _s=_1_0_0_0,  then  each processor of the machine
+          could have performed 1000 floating point operations  in
+          the  same  time  as all processors take to barrier syn-
+          chronise.
+
+
+     bsp_g
+          is the asymptotic number of flops/word required for all
+          processors to simultaneously communicate a message.
+
+
+     bsp_nhalf
+          is the number of words required to be communicated such
+          that the communication performance deteriorates to _2_g
+
+     In the current implementation of the library, the values for
+     each  of  these parameters is read from a database file, and
+     not calculated by experimentation at runtime.
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    1
+
+
+
+
+
+
+BSP parameters(3)         BSPlib level1         BSP parameters(3)
+
+
+
+FILES
+     The  file  _P_R_E_F_I_X/include/bsp_parameters.ascii  contains   a
+     table  of  the BSP parameters read by these functions; where
+     _P_R_E_F_I_X is  the  installation  prefix  set  when  configuring
+     BSPlib.
+
+
+SEE ALSO
+     bspparam(1), bsplib_level1(3)
+
+
+BUGS
+     Problems  and  bug  reports  should  be  mailed  to  _b_s_p_l_i_b-
+     _b_u_g_s@_c_o_m_l_a_b._o_x._a_c._u_k
+
+
+AUTHORS
+     Jonathan.Hill@comlab.ox.ac.uk
+     http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    2
+
+
+

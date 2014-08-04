@@ -1,0 +1,132 @@
+
+
+
+bsp_set_tagsize(3)      BSPlib FUNCTIONS       bsp_set_tagsize(3)
+
+
+
+NAME
+     bsp_set_tagsize - tag size of a BSMP packet.
+
+
+C SYNOPSIS
+     #include "bsp.h"
+
+     void bsp_set_tagsize(int *_t_a_g__b_y_t_e_s);
+
+FORTRAN SYNOPSIS
+     SUBROUTINE  bspsettagsize(tag_bytes)
+       INTEGER, intent(INOUT) :: _t_a_g__b_y_t_e_s
+
+
+DESCRIPTION
+     Allowing the user to set the tag size  enables  the  use  of
+     tags that are appropriate for the communication requirements
+     of each superstep.  This should be  particularly  useful  in
+     the development of subroutines either in user programs or in
+     libraries.
+
+     The procedure must be called collectively by all  processes.
+     A  change  in  tag size takes effect in the following super-
+     step; it then becomes _v_a_l_i_d.
+
+     The value of _t_a_g__b_y_t_e_s on entry to the procedure,  specifies
+     the size of the fixed-length portion of every message in the
+     current and succeeding supersteps; the default tag  size  is
+     zero.  On return from the procedure, _t_a_g__b_y_t_e_s is changed to
+     reflect the previous value of the tag size.
+
+
+SEE ALSO
+     bsmp(3)    ,bsp_send(3),    bsp_get_tag(3),    bsp_qsize(3),
+     bsp_move(3), bsp_hpmove(3)
+
+     ``_B_S_P_l_i_b: _T_h_e _B_S_P _P_r_o_g_r_a_m_m_i_n_g _L_i_b_r_a_r_y'' Jonathan M. D. Hill,
+     Bill  McColl,  Dan  C.  Stefanescu,  Mark W. Goudreau, Kevin
+     Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and
+     Rob  Bisseling.  Parallel  Computing,  to  appear  1998. See
+     _h_t_t_p://_w_w_w._b_s_p-_w_o_r_l_d_w_i_d_e._o_r_g for more details.
+
+
+NOTES
+     i    The tag size of outgoing messages is prescribed by  the
+          tag size that is valid in the current superstep.
+
+
+     ii   The tag  size  of  messages  in  the  system  queue  is
+          prescribed by the tag size that was valid in the previ-
+          ous superstep.
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    1
+
+
+
+
+
+
+bsp_set_tagsize(3)      BSPlib FUNCTIONS       bsp_set_tagsize(3)
+
+
+
+     iii  bsp_set_tagsize(3) must be called by _a_l_l processes with
+          the  same  argument  in  the  same  superstep.  In this
+          respect, it is similar to bsp_push_reg(3).
+
+
+     iv   bsp_set_tagsize(3) takes effect in the next superstep.
+
+
+
+     v    Given a sequence of bsp_set_tagsize(3) within the  same
+          superstep,  then the value of the last of these will be
+          used as the tag size for the next superstep.
+
+
+     vi   The default tag size is 0.
+
+
+BUGS
+     Problems  and  bug  reports  should  be  mailed  to  _b_s_p_l_i_b-
+     _b_u_g_s@_c_o_m_l_a_b._o_x._a_c._u_k
+
+
+AUTHORS
+     The Oxford BSP Toolset implementation of BSPlib was  written
+     by Jonathan.Hill@comlab.ox.ac.uk
+     http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    2
+
+
+

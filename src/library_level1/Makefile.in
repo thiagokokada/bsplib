@@ -1,0 +1,272 @@
+###########################################################################
+##      Copyright (C) 1995,1996,1997 University of Oxford                ##
+##                                                                       ##
+## Permission to use, copy, modify, and distribute this software,        ##
+## and to incorporate it, in whole or in part, into other software,      ##
+## is hereby granted without fee, provided that                          ##
+##   (1) the above copyright notice and this permission notice appear in ##
+##       all copies of the source code, and the above copyright notice   ##
+##       appear in clearly visible form on all supporting documentation  ##
+##       and distribution media;                                         ##
+##   (2) modified versions of this software be accompanied by a complete ##
+##       change history describing author, date, and modifications made; ##
+##       and                                                             ##
+##   (3) any redistribution of the software, in original or modified     ##
+##       form, be without fee and subject to these same conditions.      ##
+###########################################################################
+
+
+###########################################################################
+##            D O N T  C H A N G E  A N Y T H I N G  !!                  ##
+###########################################################################
+
+SHELL      = /bin/sh
+
+prefix     = @prefix@
+exec_prefix= @exec_prefix@
+bindir     = @bindir@
+includedir = @includedir@
+libdir     = @libdir@
+top_srcdir = @top_srcdir@/../
+
+RANLIB          = @RANLIB@
+GCC             = @GCC@
+G77             = @G77@
+GPLUSPLUS       = @GPLUSPLUS@
+INSTALL         = @INSTALL@
+INSTALL_PROGRAM = @INSTALL_PROGRAM@
+INSTALL_DATA    = @INSTALL_DATA@
+
+##########################################################################
+
+# Architecture independent modules
+SRCS_LC   = bsp_bcast.lc bsp_fold_funs.lc bsp_sort.lc\
+            bsp_gather.lc bsp_scan.lc bsp_fold.lc \
+            bsp_scatter.lc bsp_fortran77.lc bsp_slg.lc
+
+SRCS_LH   = bsp_f77_names.lh bsp_level1.lh fbsp_level1.lh
+
+LIBRARIES     = 
+INCLUDES      = 
+
+#############################################################
+##             Flags and conversions                       ##
+#############################################################
+
+SRCS_O   = $(SRCS_LC:.lc=.o)
+SRCS_H   = $(SRCS_LH:.lh=.h)
+SRCS_TEX = $(SRCS_LC:.lc=.c.tex) $(SRCS_LH:.lh=.h.tex)
+
+CC       = bspfront
+
+CFLAGS_O0 = -DSANITY_CHECK  ${BUILD_DEFINES}
+CFLAGS_O1 = -O2             ${BUILD_DEFINES}
+CFLAGS_O2 = -O3 -DTURBO     ${BUILD_DEFINES}  
+
+#Default single build is for profiling
+CFLAGS          = ${CFLAGS_O0}
+LIBNAME         = "_O0"
+
+.SUFFIXES: .lc .lh .tex .c.tex .h.tex
+
+#############################################################
+##             Compilation rules                           ##
+#############################################################
+
+.lh.h:
+	litToPgm $<
+
+.lc.o:
+	${CC} ${CFLAGS} $(INCLUDES) -c $*.lc -o $*.o
+
+.lh.h.tex:
+	litToTex $<
+
+.lc.c.tex:
+	litToTex $<
+
+#############################################################
+##           Targets used to decide machine options        ##
+#############################################################
+all::
+
+machine:
+	@case `bsparch -arch` in					   \
+	SGIORIGIN) 							   \
+		make banner TYPE="machine" FOR="SGI PowerChallenge";       \
+                make ${BUILD_TYPE} AR=ar BUILD_DEFINES="-DUNDERSCORE";;    \
+                                                                           \
+	SGICHALL64) 							   \
+		make banner TYPE="machine" FOR="SGI PowerChallenge";       \
+                make ${BUILD_TYPE} AR=ar BUILD_DEFINES="-DUNDERSCORE";;    \
+                                                                           \
+	SP2)    make banner TYPE="machine" FOR="IBM Sp2";                  \
+                make ${BUILD_TYPE} AR=ar BUILD_DEFINES="";;                \
+                                                                           \
+        CONVEXSPP)							   \
+		make banner TYPE="machine" FOR="Convex SPP";               \
+                make ${BUILD_TYPE} AR=ar BUILD_DEFINES="";;                \
+                                                                           \
+	PARSYTEC)                                                          \
+                make banner TYPE="machine" FOR="Parsytec Explorer";        \
+                make ${BUILD_TYPE} AR=ar BUILD_DEFINES="";;                \
+                                                                           \
+	PARAMID)                                                           \
+                make banner TYPE="machine" FOR="Transtech Paramid";        \
+                make ${BUILD_TYPE} AR=ar860 BUILD_DEFINES="-DPARAMID";;    \
+                                                                           \
+	HITACHIMPP)                                                        \
+                make banner TYPE="machine" FOR="Hitachi SR2001";           \
+                make ${BUILD_TYPE} AR=ar BUILD_DEFINES="";;                \
+                                                                           \
+	CRAYT3D)                                                           \
+                make banner TYPE="machine" FOR="Cray T3D";                 \
+                make ${BUILD_TYPE} AR=ar                                   \
+                     BUILD_DEFINES="-DUPPERCASE -DCRAYMPP";;               \
+                                                                           \
+	CRAYT3E)                                                           \
+                make banner TYPE="machine" FOR="Cray T3E";                 \
+                make ${BUILD_TYPE} AR=ar                                   \
+                     BUILD_DEFINES="-DUPPERCASE -DCRAYMPP";;               \
+                                                                           \
+	CRAYC90)                                                           \
+                make banner TYPE="machine" FOR="Cray C90";                 \
+                make ${BUILD_TYPE} AR=ar                                   \
+                     BUILD_DEFINES="-DUPPERCASE";;                         \
+                                                                           \
+	RS6000) make banner TYPE="machine" FOR="IBM RS6000";               \
+                make ${BUILD_TYPE} AR=ar BUILD_DEFINES="";;                \
+                                                                           \
+                                                                           \
+	OSF1)   make banner TYPE="machine" FOR="Digital Alpha";            \
+                make ${BUILD_TYPE} AR=ar BUILD_DEFINES="-DUNDERSCORE";;    \
+                                                                           \
+	SGI) 							           \
+		make banner TYPE="machine" FOR="Uniprocessor SGI";         \
+                make ${BUILD_TYPE} AR=@AR@ BUILD_DEFINES="-DUNDERSCORE";;  \
+                                                                           \
+                                                                           \
+	SGIN32) 						           \
+		make banner TYPE="machine" FOR="Uniprocessor SGI -n32";    \
+                make ${BUILD_TYPE} AR=@AR@ BUILD_DEFINES="-DUNDERSCORE";;  \
+                                                                           \
+                                                                           \
+	SunOS)  make banner TYPE="machine" FOR="Sun";                      \
+                make ${BUILD_TYPE} AR=@AR@ BUILD_DEFINES="-DUNDERSCORE";;  \
+                                                                           \
+	Solaris) 							   \
+                make banner TYPE="machine" FOR="Sun Solaris";              \
+                make ${BUILD_TYPE} AR=@AR@ BUILD_DEFINES="-DUNDERSCORE";;  \
+                                                                           \
+	SolarisX86) 							   \
+                make banner TYPE="machine" FOR="Intel Solaris";            \
+                make ${BUILD_TYPE} AR=@AR@ BUILD_DEFINES="-DUNDERSCORE";;  \
+                                                                           \
+	HP) 							   	   \
+                make banner TYPE="machine" FOR="Hewlett Packard";          \
+                make ${BUILD_TYPE} AR=ar BUILD_DEFINES="";;                \
+                                                                           \
+	LINUX)  make banner TYPE="machine" FOR="Linux";                    \
+                make ${BUILD_TYPE} AR=ar 				   \
+                     BUILD_DEFINES="-DUNDERSCORE";;		           \
+									   \
+	Windows_NT) 							   \
+                make banner TYPE="machine" FOR="Windows NT PC";            \
+                make ${BUILD_TYPE} AR=@AR@                                 \
+                     BUILD_DEFINES="-DUNDERSCORE -DWindows_NT";;           \
+                                                                           \
+        *)      echo "I dont know how to BUILD for a `bsparch -arch`";     \
+		exit 1;;						   \
+        esac
+
+
+#############################################################
+##             Main Targets                                ##
+#############################################################
+
+develop:
+	@make machine BUILD_TYPE="lib"
+
+build:
+	@make machine BUILD_TYPE="realbuild"
+
+nowstartup: bsp_nowstartup.o
+	$(CC) ${CFLAGS} bsp_nowstartup.o -o bsp_nowstartup 		\
+		-fnocheckpointing -fnoprocessmigration                  \
+                -bsproundtrip 10000;		              		\
+	${INSTALL_PROGRAM} bsp_nowstartup                       	\
+        $(top_srcdir)/bin/`bsparch -arch`/bsp_nowstartup
+
+	
+	
+#############################################################
+##             Generic Compilation targets                 ##
+#############################################################
+
+objects: $(SRCS_O) $(SRCS_H)
+
+delit: $(SRCS_H)
+
+root.dvi: $(SRCS_TEX)
+	latex root.tex
+
+realbuild:
+	@make clean; 			           	\
+	make  lib CFLAGS="${CFLAGS_O0}" LIBNAME="_O0";	\
+        make clean; 			           	\
+        make  lib CFLAGS="${CFLAGS_O1}" LIBNAME="_O1";	\
+        make clean; 			           	\
+        make  lib CFLAGS="${CFLAGS_O2}" LIBNAME="_O2";	\
+        cp bsp_level1.h  ${top_srcdir}/include/;  	\
+        cp fbsp_level1.h ${top_srcdir}/include/;	\
+	if test `bsparch -device` = "MPASS_TCPIP" ||    \
+           test `bsparch -device` = "MPASS_UDPIP";  then\
+	   make nowstartup;				\
+	fi
+
+
+lib::
+	@make banner TYPE="library prefix "     			     \
+              FOR="\"${LIBPREFIX}${LIBNAME}\"; flags are ${CFLAGS}";         \
+	if [ ! -d ${top_srcdir}/lib/`bsparch -arch` ] ;                      \
+        then  mkdir -p ${top_srcdir}/lib/`bsparch -arch`; fi;                \
+	rm -f                                                                \
+     ${top_srcdir}/lib/`bsparch -arch`/libbsplevel1${LIBPREFIX}${LIBNAME}.a; \
+        if test "${G77}" = "f2c"; then                                       \
+	   make objects CFLAGS="-DF2CUNDERSCORE ${CFLAGS}";                  \
+        else								     \
+           make objects CFLAGS="${CFLAGS}";                                  \
+        fi;								     \
+        make banner TYPE="archive installation"                              \
+                    FOR="${top_srcdir}/lib/`bsparch -arch`/";                \
+	${AR} crv                                                            \
+     ${top_srcdir}/lib/`bsparch -arch`/libbsplevel1${LIBPREFIX}${LIBNAME}.a  \
+           $(SRCS_O);                                                        \
+        ${RANLIB}                                                            \
+     ${top_srcdir}/lib/`bsparch -arch`/libbsplevel1${LIBPREFIX}${LIBNAME}.a
+
+
+clean::
+	rm -f $(SRCS_O) $(BINARY_TARGET) $(SRCS_LC:.lc=.o) \
+              $(SRCS_LH:.lh=.h)$(SRCS_TEX) mon.out $(SRCS_LC:.lc=.c)
+
+banner:
+	@echo "#########################################################"; \
+        echo  "#####   ${TYPE} = ${FOR}";                                  \
+        echo  "#########################################################"
+
+
+
+#############################################################
+##             Dependencies                                ##
+#############################################################
+
+bsp_fortran.o:	   bsp_f77_names.h bsp_level1.h
+bsp_gather.o:      bsp_f77_names.h bsp_level1.h
+bsp_scan.o:        bsp_f77_names.h bsp_level1.h
+bsp_bcast.o:       bsp_f77_names.h bsp_level1.h
+bsp_dold.o:        bsp_f77_names.h bsp_level1.h
+bsp_fold_funs.o:   bsp_f77_names.h bsp_level1.h
+bsp_sort.o:        bsp_f77_names.h bsp_level1.h
+bsp_scatter.o:     bsp_f77_names.h bsp_level1.h
+bsp_slg.o:     bsp_f77_names.h bsp_level1.h

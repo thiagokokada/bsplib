@@ -1,0 +1,197 @@
+.TH "bsp_push_reg" 3 "1.4 25/9/98" "Oxford BSP Toolset" "BSPlib FUNCTIONS"
+.SH NAME
+bsp_push_reg \- register a data-structure as available for direct
+remote memory access.
+
+.SH C SYNOPSIS
+.nf
+.B #include \&"bsp.h\&"
+.PP
+.BI "void bsp_push_reg (const void *" ident ", int " size ");"
+.fi
+.SH FORTRAN SYNOPSIS 
+.nf
+.BI "SUBROUTINE  bsppushreg (" ident ", " size ")"
+.BI "<TYPE>, intent(IN) :: " ident
+.BI "INTEGER, intent(IN):: " size
+.fi
+
+.SH DESCRIPTION
+
+A 
+.B bsplib(3)
+program consists of 
+.I p
+processes, each with its own local memory. The SPMD structure of such
+a program produces 
+.I p
+local instances of the various data structures used in the
+program. Although these 
+.I p 
+instances share the same name, they
+will not, in general, have the same physical address. Due to
+stack or heap allocation, or due to implementation on a
+heterogeneous architecture, one might find that the 
+.I p
+instances of variable 
+.I x
+have been allocated at up to 
+.I p
+different addresses.
+    
+To allow 
+.B bsplib(3)
+programs to execute correctly we require a mechanism for relating
+these various addresses by creating associations called 
+.I registrations\c
+\&. A registration is created when each process calls
+.B bsp_push_reg(3)
+and, respectively, provides 
+the address and the extent of a local area of memory. Both types
+of information are relevant as processes can create new
+registrations by providing the same addresses, but different
+extents. The semantics adopted for registration enables
+procedures called within supersteps to be written in a modular
+way by allowing newer registrations to temporarily replace older
+ones.  However, the scheme adopted does not impose the strict
+nesting of push-pop pairs that is normally associated with a
+stack. This provides the benefits of encapsulation provided by a
+stack, whilst providing the flexibility associated with a
+heap-based discipline. In line with superstep semantics,
+.I "registration takes effect at the "
+.I "next barrier synchronisation."
+
+A registration association is destroyed when each process calls
+.B bsp_pop_reg(3)
+and provides the address of its local area participating in that
+registration. A runtime error will be raised if these addresses (i.e.,
+one address per process) do not refer to the same registration
+association. In line with superstep semantics, 
+.I "de-registration takes effect at the "
+.I "next barrier synchronisation."
+
+.SH EXAMPLES
+
+.IP 1)
+Each process dynamically allocates  
+.I (bsp_pid()+1)
+integers using 
+.B calloc(3) 
+and registers the data as available for remote memory access.
+
+.nf
+.B int *data;
+.B data = calloc(bsp_pid()+1,sizeof(int));
+.B bsp_push_reg(data,(bsp_pid()+1)*sizeof(int));
+.B bsp_sync();
+.fi
+
+.IP 2)
+Consider the following two pieces of code being executed on two
+different processors:
+
+.nf
+.I On process 0                        
+.B int x,y;  
+.B x = 1;     
+.B y = 2;                            
+.B bsp_push_reg(&x,sizeof(int));        
+.B bsp_sync();                              
+.B bsp_put(1,&y,&x,0,sizeof(int));
+.B bsp_sync();                         
+.fi
+
+.nf
+.I On Process 1
+.B int x;
+.B x = 3;
+.B y = 4;
+.B bsp_push_reg(&x,sizeof(int));
+.B bsp_sync();
+.B bsp_sync();
+.fi
+
+Both process 0 and process 1 register
+.I x
+in their first slot. When process 0 executes a 
+.B bsp_put(3)
+using the variable
+.I x
+as the destination region name, this is mapped to the region whose
+address is associated with the first slot in Process 1. Therefore,
+after the last synchronisation identified by 
+.B bsp_sync(3)\c
+\&, on process 0 
+.I x=1
+and 
+.I y=2\c
+\&, and on process 1
+.I x=2
+and 
+.I y=4\c
+\&.
+
+.SH "SEE ALSO"
+drma(3), bsp_pop_reg(3), bsp_put(3), bsp_hpput(3), bsp_get(3),
+bsp_hpget(3)
+
+.I ``BSPlib: The BSP Programming Library''
+Jonathan M. D. Hill, Bill McColl, Dan C. Stefanescu, Mark W. Goudreau,
+Kevin Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and Rob
+Bisseling. Parallel Computing, to appear 1998. See
+.I http://www.bsp-worldwide.org
+for more details.
+
+.SH NOTES
+
+.IP i 
+.B bsp_push_reg(3)
+takes effect at the end of the superstep. 
+.B DRMA(3)
+operations may use the registered areas from the start of the next
+superstep.
+
+.IP ii
+.B DRMA(3)
+operations are allowed to use memory areas that have been
+de-registered in the same superstep, as
+.B bsp_pop_reg(3) 
+only takes effect at the end of a superstep.
+      
+.IP iii
+Communication into unregistered memory areas raises a runtime error.
+      
+.IP iv
+Registration is a property of an area of memory and not a reference to
+the memory.  There can therefore be many references (i.e., pointers)
+to a registered memory area.
+    
+.IP v
+If only a subset of the processes are required to register data
+because a program may have no concept of a 
+.I commonly named
+memory area on all processes, then all processes must
+call 
+.B bsp_push_reg(3)
+although some may register the memory area NULL. This memory area is
+regarded as unregistered.
+
+.IP vi 
+While registration is designed for ``full duplex'' communication, a
+process can do half duplex communication by, appropriately,
+registering an area of size 0.
+
+.IP vii
+It is an error to provide negative values for the size of the
+registration area.
+
+.SH BUGS
+Problems and bug reports should be mailed to 
+.I bsplib-bugs@comlab.ox.ac.uk
+
+.SH AUTHORS
+The Oxford BSP Toolset implementation of BSPlib was written by
+Jonathan.Hill@comlab.ox.ac.uk
+.br
+.B http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+

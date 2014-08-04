@@ -1,0 +1,32 @@
+#! /users/jonh/bin/perl
+
+while ($_ = $ARGV[0]) {
+  $infile = shift(@ARGV);
+  $infile =~ /\.l(\w+)$/ && ($outfile = $` . "." . $1);
+  &lit2pgm($infile,$outfile);
+}
+
+sub lit2pgm {
+  local($infile,$outfile) = @_;
+
+  open(PGM,$infile)        || die "litTopgm: Unable to open $infile";
+  open(OUT,"> " . $outfile)|| die "litTopgm: Unable to open $outfile";
+  while (<PGM>) {
+    if (/^\s*\\begin\{code\}/) {
+       print OUT $';
+       while (<PGM>) {
+         if (/^\s*\\end{code}\s*$/) {
+            print OUT "\n";
+            last;
+         } else {
+            print OUT;
+         }
+       }
+    } else {
+      print OUT"\n";
+    }
+  }
+  close(PGM);
+  close(OUT);
+
+}

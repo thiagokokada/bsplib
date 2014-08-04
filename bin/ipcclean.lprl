@@ -1,0 +1,76 @@
+\begin{code}#! @PERL@
+\end{code}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+This program cleans up the system semaphore set and shared memory.
+\begin{code}
+($Pgm = $0) =~ s|.*/||;
+$Verbose = 0;
+
+
+  arg: while ($_ = $ARGV[0]) {
+  shift(@ARGV);
+  /^-v$/    && do {$Verbose = 1; next arg;};
+  }
+  &main();
+  exit(0);
+\end{code}
+
+\begin{code}
+sub main {
+  local($userid)    =$ENV{'LOGNAME'};
+  local(@memory)    =();
+  local(@semaphores)=();
+  local($command, $return_val);
+
+  if (!open(FILEHANDLE,"ipcs |")) {
+    print STDERR "$Pgm: Unable to clean semaphores. Use ipcs and ipcrm\n";
+  }
+  while (<FILEHANDLE>) {
+    if (/$userid/) {
+      push(@memory,    int($1)) if /^\s*m\s*(\d+)\s/;
+      push(@semaphores,int($1)) if /^\s*s\s*(\d+)\s/;
+    } 
+  }
+  close(FILEHANDLE);
+  if ($Verbose) {
+    print "$Pgm: shared memory to clean:",&myjoin(' ' ,@memory), "\n";
+    print "$Pgm: semaphores to clean:",   &myjoin(' ' ,@semaphores), "\n";
+  }
+  $command = "ipcrm " . &myjoin(' -m ',@memory) . &myjoin(' -s ',@semaphores);
+  system($command);
+  $return_val=$?;
+  if ($? !=0) {
+    print STDERR "$Pgm: execution of ipcrm failed";
+    print STDERR " (program not found)\n" if $return_val == 255;
+    print STDERR " ($!)\n" if $! != 0;
+  }  
+}
+\end{code}
+
+\begin{code}
+sub myjoin {
+  local($prefix,@list) = @_;
+
+  if ($#list<0) {
+    return "";
+  } else {
+    return ($prefix . join($prefix,@list));
+  }
+}
+\end{code}
+    

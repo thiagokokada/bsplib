@@ -1,0 +1,149 @@
+head	1.1;
+access;
+symbols;
+locks
+	jonh:1.1; strict;
+comment	@% @;
+
+
+1.1
+date	95.08.31.16.36.43;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995, University of Oxford                         %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id$
+% $Log$
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+\chapter{High level BSP operations} 
+\label{sect:bspirix}
+
+Operations such as \texttt{reduce}, \texttt{broadcast} and
+\texttt{scan} would normally be defined in terms of the BSP library.
+The routines given here are built directly ontop of the message
+passing library available on the SP2.
+
+\begin{code}
+#include "bsp_lib.h"
+#include "bsp_profile.h"
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Broadcast function}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+src and dst may be aliased.
+\begin{code}
+void bsp_broadcast(int pid, void *src, void *dst, int nbytes) {
+  int errno;
+
+#ifdef PROFILE
+  if (_bsp_pid==pid) _bspprof.broadcast_nbytes+=nbytes;
+#endif
+#ifdef SANITY_CHECK
+  if (bsp_sumI(pid) != (pid * _bsp_nprocs))
+    bsp_error("{bsp_broadcast} the broadcasting pid is not constant "
+              "on all the processors");
+
+  if (bsp_sumI(nbytes) != (nbytes * _bsp_nprocs))
+    bsp_error("{bsp_broadcast} the broadcasting nbytes is not constant "
+              "on all the processors");
+#endif
+  if (pid==_bsp_pid) {
+    memcpy(dst,src,nbytes);
+    errno = messg_broadcast(src,nbytes,pid);
+    if (errno) 
+      bsp_error("{bsp_broadcast}: couldn't broadcast");
+  } else {
+    errno = messg_broadcast(dst,nbytes,pid);
+    if (errno) 
+      bsp_error("{bsp_broadcast}: failed to receive broadcast");
+  }
+}
+\end{code}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Gather  function}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Inverse of gather. \texttt{src} on each processor is put into
+\texttt{offset} bytes from \texttt{dst} on \texttt{pid}.
+\texttt{offset} is calculated with respect to the sending machine.
+Its semantics are as if it where implemented as:
+
+\begin{verbatim}
+void bsp_gather(int pid, void *src, void *dst, int nbytes) {
+#ifdef PROFILE
+  if (_bsp_pid==pid) _bspprof.gather_nbytes+=nbytes;
+#endif
+#ifdef SANITY_CHECK
+  if (bsp_sumI(pid) != pid * _bsp_nprocs)
+    bsp_error("{bsp_gather} the broadcasting pid is not constant "
+              "on all the processors");
+
+  if (bsp_sumI(nbytes) != nbytes * _bsp_nprocs)
+    bsp_error("{bsp_gather} the broadcasting nbytes is not constant "
+              "on all the processors");
+#endif
+  bsp_sstep(100);
+     bsp_addr(0,dst);
+     _bsp_store(pid,src,0,_bsp_pid*nbytes,nbytes);
+  bsp_sstep_end(100);
+}
+\end{verbatim}
+
+
+src and dst cannot be aliased. dst is only changed on pid.
+\begin{code}
+void bsp_gather(int pid, void *src, void *dst, int nbytes) {
+  int errno;
+  void *scratch;
+
+#ifdef PROFILE
+  if (_bsp_pid==pid) _bspprof.gather_nbytes+=nbytes;
+#endif
+#ifdef SANITY_CHECK
+  if (bsp_sumI(pid) != pid * _bsp_nprocs)
+    bsp_error("{bsp_gather} the broadcasting pid is not constant "
+              "on all the processors");
+
+  if (bsp_sumI(nbytes) != nbytes * _bsp_nprocs)
+    bsp_error("{bsp_gather} the broadcasting nbytes is not constant "
+              "on all the processors");
+#endif
+  if (_bsp_pid!=pid) {
+    scratch = malloc(nbytes);
+    errno = messg_gather(pid,src,scratch,nbytes);
+    free(scratch);
+  } else {
+    errno = messg_gather(pid,src,dst,nbytes);
+  }
+  if (errno)
+    bsp_error("{bsp_gather}: failed");
+}
+\end{code}
+
+@

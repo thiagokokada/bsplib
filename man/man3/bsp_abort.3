@@ -1,0 +1,73 @@
+.TH "bsp_hpmove" 3 "1.4 25/9/98" "Oxford BSP Toolset" "BSPlib FUNCTIONS"
+.SH NAME
+bsp_abort \- stop a BSP computation
+
+.SH C SYNOPSIS
+.nf
+.B #include \&"bsp.h\&"
+.PP
+.BI "void bsp_abort(char *" format , "..." ");"
+.fi
+.SH FORTRAN SYNOPSIS
+.nf
+.BI "SUBROUTINE bspabort(" err_string ")"
+.BI "CHARACTER(*), intent(IN)::" err_string
+.fi
+
+.SH DESCRIPTION
+The function 
+.B bsp_abort
+can be used to print an error message followed by a halt of the entire
+.B bsplib(3) 
+program. The routine is designed not to require a barrier
+synchronisation of all processes. A single process in a potentially
+unique thread of control can therefore halt the entire 
+.B bsplib(3)
+program.
+
+In the C version of the function,
+.I format 
+is a C-style format string as used by 
+.B printf(3)\c
+\&. Any other arguments are interpreted in the same way as the
+variable number of arguments to 
+.B printf(3)\c
+\&.
+   
+.I err_string
+is single error string that is printed when the Fortran routine is
+executed. All computation ceases after a call to 
+.B bsp_abort\c
+\&.
+
+
+
+.SH "SEE ALSO"
+bsplib(3)
+
+.I ``BSPlib: The BSP Programming Library''
+Jonathan M. D. Hill, Bill McColl, Dan C. Stefanescu, Mark W. Goudreau,
+Kevin Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and Rob
+Bisseling. Parallel Computing, to appear 1998. See
+.I http://www.bsp-worldwide.org
+for more details.
+
+.SH NOTES
+.IP i
+If more than one process calls
+.B bsp_abort
+in the same superstep, then either one, all, or a subset of the
+processes that called 
+.B bsp_abort
+may print their format string to the terminal before stopping the
+BSPlib computation.
+
+.SH BUGS
+Problems and bug reports should be mailed to 
+.I bsplib-bugs@comlab.ox.ac.uk
+
+.SH AUTHORS
+The Oxford BSP Toolset implementation of BSPlib was written by
+Jonathan.Hill@comlab.ox.ac.uk
+.br
+.B http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html

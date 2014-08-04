@@ -1,0 +1,91 @@
+.TH "bsp_send" 3 "1.4 25/9/98" "Oxford BSP Toolset" "BSPlib FUNCTIONS"
+.SH NAME
+bsp_send \- transmit a BSMP packet to a remote process.
+
+.SH C SYNOPSIS
+.nf
+.B #include \&"bsp.h\&"
+.PP
+.BI "void bsp_send(int " pid ",const void *" tag ","
+.BI "              const void * " payload ",int " payload_bytes ");"
+.fi
+.SH FORTRAN SYNOPSIS 
+.nf
+.BI "SUBROUTINE  bspsend(" pid,tag,payload,payload_bytes)
+.BI "   INTEGER, intent(IN) :: " pid
+.BI "   <TYPE>,  intent(IN) :: " tag
+.BI "   <TYPE>,  intent(IN) :: " payload
+.BI "   INTEGER, intent(IN) :: " payload_bytes
+.fi
+
+.SH DESCRIPTION
+
+The 
+.B bsp_send(3)
+operation is used to send a message that consists of a tag and a
+payload to a specified destination process.  The destination process
+will be able to access the message during the subsequent
+superstep. The
+.B bsp_send(3)
+operation copies both the tag and the payload of the message before
+returning.  The 
+.I tag
+and 
+.I payload 
+variables can therefore be changed by the
+user immediately after the
+.B bsp_send(3)\c
+\&.  Messages sent by
+.B bsp_send(3)
+are 
+.I not
+guaranteed to be received in any particular order by the destination
+process.  This is the case even for successive calls of
+.B bsp_send(3)
+from one process with the same value for 
+.I pid\c
+\&.
+
+.SH "SEE ALSO"
+bsmp(3), bsp_set_tagsize(3), bsp_qsize(3), bsp_get_tag(3), bsp_move(3)
+
+.I ``BSPlib: The BSP Programming Library''
+Jonathan M. D. Hill, Bill McColl, Dan C. Stefanescu, Mark W. Goudreau,
+Kevin Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and Rob
+Bisseling. Parallel Computing, to appear 1998. See
+.I http://www.bsp-worldwide.org
+for more details.
+
+.SH NOTES
+
+.IP i
+The size of the tag used in 
+.B bsp_send(3)
+will depend upon either the size of tag that was active in the
+previous superstep, or the size specified by the last
+.B bsp_set_tagsize(3)
+.I "issued in the previous superstep."
+
+.IP ii
+If the payload size is zero, then a message that only contains the tag
+will be sent. Similarly, if the tag size is zero, then a message just
+containing the payload will be sent. If both the tag and payload are
+zero, a message that contains neither tag nor payload 
+.I will be sent.
+
+.IP iii
+If the tag size is zero, then the 
+.I tag
+argument may be NULL. Similarly, if the payload size is zero, then the
+.I payload
+argument may be NULL.
+
+.SH BUGS
+Problems and bug reports should be mailed to 
+.I bsplib-bugs@comlab.ox.ac.uk
+
+.SH AUTHORS
+The Oxford BSP Toolset implementation of BSPlib was written by
+Jonathan.Hill@comlab.ox.ac.uk
+.br
+.B http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html

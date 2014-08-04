@@ -1,0 +1,208 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1997 Stephen Donaldson                             %%
+%%                      &  The University of Oxford                      %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsptcperrs.lh,v 1.1 1997/07/11 10:28:20 jonh Exp $
+% $Log: bsptcperrs.lh,v $
+% Revision 1.1  1997/07/11 10:28:20  jonh
+% Initial revision
+%
+
+Functions to guard the results of library calls.  Macros
+\texttt{ABORT\_MSG}, \texttt{ABORT\_MSG\_OK} and \texttt{ABORT\_EXIT}
+must be defined.  \texttt{ABORT\_MSG\_OK} should evaluate to nonzero when the
+preferred method of aborting execution should be used. This preferred
+method should be defined by the macro \texttt{ABORT\_EXIT} and the method of
+sending the abort message should be defined by \texttt{ABORT\_MSG}.
+
+\begin{code}
+static int   guardcache_fn, guardcache_val;
+static void *guardcache_fnp;
+\end{code}
+
+\begin{code}
+#ifndef GUARDEQ
+#define GUARDEQ(fn,val,name)                              \
+   ((  guardcache_fn=(fn),guardcache_val=(val)),          \
+    (  (guardcache_fn!=guardcache_val)?                   \
+          (_GUARDEQ(guardcache_fn,guardcache_val,name)):  \
+          (guardcache_fn)))
+
+static int _GUARDEQ(int fn, int val, char *name) 
+   { 
+   int err;
+   char msgbuf[BSPTCP_BUFF_LEN], hostname[BSPTCP_STR_LEN];
+
+   err = errno;
+   if (fn != val) 
+      {
+      if (gethostname(hostname,BSPTCP_STR_LEN)) 
+         strcpy(hostname,"localhost");
+
+      if (ABORT_MSG_OK)
+         { 
+         sprintf(msgbuf,"%s(%s): error in %s call ",
+		 BSPTCP_COMPONENT,hostname,name); 
+         ABORT_MSG(msgbuf);
+         sprintf(msgbuf,"(expected %d, received %d, errno = %d).\n",
+            val,fn,err);
+         ABORT_MSG(msgbuf);
+         ABORT_EXIT(1);
+         }
+      else
+         { 
+         fprintf(stderr,"%s(%s): error in %s call ",
+		 BSPTCP_COMPONENT,hostname,name); 
+         fprintf(stderr," (expected %d, received %d, errno = %d).\n",
+            val,fn,err); 
+         exit(1); 
+         } 
+      }
+   return fn;
+   }
+#endif
+\end{code}
+
+\begin{code}
+#ifndef GUARDZ
+#define GUARDZ(fn,name)     \
+   ((  guardcache_fn=(fn)), \
+    (  (guardcache_fn)?(_GUARDZ(guardcache_fn,name)):(guardcache_fn)))
+
+static int _GUARDZ(int fn, char *name) 
+   { 
+   int err;
+   char msgbuf[BSPTCP_BUFF_LEN], hostname[BSPTCP_STR_LEN];
+
+   err = errno;
+   if (fn) 
+      {
+      if (gethostname(hostname,BSPTCP_STR_LEN)) 
+         strcpy(hostname,"localhost");
+      if (ABORT_MSG_OK)
+         { 
+         sprintf(msgbuf,"%s(%s): error in %s call ",
+		 BSPTCP_COMPONENT,hostname,name); 
+         ABORT_MSG(msgbuf);
+         sprintf(msgbuf,"(result = %d, errno = %d).\n",fn,err); 
+         ABORT_MSG(msgbuf);
+         ABORT_EXIT(2);
+         }
+      else
+         { 
+         fprintf(stderr,"%s(%s): error in %s call ",
+		 BSPTCP_COMPONENT,hostname,name); 
+         fprintf(stderr,"(result = %d, errno = %d).\n",fn,err);
+	 fflush(stderr);
+         exit(3); 
+         } 
+      }
+   return fn; 
+   }
+#endif
+\end{code}
+
+\begin{code}
+#ifndef GUARDNZ
+#define GUARDNZ(fn,name)     \
+   ((  guardcache_fn=(fn)), \
+    (  (!guardcache_fn)?(_GUARDNZ(guardcache_fn,name)):(guardcache_fn)))
+
+static int _GUARDNZ(int fn, char *name) 
+   { 
+   int err;
+   char msgbuf[BSPTCP_BUFF_LEN], hostname[BSPTCP_STR_LEN];
+
+   err = errno;
+   if (!fn) 
+      {
+      if (gethostname(hostname,BSPTCP_STR_LEN)) 
+         strcpy(hostname,"localhost");
+      if (ABORT_MSG_OK)
+         { 
+         sprintf(msgbuf,"%s(%s): error in %s call ",
+		 BSPTCP_COMPONENT,hostname,name); 
+         ABORT_MSG(msgbuf);
+         sprintf(msgbuf,"(result = %d, errno = %d).\n",fn,err); 
+         ABORT_MSG(msgbuf);
+         ABORT_EXIT(2);
+         }
+      else
+         { 
+         fprintf(stderr,"%s(%s): error in %s call ",
+		 BSPTCP_COMPONENT,hostname,name); 
+         fprintf(stderr,"(result = %d, errno = %d).\n",fn,err);
+	 fflush(stderr);
+         exit(4); 
+         } 
+      }
+   return fn; 
+   }
+#endif
+\end{code}
+
+\begin{code}
+#ifndef GUARDNN
+#define GUARDNN(fn,name)     \
+   ((  guardcache_fn=(fn)), \
+    (  (guardcache_fn<0)?(_GUARDNN(guardcache_fn,name)):(guardcache_fn)))
+
+static int _GUARDNN(int fn, char *name) 
+   { 
+   int err;
+   char msgbuf[BSPTCP_BUFF_LEN], hostname[BSPTCP_STR_LEN];
+
+   err = errno;
+   if (fn < 0) 
+      {
+      if (gethostname(hostname,BSPTCP_STR_LEN)) 
+         strcpy(hostname,"localhost");
+      if (ABORT_MSG_OK)
+         { 
+         sprintf(msgbuf,"%s(%s): error in %s call ",
+		 BSPTCP_COMPONENT,hostname,name); 
+         ABORT_MSG(msgbuf);
+         sprintf(msgbuf,"(result = %d, errno = %d).\n",fn,err); 
+         ABORT_MSG(msgbuf);
+         ABORT_EXIT(3);
+         } 
+      else
+         {
+         fprintf(stderr,"%s(%s): error in %s call ",
+		 BSPTCP_COMPONENT,hostname,name); 
+         fprintf(stderr,"(result = %d, errno = %d).\n",fn,err); 
+         exit(3);
+         }
+      }
+   return fn; 
+   }
+#endif
+\end{code}
+
+\begin{code}
+#ifndef GUARDNZP
+#define GUARDNZP(fn,name)                                      \
+   ((  guardcache_fnp=(fn)),                                   \
+    (  (guardcache_fnp==NULL)?(_GUARDNZP(guardcache_fnp,name)):\
+                              (guardcache_fnp)))
+
+static void *_GUARDNZP(void *fn, char *name)
+   {
+   GUARDZ(fn == NULL,name);
+   return fn;
+   }
+#endif
+\end{code}

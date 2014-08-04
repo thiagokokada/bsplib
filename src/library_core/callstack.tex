@@ -1,0 +1,46 @@
+\documentclass[12pt]{report}
+\usepackage{draft}
+\usepackage{a4wide}
+\usepackage{lit}
+
+%\nofiles
+%\usepackage{2up} \source{1000}{210mm}{293mm}
+%\target{833}{293mm}{210mm} \targetlayout{twosided} \special{landscape}
+
+\newcommand{\bsplib}{\textsl{BSPlib}}
+\newcommand{\nhalf}{n_{\frac{1}{2}}}
+\newcommand{\ToDo}[1]{\textbf{TODO:}\emph{#1}}
+\begin{document}
+\title{Call stack profiling}
+\author{Vasil P Vasilev\footnote{\texttt{m95vpv@comlab.ox.ac.uk}}\\
+        Oxford Parallel, Oxford University Computing Laboratory}
+\maketitle
+
+\tableofcontents
+
+\chapter*{Copyright notice}
+\centerline{Copyright \copyright 1995,1996,1997 University of Oxford.}
+\vspace{2ex}
+
+\noindent Permission to use, copy, modify, and distribute this
+software, and to incorporate it, in whole or in part, into other
+software, is hereby granted without fee, provided that:
+\begin{enumerate}
+\item the above copyright notice and this permission notice appear in
+all copies of the source code, and the above copyright notice appear
+in clearly visible form on all supporting documentation and
+distribution media;
+
+\item modified versions of this software be accompanied by a complete
+change history describing author, date, and modifications made; and 
+
+\item any redistribution of the software, in original or modified form, be without fee and subject to these same conditions.
+\end{enumerate}
+\clearpage
+
+	\input{bsp_callstack.h.tex}
+	\input{bsp_callstack.c.tex}
+
+\bibliographystyle{alpha}
+\bibliography{bsp}
+\end{document}

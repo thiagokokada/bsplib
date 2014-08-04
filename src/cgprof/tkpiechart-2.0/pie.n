@@ -1,0 +1,73 @@
+' $Id: pie.n,v 1.9 1995/10/17 14:59:30 jfontain Exp $
+.TH pie tk
+.BS
+.SH NAME
+pie \- pie with slices class
+.SH SYNOPSIS
+\fBnew pie \fIcanvasPathName x y width height ?options?\fR
+.in
+\fBdelete pie \fIpieId\fR
+.SH DESCRIPTION
+A pie object is used to visualize a set of values, usually as shares of a total. Each value is represented by a colored slice, which may have a 2 dimensional or 3 dimensional look with a thick edge. Each slice is associated with a label containing text describing the meaning of the value, and a numerical field showing the percentage taken by the slice. The labels are placed according to the \fB-labeller\fR option. Each label color matches its related slice. The pie and its labels are implemented with \fBcanvas\fR items.
+.PP
+The \fBpie\fR constructor creates the pie itself and its background slice within the \fIcanvasPathName\fR canvas. The \fBnew pie\fR instruction returns a unique object identifier, later used for creating slices, resizing them and ultimately deleting the pie object itself, using the \fBdelete pie\fR instruction. At the time the pie is created, the \fIcanvasPathName\fR widget must exist.
+.PP
+Slices colors are automatically generated, using a default color list for all pies, unless another list is used (see the OPTIONS section). When a 3D look is used, the slice edge is darker than its top and uses the same color tone.
+.PP
+When deleted, all the canvas items composing the pie and its labels are destroyed.
+.SH CREATION PARAMETERS
+The constructor takes several arguments: the parent canvas, the pie coordinates and sizes, and some options.
+.PP
+The pie coordinates are those of the upper-left corner of the bounding region that encloses the pie and its labels. The coordinates can be retrieved using the pie tag (see the TAGS section), which can be used to move the pie using the normal \fBcanvas\fR facilities.
+.PP
+The graphical part of the pie is defined using the size parameters, and has its own tag. The width and height parameters define the elliptical shape of the pie. These values may be specified in any of the forms described in the SIZES section below.
+.SH OPTIONS
+\fB-background\fR
+.PP
+Slices may or may not fill up the 100% of the pie. The unoccupied part of the pie is a slice that takes 100% of the pie. It is by default transparent with a black border. The color of this background slice may be set by the user using color names as in the \fB-background\fR standard option (see the \fBoptions\fR manual page for more details). When the pie has a 3D look, as for all slices, the background slice edge is darker than its top and uses the same color tone.
+.PP
+\fB-colors\fR
+.PP
+Specifies a list of colors for slices. In this case, the slice colors will successively be drawn from the list in the list order, circling through if there are more slices than colors in the list. Colors are specified in the same format as the \fB-background\fR option.
+.PP
+\fB-labeller\fR
+.PP
+Specifies a placer object for the slice labels, so that, for example, slice values may be placed next to them. If not specified, the \fBpieBoxLabeller\fR (see corresponding manual page) is used, the other option being the \fBpiePeripheralLabeller\fR class. Each labeller has a specific behavior which may be set through its constructor options (see \fBboxlabel\fR and \fBperilabel\fR labellers manual pages). The labeller object is automatically deleted when the pie object is itself deleted.
+.PP
+\fB-thickness\fR
+.PP
+The thickness is set to 0 by default, giving the pie a simple 2D shape, faster to display. A positive thickness value will give the pie a 3D look with matched darker colors for the slices edges. These values may be specified in any of the forms described in the SIZES section below.
+.SH TAGS
+The whole pie, the pie graphics (all slices), and each slice have the following specific tags (see the \fBcanvas\fR manual page ITEM IDS AND TAGS section for more information):
+.PP
+\fBpie(\fI$pieId\fB)\fR
+.in
+\fBpieGraphics(\fI$pieId\fB)\fR
+.in
+\fBslice(\fI$sliceId\fB)\fR
+.PP
+For example, the whole pie can be moved using the \fBcanvas move\fR command on the pie tag, or bindings on slices can be set using the slice tags.
+.SH SLICE CREATION
+Slices are created using:
+.PP
+\fBpie::newSlice \fIpieId ?labelText?\fR
+.PP
+The slice color is automatically allocated and the slice label and its current slice size in % is placed within one of the 2 labels columns below the pie graphics. The slice itself is placed after (clockwise) the existing slices. A unique slice integer object identifier is returned: it will be used for sizing and resizing the slice.
+.PP
+If the label text is not specified, it will be set to "slice n", n being the number of the slice in the order of creation (first slice is number 1).
+.SH SLICE RESIZING
+Slices are sized and resized using:
+.PP
+\fBpie::sizeSlice \fIpieId sliceId unitShare ?displayedValue?\fR
+.PP
+The slice is then automatically recalculated so it occupies the proper share of the whole pie. The \fIunitShare\fR parameter is a floating point number expressed in share (between 0 and 1) of the whole pie. The following slices (clockwise) are moved to accomodate the new slice size. The slice size value next to the slice label is also updated with the new share value or \fIdisplayedValue\fR if present.
+.SH SIZES
+All sizes related to pies are stored as floating-point numbers. The coordinates and sizes are specified in screen units, which are floating-point numbers optionally followed by one of several letters as specified in the \fBcanvas\fR COORDINATES manual section.
+.SH LIMITATIONS
+If the number of slices is too big, identical colors will be used for some of the slices. You may set your own color slices in this case.
+.in
+There is no way to delete a slice.
+.in
+Pie resizing is not implemented (maybe when and if \fBcanvas\fR coordinate system scaling is implemented).
+.SH KEYWORDS
+pie, boxlabel, perilabel, slice, canvas, new, delete

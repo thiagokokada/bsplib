@@ -1,0 +1,93 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997,1998 University of Oxford           %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+#include "bsp_lib.h"
+#include "bsp_contentionfree.h"
+_BSPcontention contentionfree;
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Contention free communication}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Use a magic square of size $p-1$ as the basis for contention free
+routing. Randomly generate a number of squares. The contention levels are:
+\begin{description}
+\item Make contention wherever possible
+\item Latin squares contention removal
+\end{description}
+
+\begin{code}
+void config_contention_free_communication() {
+  int i,j,k,size,temp;
+
+  size = CONTENTION_FREE_INIT_FREQ + CONTENTION_FREE_RANDOM_SIZE;
+
+  contentionfree.size=(_bsp_nprocs > 1)?(size*(_bsp_nprocs-1)):size;
+  contentionfree.next=0;
+  contentionfree.last=0;
+
+  contentionfree.randoms 
+    = CALLOC(contentionfree.size,SIZEOF(int));
+  if (contentionfree.randoms==NULL)
+    bsp_abort("{config_contention_free} failed to alloc %d bytes",
+              contentionfree.size);
+  
+  contentionfree.size -= (_bsp_nprocs-1)*CONTENTION_FREE_INIT_FREQ;
+
+  if (CONTENTION_REMOVAL_NONE()) {
+    i=0;
+    for(j=0;j<size;j++) {
+      for(k=0;k<_bsp_nprocs;k++) {
+        if (k!=_bsp_pid)
+          contentionfree.randoms[i++]=k;
+      }
+    }
+
+  } else if (CONTENTION_REMOVAL_ALL()) {
+    /* generate a repetitive contention free permutation. */
+    i=0;
+    for(j=0;j<size;j++) {
+      for(k=1;k<_bsp_nprocs;k++) {
+        contentionfree.randoms[i++]=(_bsp_pid+k)%_bsp_nprocs;
+      }
+    }
+
+    /* Randomise based upon different latin squares. Use a fixed seed so all
+       processors generate the same sequence*/
+
+    RAND_SEED(0);  
+    for(j=0;j<size;j++) {
+      for(k=0;k<(_bsp_nprocs-1);k++) {
+        i = RAND() % (_bsp_nprocs-1);
+        temp = contentionfree.randoms[(j*(_bsp_nprocs-1))+i];
+        contentionfree.randoms[(j*(_bsp_nprocs-1))+i] 
+          = contentionfree.randoms[(j*(_bsp_nprocs-1))+k];
+        contentionfree.randoms[(j*(_bsp_nprocs-1))+k]=temp;
+      } 
+    }
+  
+  } else {
+    bsp_abort("{config_contention_free_comm} unknown option");
+  }
+}
+\end{code}
+  
+      
+    
+
+  

@@ -1,0 +1,132 @@
+
+
+
+bsprun(1)                 User Commands                 bsprun(1)
+
+
+
+NAME
+     bsprun - Initiates the parallel execution of a BSP job.
+
+
+SYNOPSIS
+     bsprun[  -v  ]  [  -npes  number  ][  -local  ][  -nolocal][
+     -noload][ -splitio ] _p_r_o_g_r_a_m _c_o_m_m_a_n_d-_l_i_n_e-_o_p_t_i_o_n_s
+
+
+DESCRIPTION
+     The purpose of this command is to hide the machine specifics
+     of starting parallel jobs. The programmer specifies with the
+     -_n_p_e_s option an  _u_p_p_e_r  _b_o_u_n_d  of  the  number  of  parallel
+     processes  to  be spawned by a program. This value doesn not
+     override the value specified by _b_s_p__b_e_g_i_n(_3).
+
+
+OPTIONS
+     -v    Print (on standard error output) the  phases  involved
+          in the execution of the command.
+
+     -help
+          Print this manual page on standard output.
+
+     -local
+          In the  TCP/IP  implementation  of  the  library,  this
+          option  enforces  process  zero  to be on the processor
+          that initiates the computation.
+
+
+     -nolocal
+          In the  TCP/IP  implementation  of  the  library,  this
+          option enforces process zero to be on a processor other
+          than the one that initiates the computation.
+
+
+     -noload
+          In the TCP/IP implementation of the library,  the  load
+          daemon  will  not be used to determine which processors
+          should be spawned. Processors  will  be  tried  in  the
+          order specified by the ~/.bsptcphosts file.
+
+
+     -npes number
+          Spawn at most _n_u_m_b_e_r  BSP  processes  in  parallel.  If
+          there  are _P physical parallel processes available, and
+          _p processes are spawned by  _b_s_p__b_e_g_i_n(_3),  then  the  _p
+          processes  are  allocated among the _P processors evenly
+          (where _1<=_p<=_n_u_m_b_e_r ).
+
+     -splitio
+          This option is intended  to  help  the  user  determine
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    1
+
+
+
+
+
+
+bsprun(1)                 User Commands                 bsprun(1)
+
+
+
+          which  process  printed  data to either standard out or
+          error. A banner of the form:
+
+          --- pine.comlab.ox.ac.uk BSP pid 2 - stdout ---
+
+          will be printed  whenever  the  source  pid  or  stream
+          changes.  Note,  this  option is only available on some
+          platforms.
+
+
+NOTES
+     The environment variable _B_S_P__P_R_O_C_S can be used in preference
+     to the option -_n_p_e_s.
+
+
+SEE ALSO
+     bsplib(3)
+
+     The Oxford BSP toolset web pages can be found  at:
+     _h_t_t_p://_w_w_w._b_s_p-_w_o_r_l_d_w_i_d_e._o_r_g/_i_m_p_l_m_n_t_s/_o_x_t_o_o_l/
+
+
+BUGS
+     Problems  and  bug  reports  should  be  mailed  to  _b_s_p_l_i_b-
+     _b_u_g_s@_c_o_m_l_a_b._o_x._a_c._u_k
+
+
+AUTHORS
+     Jonathan.Hill@comlab.ox.ac.uk
+
+     http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    2
+
+
+

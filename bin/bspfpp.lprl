@@ -1,0 +1,158 @@
+\begin{code}#! @PERL@
+\end{code}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bspfpp.lprl,v 1.2 1996/05/24 11:40:24 jonh Exp jonh $
+% $Log: bspfpp.lprl,v $
+# Revision 1.2  1996/05/24  11:40:24  jonh
+# Just about to simplify
+#
+# Revision 1.1  1996/04/03  11:32:16  jonh
+# Initial revision
+#
+
+\begin{code}
+($Pgm = $0) =~ s|.*/||;
+&main();
+exit(0);
+\end{code}
+
+
+\begin{code}
+sub main {
+  local($going);
+  if ($#ARGV<2) {
+    print STDERR"usage: bspfpp  realname infile outfile\n";
+    exit(1);
+  } else {
+    $going=1;
+    $realname = $ARGV[0];
+    $infile   = $ARGV[1];
+    $outfile  = $ARGV[2];
+    &insertProfileInfo($realname,$infile,$outfile); 
+  }
+}
+\end{code}
+
+\begin{code}
+sub insertProfileInfo {
+  local($realname,$convin,$convout) = @_;
+  local($argument,$brackets,$seen,$lastbracket);
+
+  local($need_fbsp_win32_at_head)= "@NEED_FBSP_WIN32_AT_HEAD@" eq "1";
+
+  if (!open(INFILE,$convin)) {
+    printf STDERR "$Pgm:insertProf: unable to open $convin for reading\n";
+    exit(1);
+  }
+
+  if (!open(OUTFILE,"> ". $convout)) {
+    printf STDERR "$Pgm: unable to open $convout for writing\n";
+    exit(1);
+  } 
+  if($need_fbsp_win32_at_head== 1) {
+    print OUTFILE "      INCLUDE 'fbsp_win32.h'\n";
+  }
+  while($line = <INFILE>) {
+    if (($line =~ /^\s*CALL\s+bspsync\s*$/i) ||
+        ($line =~ /^\s*CALL\s+bspsync\s*\(\s*\)\s*$/i)) {
+      print OUTFILE "        CALL cppsync($.,'$realname')\n";
+
+    } elsif ($line =~ /^\s*CALL\s+bsp\_sstep\_end\s*\(.*\)\s*$/i) {
+      print OUTFILE "        CALL cppsync($.,'$realname')\n";
+
+    } elsif ($line=~/^\s*CALL\s+bsp(sync\_number|put|get|hpput|hpget|pushreg|popreg|settagsize|gettagsize|send|move|qsize)\(/i) {
+      $seen        = "        CALL cpp$1(";
+      $lastbracket = "";
+      $argument    = $';
+      $brackets    = 1;
+      while ($brackets>0) {
+        if ($argument =~ /(\(|\))/) {
+          $brackets++ if ($1 eq "(");
+          $brackets-- if ($1 eq ")");
+          $seen       .= $lastbracket . $`;
+          $lastbracket = $1;
+          $argument    = $';
+        } else {
+          print OUTFILE $seen , $lastbracket, $argument;
+          ($line= <INFILE>) || ($brackets=0);
+          $argument    = $line;
+          $seen        = "";
+          $lastbracket = "";
+        }
+      }
+      print OUTFILE "$seen,\n",
+                    "     + $.,'$realname')$argument\n";
+        
+    } else {
+      print OUTFILE $line; 
+    }
+  }
+  close(INFILE);
+  close(OUTFILE);
+}
+\end{code}
+
+\begin{code}
+sub grabArguments {
+   local($line)=$_[0];
+   local($after_close);
+   local($inside_brackets);
+   local($level) = 1;
+   local($char);
+   
+   while ($level != 0) {
+     if      ($line =~ /\(|\)/ ) {
+       if ($& eq "(") {
+         $level++;
+       } else {
+         $level--;
+       }
+       $inside_brackets .= $` . $&;
+       $line = $';
+     } else { 
+       $inside_brackets .= $line;
+       $line = <INFILE>;
+       $linenumber++;
+     }
+   }
+   chop($inside_brackets);
+   $after_close = $line;
+
+   $level            =0;
+   local(@arguments) =();
+   local($word)      ="";
+   
+   foreach $char (split(//,$inside_brackets)) {
+      if ("$char" eq "(") {
+         $level++;
+         $word .= "$char";
+      } elsif ("$char" eq ")") {
+         $level--;
+         $word .= "$char";
+      } elsif (("$char" eq ",") && ($level==0)) {
+        push(@arguments,$word);
+        $word="";
+      } else {
+        $word .= "$char";
+      }        
+   }
+   push(@arguments,$word);
+   push(@arguments,$after_close);
+   return(@arguments);
+}
+\end{code}

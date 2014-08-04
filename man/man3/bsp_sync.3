@@ -1,0 +1,114 @@
+.TH "bsp_sync" 3 "1.4 25/9/98" "Oxford BSP Toolset" "BSPlib FUNCTIONS"
+.SH NAME
+bsp_sync \- end of a superstep.
+
+.SH C SYNOPSIS
+.nf
+.B #include \&"bsp.h\&"
+.PP
+.B void bsp_sync()
+.fi
+.SH FORTRAN SYNOPSIS 
+.nf
+.BI "SUBROUTINE  bspsync()
+.fi
+
+.SH DESCRIPTION
+A 
+.B bsplib(3)
+calculation consists of a sequence of supersteps. During a superstep
+each process can perform a number of computations on data held locally
+at the start of superstep and may communicate data to other
+processes using either
+.B bsp_put(3), bsp_get(3), 
+.B bsp_hpput(3), bsp_hpget(3), 
+or
+.B bsp_send(3)\c
+\&.  Any communications within a superstep are guaranteed to occur by
+the end of the superstep, where the
+.B bsp_nprocs(3)
+processes synchronise at a barrier. The end of one superstep and the
+start of the next is identified by a call to the library procedure
+.B bsp_sync\c
+\&. Communication initiated during a superstep is 
+.I not guaranteed
+to occur until 
+.B bsp_sync
+is executed; this is even the case for the unbuffered variants of
+communication (i.e., 
+.B bsp_hpput(3)\c
+\&)
+.
+.SH EXAMPLE
+.IP 1) Unlike the previous examples of ``Hello World'' programs (see
+.B bsp_begin(3)
+and
+.B bsp_init(3)\c
+\&), the following program
+.I attempts
+(it is not guaranteed) to serialise the printing by ensuring each
+process prints its output in turn. This is done by performing 
+.I p
+iterations, each separated by a barrier synchronisation, where process
+.I i
+prints ``Hello BSP Worldwide'' during iteration
+.I i\c
+\&.
+
+.nf
+void main(void) {
+  int i;
+  bsp_begin(bsp_nprocs());
+    for(i=0; i<bsp_nprocs(); i++) {
+      if (bsp_pid()==i) 
+        printf("Hello BSP Worldwide from process %d of %d\n",
+               i,bsp_nprocs()); 
+      fflush(stdout);
+      bsp_sync();
+    }  
+  bsp_end();   
+}
+.fi
+
+.IP 2)
+Consider a Fortran 77 program that prints ``Hello World'' in parallel.
+.nf
+      PROGRAM MAIN
+        INCLUDE 'fbsp.h'
+        INTEGER i
+        CALL bspbegin(bspnprocs())
+          DO i=0,bspnprocs()-1
+            IF (bsppid() .eq. i) THEN
+              WRITE (*,*) 'Hello BSP Worldwide from process',
+     +                    i,' of ',bspnprocs()
+            END IF
+            CALL bspsync()
+          END DO
+        CALL bspend()
+      END
+.fi
+
+.SH "SEE ALSO"
+bsplib(3)
+
+.I ``BSPlib: The BSP Programming Library''
+Jonathan M. D. Hill, Bill McColl, Dan C. Stefanescu, Mark W. Goudreau,
+Kevin Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and Rob
+Bisseling. Parallel Computing, to appear 1998. See
+.I http://www.bsp-worldwide.org
+for more details.
+
+.SH NOTES
+.B bsplib(3) 
+has no form of subset synchronisation.
+
+.SH BUGS
+Problems and bug reports should be mailed to 
+.I bsplib-bugs@comlab.ox.ac.uk
+
+.SH AUTHORS
+The Oxford BSP Toolset implementation of BSPlib was written by
+Jonathan.Hill@comlab.ox.ac.uk
+.br
+.B http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+

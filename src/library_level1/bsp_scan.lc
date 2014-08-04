@@ -1,0 +1,227 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsp_scan_mpass.lc,v 1.2 1996/01/19 14:32:33 jonh Exp jonh $
+% $Log: bsp_scan_mpass.lc,v $
+% Revision 1.2  1996/01/19  14:32:33  jonh
+% Changing to a generic BSP implementation
+%
+% Revision 1.1  1995/08/31  16:36:03  jonh
+% Initial revision
+%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\texttt{bsp\_scan}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#include "bsp.h"
+#include "bsp_level1.h"
+#include "bsp_f77_names.h"
+#include <stdlib.h>
+#if !defined(PARAMID) && !defined(WIN32)
+#include <unistd.h>
+#endif
+#include <limits.h>
+#include <stdio.h>
+\end{code}
+
+The scan operation assumes that the destination data-structure that
+holds the scanned data has been previously registered.  There are
+currently two implementations of a scan, where the implementation
+chooses between them depending upon the values of $p$, $l$ and $g$.
+When costing the algorithm, we assume that the cost of applying the
+associative operator $\oplus$ used in the scan is proportional to the
+size $n$ of data-structure used as an argument to $\oplus$.
+
+\paragraph{Parallel prefix}
+Performs $\lceil \log p \rceil$ superstep. The cost is:
+\begin{equation}
+\label{eqn:pprefix}
+\lceil \log p \rceil 3n + \lceil \log p \rceil ng + \lceil \log p \rceil l
+\end{equation}
+
+\paragraph{Total exchange}
+Peforms two supersteps. The first registers a newly allocated table,
+  and the second performs the total exchange. The total cost is:
+\begin{equation}
+\label{eqn:totex}
+(p-1)2n + (p-1)ng + 2l
+\end{equation}
+
+When $n$ is small, then the total exchange algorithm of
+equation~\ref{eqb:totex} is more effective
+than the parallel prefix technique. The parallel prefix technique
+becomes more effective when $n$ is greater than:
+
+% Maple
+% solve(log(p)*(2*n + (n*g) + l)=((p-1)*2*n) + ((p-1)*n*g) + 2*l,{n});  
+%                                   ln(p) l - 2l
+%                        n =  -------------------------
+%                             2p + pg -2 -g -2ln(p) - ln(p)g
+
+\begin{equation}
+n > \frac {\lceil \log p\rceil l-2l}{2p + pg -2 - g - 2\lceil \log p\rceil - 
+                                    \lceil \log p \rceil g}
+\end{equation}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Initialisation}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+static int bsp_scan_breakeven;
+void bsp_scan_init() {
+  double p,l,g, top,bot,denom, log_p=0.0;
+  int ilog_p;
+
+  for(ilog_p=1;ilog_p < bsp_nprocs(); ilog_p*=2) log_p += 1.0;
+  p   = (double) bsp_nprocs();
+  l   = bsp_l();
+  g   = bsp_g(); 
+  top = 4.0*(log_p*l - 2*l);
+  bot = 2*p + p*g - 2.0 - g - 2*log_p - log_p*g;
+  bsp_scan_breakeven=(top<bot)?0:((bot<0.000001)?INT_MAX:((int)(top/bot)));
+
+#ifdef DEBUG
+  bsp_debug("{bsp_scan_init} using parallel prefix scan when n>%d bytes",
+            bsp_scan_breakeven);
+#endif
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Statistics output}
+ %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_scan_stat(FILE *fptr) {
+  fprintf(fptr,"bsp_scan cost:\n"
+               "\tmin (totex,prefix)\n"
+               "\twhere totex  = (p-1)n + (p-1)ng + 2l\n"
+               "\t      prefix = log p(n + ng +l)\n"
+               "\t      n      = size of element used in associative operator\n\n");
+  fprintf(fptr,"\tusing totex scan when n < (log(p)l-2l)/(2p+pg-2-g-2log(p)-log(p)g)\n");
+  fprintf(fptr,"\t                      n < %d bytes\n\n",bsp_scan_breakeven);
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Parallel Prefix Scan}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+static void bsp_scan_prefix(void (*op)(void*,void*,void*,int*),
+                            void *src, void *dst, int nbytes) {
+  int i, nprocs, pid;
+  char *left  = malloc(nbytes),
+       *right = malloc(nbytes);
+
+#ifdef SANITY_CHECK
+  if (left==NULL || right==NULL)
+    bsp_abort("{bsp_scan} failed to allocate %d bytes",nbytes);
+#endif
+  memcpy(right,src,nbytes);
+
+  nprocs = bsp_nprocs();
+  pid    = bsp_pid();
+  for(i=1;i<nprocs;i*=2) {
+    if (pid+i < nprocs) 
+      bsp_put(pid+i,right,dst,0,nbytes);
+    bsp_sync();
+    if (pid>=i) {
+      op(left,dst,right,&nbytes);
+      memcpy(right,left,nbytes);
+    }
+  }
+  memcpy(dst,right,nbytes);
+  free(left); free(right);
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Parallel Prefix Scan}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+static void bsp_scan_totex(void (*op)(void*,void*,void*,int*),
+                           void *src, void *dst, int nbytes) {
+  char *totex_table;
+  int i,pid, nprocs;
+
+  pid    = bsp_pid();
+  nprocs = bsp_nprocs();
+  i = (pid+1)*nbytes;
+#ifdef DEBUG
+  bsp_debug("{bsp_scan} allocating %d bytes",i);
+#endif
+  totex_table = (char*) malloc(i);
+  if (totex_table==NULL)
+    bsp_abort("{bsp_scan} unable to allocate %d bytes",i);
+  bsp_pushregister(totex_table,i);
+  bsp_sync();
+
+  for(i=pid;i<nprocs;i++)
+    bsp_hpput(i,src,totex_table,pid*nbytes,nbytes);
+  bsp_sync();
+#ifdef DEBUG
+  bsp_debug("{bsp_scan} finished total exchange part of scan");
+#endif
+#ifdef DEBUG
+    bsp_debug("Combining results from %d and %d",i,i+1);
+#endif
+  if (pid==0) memcpy(dst,src,nbytes);
+  else {
+   for(i=0;i<pid;i++) {
+     op(dst,
+         totex_table+(i*nbytes),
+         totex_table+((i+1)*nbytes),
+         &nbytes);
+      memcpy(totex_table+((i+1)*nbytes),dst,nbytes);
+    }
+  }
+  bsp_popregister(totex_table);
+  free(totex_table);
+}
+\end{code}    
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{The scan function itself}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_scan(void (*op)(void*,void*,void*,int*),
+              void *src, void *dst, int nbytes) {
+#ifdef SANITY_CHECK
+  if (!bsp_constantI(nbytes))
+    bsp_abort("{bsp_scan}\n"
+              "\tThe scanning nbytes is not constant on all the processors");
+#endif
+  if (nbytes<bsp_scan_breakeven)
+    bsp_scan_totex(op,src,dst,nbytes);
+  else
+    bsp_scan_prefix(op,src,dst,nbytes);
+}
+
+void BSPSCAN(void (*op)(void*,void*,void*,int*),
+             void *src, void *dst, int *nbytes) {
+#ifdef SANITY_CHECK
+  if (!bsp_constantI(*nbytes))
+    bsp_abort("{bsp_scan}\n"
+              "\tThe scanning nbytes is not constant on all the processors");
+#endif
+  if (*nbytes<bsp_scan_breakeven)
+    bsp_scan_totex(op,src,dst,*nbytes);
+  else
+    bsp_scan_prefix(op,src,dst,*nbytes);
+}
+\end{code}

@@ -1,0 +1,50 @@
+.TH "bspnm" 1 "1.4 25/9/98" "Oxford BSP Toolset" 
+.SH NAME
+bspnm \- Generate a symbol table in a standard format
+
+.SH SYNOPSIS
+.B bspnm \c
+[-v] [-help] [-o output] \c
+.I filename
+
+.SH DESCRIPTION
+Generates a textual description of a symbol table, in an architecture
+independant way. The tool is really just a filter for a particular
+systems version of
+.I nm(1)\c
+\&.
+
+
+.SH OPTIONS
+.TP
+.B \-v
+Print (on standard error output) the phases involved in the execution
+of the profiler. The option also prints the version number of the
+profiler.
+.TP
+.B \-help
+Print this manual page on standard output.
+.TP
+.BI \-o " output"
+Write the symbol table to the file 
+.I output\c
+.RE
+
+
+.SH  "SEE ALSO"
+bspfront(1), bsparch(1)
+
+The Oxford BSP toolset web pages can be found  at:
+.br
+.I http://www.bsp-worldwide.org/implmnts/oxtool/
+
+.SH BUGS
+Problems and bug reports should be mailed to 
+.I bsplib-bugs@comlab.ox.ac.uk
+
+.SH AUTHORS
+Vasil.P.Vasilev@comlab.ox.ac.uk
+
+.PP
+.B http://users.ox.ac.uk/~scat0326
+

@@ -1,0 +1,198 @@
+
+
+
+drma(3)                 BSPlib FUNCTIONS                  drma(3)
+
+
+
+NAME
+     Bulk synchronous remote memory access.
+
+
+DESCRIPTION
+     One way of performing data communication in the BSP model is
+     to  use  Direct  Remote  Memory  Access (DRMA) communication
+     facilities. Some parallel programming libraries require that
+     the  data structures used in DRMA operations have to be held
+     at statically allocated memory locations.  BSPlib  does  not
+     have  this  restriction, which enables communication in cer-
+     tain heterogeneous environments,  and  allows  communication
+     into  any  type of contiguous data structure including stack
+     or heap allocated data. This is achieved by only allowing  a
+     process  to  manipulate certain _r_e_g_i_s_t_e_r_e_d areas of a remote
+     memory which have been  previously  made  available  by  the
+     corresponding  processes.  In  this  registration procedure,
+     processes use the operation bsp_push_reg(3) to announce  the
+     address  of the start of a local area which is available for
+     global remote use.
+
+     The operation bsp_put(3) deposits locally held data  into  a
+     registered  remote  memory area on a target process, without
+     the active participation of the target process.  The  opera-
+     tion  bsp_get(3) reaches into the registered local memory of
+     another process to copy data values held there into  a  data
+     structure in its own local memory.
+
+     Allowing a process to arbitrarily manipulate the  memory  of
+     another process, without the involvement of that process, is
+     potentially dangerous. The mechanisms we propose here  exhi-
+     bit different degrees of _s_a_f_e_t_y depending upon the buffering
+     requirements of  the  communication  operations.  The  right
+     choice  of  buffering depends upon the class of applications
+     and the desired goals, and has to be made by the user.
+
+     There are four forms of buffering with respect to  the  DRMA
+     operations:
+
+
+     Buffered on destination:
+          Writing data into registered areas will happen  _a_t  the
+          end  of  the superstep, once all _r_e_m_o_t_e _r_e_a_d_s _h_a_v_e _b_e_e_n
+          _p_e_r_f_o_r_m_e_d.
+
+
+     Unbuffered on destination:
+          Data  communication  into  registered  areas  can  take
+          effect at any time during the superstep. Therefore, for
+          safety, no process should change the  destination  data
+          structures used during the course of the superstep.
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    1
+
+
+
+
+
+
+drma(3)                 BSPlib FUNCTIONS                  drma(3)
+
+
+
+     Buffered on source:
+          If the source data structure is in the  memory  of  the
+          process  that  issues  a  communication action (i.e., a
+          put), then a copy of the data is made at the  time  the
+          communication  action is issued; the source data struc-
+          ture can therefore be changed by the  user  immediately
+          after  communications are issued. Alternatively, if the
+          source data structure is on a remote process  (i.e.,  a
+          get),  then  the  data is read on the remote process at
+          the end of the superstep, _b_e_f_o_r_e any remote writes  are
+          performed.
+
+
+     Unbuffered on source
+          The data transfer resulting from a call to a communica-
+          tion  operation  may occur at any time between the time
+          of issue and the end of the superstep.  Therefore,  for
+          safety, no process should change the source data struc-
+          tures used during the course of the superstep.
+
+     The various buffering choices are crucial in determining the
+     _s_a_f_e_t_y  of the communication operation, i.e., the conditions
+     which guarantee correct data delivery as well as its effects
+     on  the  processes  involved  in the operation.  However, it
+     should be noted  that  even  the  most  cautious  choice  of
+     buffering  mode  does not completely remove non-determinism.
+     For example, if more than one process  transfers  data  into
+     overlapping  memory  locations, then the result at the over-
+     lapping region will be nondeterministically  chosen;  it  is
+     implementation dependent which one of the many ``colliding''
+     communications should be  written  into  the  remote  memory
+     area.
+
+
+SEE ALSO
+     bsp_push_reg(3), bsp_pop_reg(3),  bsp_put(3),  bsp_hpput(3),
+     bsp_get(3), bsp_hpget(3)
+
+     ``_B_S_P_l_i_b: _T_h_e _B_S_P _P_r_o_g_r_a_m_m_i_n_g _L_i_b_r_a_r_y'' Jonathan M. D. Hill,
+     Bill  McColl,  Dan  C.  Stefanescu,  Mark W. Goudreau, Kevin
+     Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and
+     Rob  Bisseling.  Parallel  Computing,  to  appear  1998. See
+     _h_t_t_p://_w_w_w._b_s_p-_w_o_r_l_d_w_i_d_e._o_r_g for more details.
+
+
+BUGS
+     Problems  and  bug  reports  should  be  mailed  to  _b_s_p_l_i_b-
+     _b_u_g_s@_c_o_m_l_a_b._o_x._a_c._u_k
+
+
+AUTHORS
+     The Oxford BSP Toolset implementation of BSPlib was  written
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    2
+
+
+
+
+
+
+drma(3)                 BSPlib FUNCTIONS                  drma(3)
+
+
+
+     by Jonathan.Hill@comlab.ox.ac.uk
+     http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    3
+
+
+

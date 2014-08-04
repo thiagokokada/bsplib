@@ -1,0 +1,175 @@
+
+bsploadd.lc,200
+#define BSPTCP_COMPONENT 41,1791
+void *GUARDNZP(42,1832
+int GUARDNZ(53,2035
+void main(78,2593
+void slavekill(812,24544
+void slavereap(831,24953
+void slaveadd(858,25760
+void slavedel(882,26220
+
+bsploadfuns.lc,481
+int open_connection_load_daemon(39,1904
+char *lookup_remote_load_recv(85,3315
+double load_average(147,4971
+int time_oldest_load_average(177,5805
+char *random_host_name(197,6261
+double bsphost_t_cost(241,7197
+void sort_host_list(246,7303
+void update_load_average(297,8423
+void update_load_averages(321,8947
+void pr_load_averages(368,10211
+void ppr_load_averages(401,11042
+char *load_average_info(476,13369
+#define MATRIX_SIZE 525,14775
+double getMflopRating(527,14800
+
+bspportd.lc,269
+%%      Copyright 2,76
+portnumber on which the daemon is listening. The other 42,2340
+typedef struct user_bsptcpd user_bsptcpd_t;user_bsptcpd_t97,4384
+struct user_bsptcpduser_bsptcpd98,4428
+void main(137,5597
+void exitchain(575,21207
+void shutdaemon(609,22314
+
+bspshutd.lc,26
+Program bspshutd.25,1471
+
+bsptcpd.lc,253
+program starts 32,1831
+%%      Copyright 2,76
+stderr 34,1959
+void main(92,3477
+void slavekill(645,23331
+void slaveadd(664,23774
+void slavedel(688,24318
+void slavereap(712,24808
+#define ERROREXIT(ERROREXIT747,25945
+void portregister(755,26099
+
+bsptcpl.lc,888
+%%      Copyright 2,76
+#define BSPTCP_COMPONENT 92,4115
+#define ABORT_MSG_OK 93,4185
+#define ABORT_EXIT(ABORT_EXIT94,4264
+#define ABORT_MSG(ABORT_MSG109,4842
+#define GUARDNN_IGN_INT(GUARDNN_IGN_INT113,4981
+#define GUARDEQ_IGN_INT(GUARDEQ_IGN_INT120,5270
+int bsptcp_set_buffer_size(146,6126
+void bsptcp_env(173,6936
+void bsptcp_init(246,9486
+int bsptcp_recv(684,26484
+int bsptcp_okto_send(785,29482
+int bsptcp_nonblock_send(829,30828
+void bsptcp_block_recv(939,34400
+void bsptcp_wait_sends(1017,36644
+int bsptcp_probe(1049,37640
+void bsptcp_messg_stopall(1165,40801
+void bsptcp_messg_exit(1186,41396
+\verb!gettimeofday! call so that we 1228,42723
+int bsptcp_usecsleep(1232,42895
+#define RAND_MULT 1270,43719
+#define RAND_ADD 1271,43748
+#define RAND_MASK 1272,43771
+void bsptcp_srand(1274,43803
+int bsptcp_rand(1282,44031
+void bsptcp_write_hostlist(1294,44278
+
+bsptcpm.lc,22
+program when 34,1928
+
+bsptcps.lc,43
+program is 31,1716
+program can 267,10121
+
+bsptcpsio.lc,109
+Function sendall(77,2699
+Function recvall(156,5137
+Function readall(234,7560
+Function writeall(312,10035
+
+massdata.lc,72
+#define BSP_NPROCS 14,220
+#define BLOCK_SIZE 15,241
+void main(17,263
+
+sample.lc,18
+void main(13,215
+
+bsploadfuns.lh,135
+#define CLOCKS_PER_SEC 44,1705
+#define MALLOC(MALLOC47,1744
+#define INIT_RANDOM(INIT_RANDOM49,1794
+#define RANDOM(RANDOM56,2058
+
+bsptcpdefs.lh,1959
+%%      Copyright 2,76
+#define BSPTCPDEFS_H26,1479
+#define MSG_WAITALL 38,1869
+#define MAC_HEADER_SIZE 56,2415
+#define IP_HEADER_SIZE 57,2472
+#define TCP_HEADER_SIZE 58,2507
+#define BSPTCP_LPORT 60,2543
+#define BSPTCP_LOADPORT 61,2623
+#define BSPTCP_BACKLOG 62,2703
+#define BSPTCP_TIMEOUT_HIGH 63,2773
+#define BSPTCP_TIMEOUT_LOW 64,2851
+#define BSPTCP_MAX_RETRIES 65,2929
+#define BSPTCP_MAXAGE_LOAD 67,3009
+#define BSPTCP_MAXTIMEOUT_LOAD 68,3084
+#define BSPTCP_MINTIMEOUT_LOAD 69,3160
+#define BSPTCP_LOAD_CONNECTS 70,3236
+#define BSPTCP_LOAD_CHILDREN 71,3312
+#define BSPTCP_TIMEOUT_ENQ 72,3383
+#define BSPTCP_MAX_ATTEMPTS 75,3524
+#define BSPTCP_LINGER_INT 76,3599
+#define BSPTCP_MAX_SESSIONS 77,3672
+#define BSPTCP_MAX_BACKOFF 78,3748
+#define BSPTCP_HOST_NAME_MAX 79,3821
+#define BSPTCP_STR_LEN 80,3889
+#define BSPTCP_BUFF_LEN 81,3961
+#define BSPTCP_INFTY_LOAD 82,4026
+#define BSPTCP_LOAD_MFLOP 83,4098
+#define BSPTCP_MASTER_PATH 92,4343
+#define BSPTCP_SLAVE_PATH 93,4398
+#define BSPTCP_MASTER_PATH 95,4459
+#define BSPTCP_SLAVE_PATH 96,4509
+typedef struct bsptcp_msghdr bsptcp_msghdr_t;bsptcp_msghdr_t104,4694
+struct bsptcp_msghdrbsptcp_msghdr105,4740
+#define BSPTCP_MSG_STDOUT 122,5201
+#define BSPTCP_MSG_STDERR 123,5273
+#define BSPTCP_MSG_PASSWD 124,5345
+#define BSPTCP_MSG_ACK 125,5416
+#define BSPTCP_MSG_CDATA 126,5484
+#define BSPTCP_MSG_ENVSET 127,5553
+#define BSPTCP_MSG_EXIT 128,5622
+#define BSPTCP_MSG_ABORT 129,5684
+#define BSPTCP_MSG_SIGNAL 130,5761
+#define BSPTCP_MSG_LD_ENQ 131,5828
+#define BSPTCP_MSG_LD_UPD 132,5891
+#define BSPTCP_MSG_LD_INFTY 133,5956
+#define BSPTCP_MSG_LD_RLD 134,6022
+#define BSPTCP_MSG_LD_DATA 135,6097
+#define BSPTCP_MSG_MASTERPID 136,6164
+#define BSPTCP_MIN_TYPE 138,6239
+#define BSPTCP_MAX_TYPE 139,6283
+typedef struct envvar envvar_t;envvar_t147,6455
+typedef struct bsphost bsphost_t;bsphost_t148,6527
+struct envvarenvvar150,6604
+struct bsphostbsphost157,6838
+
+bsptcperrs.lh,133
+%%      Copyright 2,76
+int GUARDEQ(32,1874
+int GUARDZ(65,2707
+int GUARDNZ(96,3480
+int GUARDNN(127,4255
+void *GUARDNZP(157,5014
+
+bsptcpl.lh,24
+%%      Copyright 2,76
+
+bsptcpsio.lh,24
+%%      Copyright 2,76

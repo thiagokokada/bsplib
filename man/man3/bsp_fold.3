@@ -1,0 +1,127 @@
+.TH "bsp_fold" 3 "1.4 25/9/98" "Oxford BSP Toolset" "BSPlib level1"
+.SH NAME
+bsp_fold \- fold (aka reduce) an associate operator between a single
+data item held in each process
+
+
+.SH C SYNOPSIS
+.nf
+.B #include \&"bsp_level1.h\&"
+.PP
+.BI "void bsp_fold(void (*" op ")(void*,void*,void*,int*),"
+.BI "              void *" src ", void *" dst\c
+.BI ", int " nbytes )
+.fi
+.SH FORTRAN SYNOPSIS
+.nf
+.BI "SUBROUTINE bspfold(" op , src \c
+.BI , dst , nbytes )
+.BI "  INTERFACE"
+.BI "    SUBROUTINE op(" res,left,right,n)
+.BI "      INTEGER, intent(IN) :: " n
+.BI "      <TYPE>,  intent(IN) :: " left,right
+.BI "      <TYPE>,  intent(OUT):: " res
+.BI "  END INTERFACE"
+.BI "  INTEGER, intent(IN)  :: " nbytes
+.BI "  <TYPE>,  intent(IN)  :: " src
+.BI "  <TYPE>,  intent(OUT) :: " dst
+.fi
+
+
+.SH DESCRIPTION
+A collective reduction operation that combines the local copies of the
+data 
+.I src
+on each processor, using an associative, binary operator
+.I op\c
+\&. The result of the reduction is copied into
+.I dst
+on all the processors.
+
+The data-structures
+.I src
+and 
+.I dst
+have to be of size
+.I nbytes
+on each process. The procedure
+.I op
+is defined by the user, and combines the arguments 
+.I left
+and
+.I right\c
+\&, placing the result into 
+.I right\c
+\&. The size of 
+.I left\c
+\&,
+.I right\c
+\&, and 
+.I result
+all have to be 
+.I nbytes\c
+\&. When defining the procedure 
+.I op\c
+\&, the user does not have to cope with the possibility that
+.I result\c
+\&, 
+.I left\c
+\&, or
+.I right 
+are aliased.
+
+.SH EXAMPLES
+.IP 1)
+Consider the definition of a function 
+.I bsp_sum
+that sums a single integer stored on each process.
+
+.nf
+void addition(int *res, int *left, int *right; int *nbytes) {
+  *res = 0;
+  *res = *left + *right;
+}
+
+int bsp_sum(x) {
+  int result;
+
+  bsp_fold(addition,&x,&result,sizeof(int));
+  return result;
+}
+.fi
+
+The assignment 
+.I "*res = 0"
+in the definition is not semantically necessary as it doesn't change
+the desired effect of the summation. This is guarenteed as neither 
+.I right
+or 
+.I left\c
+will be aliased to
+.I result\c
+\&.
+  
+
+.SH NOTES
+
+In the C implementation of bsp_fold, the 
+.I nbytes
+argument to the operator
+.I op
+is defined to be a pointer to a integer so that either a C or Fortran
+77 subroutine can be used as 
+.I op\c
+\&.
+
+
+.SH "SEE ALSO"
+bsplib_level1(3), bsp_scan(3)
+
+.SH BUGS
+Problems and bug reports should be mailed to 
+.I bsplib-bugs@comlab.ox.ac.uk
+
+.SH AUTHORS
+Jonathan.Hill@comlab.ox.ac.uk
+.br
+.B http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html

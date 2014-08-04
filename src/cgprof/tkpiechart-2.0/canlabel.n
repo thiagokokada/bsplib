@@ -1,0 +1,88 @@
+' $Id: canlabel.n,v 1.3 1995/10/10 20:11:47 jfontain Exp $
+.TH canvasLabel tk
+.BS
+.SH NAME
+canvasLabel \- canvas label class
+.SH SYNOPSIS
+\fBnew canvasLabel \fIcanvasPathName x y ?options?\fR
+.in
+\fBdelete canvasLabel \fIlabelId\fR
+.SH DESCRIPTION
+The \fBcanvasLabel\fR class brings some \fBlabel\fR widget functionality to the \fBcanvas text\fR item, such as a background and a border.
+.PP
+The \fBcanvasLabel\fR object is built with two \fBcanvas\fR items: a \fBrectangle\fR and a \fBtext\fR which are placed relatively to each other according to the \fB-style\fR option.
+.PP
+The label has a specific tag, which can be used to retrieve the coordinates of the object or move it, thanks to the normal \fBcanvas\fR facilities.
+.SH CREATION PARAMETERS
+The constructor takes several arguments: the parent canvas, the label coordinates, and some options.
+.PP
+The coordinates are those of a point used to position the label (see the \fB-anchor\fR option for more information). They are specified in screen units, which are floating-point numbers optionally followed by one of several letters as specified in the \fBcanvas\fR COORDINATES manual section.
+.SH OPTIONS
+\fB-anchor\fR
+.PP
+Specifies the anchor position of the rectangle and the text, relative to the positionning point. The behavior is similar to the \fB-anchor\fR option of the \fBcanvas text\fR item, except that the rectangle is taken into account. The default is center.
+.PP
+\fB-background\fR
+.PP
+Specifies the background color of the rectangle, as in the \fB-fill\fR option of the \fBcanvas rectangle\fR item. The default is transparent (empty string).
+.PP
+\fB-bordercolor\fR
+.PP
+Specifies the border color of the rectangle, as in the \fB-outline\fR option of the \fBcanvas rectangle\fR item. The default is black.
+.PP
+\fB-borderwidth\fR
+.PP
+Specifies the border width of the rectangle, as in the \fB-width\fR option of the \fBcanvas rectangle\fR item. By default, the width is 1 pixel, which is the minimum width.
+.PP
+\fB-font\fR
+.PP
+Specifies the font of the text, as in the \fB-font\fR option of the \fBcanvas text\fR item. The default is system dependent.
+.PP
+\fB-foreground\fR
+.PP
+Specifies the color of the text, as in the \fB-fill\fR option of the \fBcanvas text\fR item. The default is black.
+.PP
+\fB-justify\fR
+.PP
+Specifies how to justify the text, as in the \fB-justify\fR option of the \fBcanvas text\fR item. The default is left.
+.PP
+\fB-stipple\fR
+.PP
+Specifies the stipple pattern filling the rectangle, as in the \fB-stipple\fR option of the \fBcanvas rectangle\fR item. There is no bitmap by default.
+.PP
+\fB-style\fR
+.PP
+Specifies whether the rectangle encloses the text (\fBbox\fR style) or is placed to the left of the text (\fBsplit\fR style) as a colored marker.
+.PP
+\fB-text\fR
+.PP
+Specifies the string to be displayed in the text area, as in the \fB-text\fR option of the \fBcanvas text\fR item. The default is an empty string.
+.PP
+\fB-width\fR
+.PP
+Specifies a maximum line length for the text, as in the \fB-width\fR option of the \fBcanvas text\fR item. The default is zero.
+.SH CONFIGURATION
+The \fBcanvasLabel\fR class features two member functions that can be used to configure or retrieve the configuration of the label. Their use is very similar to the \fBconfigure\fR and \fBcget\fR Tk widget commands, except that they take the label object identifier as the first parameter, and that configuration requires a value for each option. See the OPTIONS section for supported options.
+.PP
+Their synopsis is as follows:
+.PP
+\fBcanvasLabel::configure \fIlabelId option value ?option value ...?\fR
+.in
+\fBcanvasLabel::cget \fIlabelId option\fR
+.PP
+and some examples:
+.sp
+.RS
+.nf
+\fBcanvasLabel::configure \fI$labelId -text "Some Text" -background white\fR
+set anchor [\fBcanvasLabel::cget \fI$labelId -anchor\fR]
+.fi
+.RE
+.SH TAGS
+The label has the following specific tag (see the \fBcanvas\fR manual page ITEM IDS AND TAGS section for more information):
+.PP
+\fBcanvasLabel(\fI$labelId\fB)\fR
+.SH LIMITATIONS
+There is no relief option.
+.SH KEYWORDS
+label, canvas, new, delete

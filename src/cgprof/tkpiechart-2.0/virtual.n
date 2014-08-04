@@ -1,0 +1,64 @@
+' $Id: virtual.n,v 1.4 1995/10/15 21:04:49 jfontain Exp $
+.TH virtual tcl
+.BS
+.SH NAME
+virtual \- Virtual functions in Tcl
+.SH SYNOPSIS
+\fBvirtual\fR \fIproc className::className {this ...} {...}\fR
+.in
+\fBvirtual\fR \fIproc className::~className {this} ?{...}?\fR
+.in
+\fBvirtual\fR \fIproc className::procedureName {this ...} ?{...}?\fR
+.SH DESCRIPTION
+Virtual procedures and destructors can be used within a simple Tcl object oriented programming scheme.
+.PP
+In order for virtual procedure calls to be possible, and since there is no declarative section, the base class constructor is given an indication that virtual procedures may be used by prepending the \fBvirtual\fR keyword to the constructor procedure definition.
+.PP
+The \fBvirtual\fR keyword can then be used on the base class destructor and member functions. If the procedure has no body, then it is considered to be a \fBpure virtual\fR and the derived class procedure must exists and is always evaluated.
+.PP
+The destructor procedure may be a \fBpure virtual\fR but in any case the derived destructor must always exists and is always evaluated before the base class destructor is.
+.PP
+If a regular procedure is \fBvirtual\fR but not pure, and a derived class procedure with the same name exists, then it is evaluated in place of the base class procedure. The derived class procedure must have the same signature, that is the same number of parameters.
+.PP
+If a class has one or more virtual procedures, then the destructor must also be virtual.
+.SH EXAMPLES
+Here is a simple example with one level of derivation. Of course, greater numbers of levels are possible and can be drawn from this.
+.sp
+.RS
+.nf
+\fBvirtual\fR proc \fBbase::base\fR {this parameter} {
+    \fI# allow virtual procedure calls from base class\fR
+    \fI# base members initialization ...\fR
+}
+\fBvirtual\fR proc \fBbase::~base\fR {this}
+\fI# pure virtual, call derived class destructor\fR
+\fBvirtual\fR proc \fBbase::procedure\fR {this parameter} {
+    \fI# call derived class procedure\fR
+}
+proc \fBderived::derived\fR {this parameter} {
+    base::base $this
+    global derived
+    \fI# derived members initialization ...\fR
+}
+proc \fBderived::~derived\fR {this} {
+    global derived
+    \fI# use derived members data for some cleanup ...\fR
+    \fI# do not delete base part to avoid infinite loop\fR
+}
+proc \fBderived::procedure\fR {this parameter} {
+    \fI# derived class procedure, which must exist\fR
+    \fI# implementation here ...\fR
+}
+
+\fI# create derived class object\fR
+set id [\fBnew\fR derived data]
+\fI# call derived virtual function through base class\fR
+base::procedure $id data
+\fI# delete object through base class (a must)\fR
+\fBdelete\fR base $id
+.fi
+.RE
+.SH LIMITATIONS
+In order to avoid some costly (performance-wise) anti infinite loop code, objects with a virtual base class \fBmust\fR be deleted through the base class (see EXAMPLES above).
+.SH KEYWORDS
+oop, virtual, new, delete, object

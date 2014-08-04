@@ -1,0 +1,61 @@
+\" groff  -ms bsplib_title.3
+.TL
+BSPlib manual pages
+.AB
+This document contains the BSPlib manual pages in alphabetical
+order. For more information see\c
+.I "``A proposal for the BSP Worldwide Standard Library''"
+Mark W. Goudreau, Jonathan M. D. Hill, Kevin Lang, Bill McColl, Satish
+B. Rao, Dan C. Stefanescu, Torsten Suel, Thanasis Tsantilas. Oxford
+University Computing Laboratory, April 1996. See
+.I http://www.bsp-worldwide.org
+for more details.
+.AE
+
+.XS 1
+Introduction to BSPlib
+.XA 3
+Introduction to DRMA
+.XA 4
+Introduction to BSMP
+.XA 5
+Core BSPlib: bsp_abort, one process halts all 
+.XA 6
+Core BSPlib: bsp_begin, start of SPMD code
+.XA 8
+Core BSPlib: bsp_end, end of SPMD code
+.XA 9
+Core BSPlib: bsp_get, pull from remote memory
+.XA 12
+Core BSPlib: bsp_get_tag, match tag with message
+.XA 13
+Core BSPlib: bsp_move, fetch from queue
+.XA 14
+Core BSPlib: bsp_nprocs, number of threads
+.XA 15
+Core BSPlib: bsp_pid, find my process id
+.XA 16
+Core BSPlib: bsp_pushregister, make region globally visible
+.XA 18
+Core BSPlib: bsp_put, push to remote memory
+.XA 21
+Core BSPlib: bsp_send, send to remote queue
+.XA 22
+Core BSPlib: bsp_set_tag_size, choose tage size
+.XA 23
+Core BSPlib: bsp_sync, barrier synchronisation
+.XA 24
+Core BSPlib: bsp_time, local time
+.XA 25
+Level 1: Collective communications
+.XA 27
+Level 1: bsp_bcast, multicast data from one process to all.
+.XA 28
+Level 1:  bsp_fold, reduce using an associative operator
+.XA 30
+Scripts: bspfront, the BSPlib compilation driver
+.XA 36
+Scripts: bspprof, the BSPlib profiler
+.XE
+.PX
+\" groff -ms -rC1 bsplib_title.3 > bsplib_title.ps

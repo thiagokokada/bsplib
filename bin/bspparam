@@ -1,0 +1,183 @@
+#! /users/jonh/bin/perl
+$bindir        = "//amd/tmp_mnt/garnet/fs25/jonh/BSP/bin/";
+$includedir    = "//amd/tmp_mnt/garnet/fs25/jonh/BSP/bin/../include/";
+$libdir        = "//amd/tmp_mnt/garnet/fs25/jonh/BSP/bin/../lib/";
+$mandir        = "/amd/tmp_mnt/garnet/fs25/jonh/BSP/man";
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+push(@INC,$includedir);
+push(@INC,$bindir);
+require "bsputil";
+
+select(STDERR); $| = 1; select(STDOUT); # no STDERR buffering, please.
+($Pgm = $0) =~ s|.*/||;
+$Version        = "1.3, 25th Nov 1997";
+$bug_reports_to = 'bsplib-bugs@comlab.ox.ac.uk';
+
+$ShortUsage = "\n$Pgm usage: for basic information, try the `-help' option\n";
+
+
+
+$Verbose    = 0;
+$ShowAll    = 0;
+$Time       = 0;
+
+$ThisArch   = &backtick("$bindir/bsparch -arch");
+$ThisArch   = &backtick("bsparch -arch")  if ($ThisArch eq "");
+$Arch       = $ThisArch;
+
+
+
+
+  arg: while ($_ = $ARGV[0]) {
+  shift(@ARGV);
+  #--------HELP------------------------------------------------
+  /^-(help|man)$/ && do {&FormatManual("bspparam.1");exit(0);};
+
+  /^-v$/          && do {$Verbose = 1; next arg;};
+
+  /^-a$/          && do {$Arch='.'; next arg;};
+  /^-time$/       && do {$Time =1;next arg;};
+
+  print STDERR "Unrecognised option \"",$_,"\"\n";
+  $Status++;
+  }
+  if ($Status>0) {
+    print STDERR $ShortUsage;
+    exit(1);
+  }
+  print STDERR "$Pgm: ($Version)\n" if $Verbose;
+  &printParams();
+  exit(0);
+
+
+
+
+
+
+sub printParams {
+  local($mach,$lib,$liblevel,$p,$s,$l,$g,$nhalf);
+  local($lastmach,$lastlib,$lastliblevel,$override);
+  local(%name_env);
+  
+
+  if (!open(PARAMS,$includedir."/bsp_parameters.ascii")) {
+    printf STDERR "$Pgm: unable to open the BSP parameter file \"%s\"",
+                  $includedir."/bsp_parameters.ascii";
+    exit(1);
+  }
+
+  if ($Time) {
+    print "      Machine      |   Device   |Library |  P |   s  |  L/s   |",
+          "  g/s  | n_half\n";
+  } else {
+    print "      Machine      |   Device   |Library |  P |   s  |   L    |",
+          "   g   | n_half\n";
+  }
+  while (<PARAMS>) {
+    if (/(\w+)\s+(\w+)\s+(\w)(\d)\s+(\d+)\s+(\d+.\d+)\s+(\d+.\d+)\s+(\d+.\d+)\s+(\d+)/) {
+      $mach     = $1;
+      $dev      = $2;
+      $lib      = $3;
+      $liblevel = $4;
+      $p        = $5;
+      $s        = $6;
+      $l        = $7;
+      $g        = $8;
+      $nhalf    = $9;
+      if ($mach eq $ThisArch && $ENV{'BSP_SLG'}) {
+        if ($ENV{'BSP_SLG'} =~ /^(\d+.\d+),(\d+),(\d+.\d+),(\d+)/) {
+          $override= 1;
+          $s       = $1;
+          $l       = $2;
+          $g       = $3;
+          $nhalf   = $4;
+        }
+      }
+      if ($mach =~ /$Arch/) {
+        if ($Time) {
+          $l = $l/$s;
+          $g = $g/$s;
+        }
+        if (!$name_env{$mach}) {
+          $name_env{$mach} = &backtick("$bindir/bsparch -convertname $mach");
+          if ($name_env{$mach} eq "") {
+             $name_env{$mach}= &backtick("bsparch -convertname $mach");
+          }
+        }
+        $libtype = "van";
+        $libtype = "prof" if $lib eq "P";
+
+        if ($lastmach ne $mach) {
+          print  "-------------------+------------+--------+----+------+--------+",
+                 "-------+-------\n";
+          $section  = 0;
+          $lastmach = $mach;
+        } elsif ($section &&
+                   ($lastlib ne $libtype || $lastliblevel ne $liblevel)) {
+          print  "                   +------------+--------+----+------+--------+",
+                 "-------+-------\n";
+        } else {
+          $section = 1;
+          
+        }
+        $lastlib      = $libtype;
+        $lastliblevel = $liblevel;
+        printf "%-18s |%-11s |%5s-%1d |%3d |%5.1f |%7d |%6.2f |%4d\n",
+               $name_env{$mach},$dev,$libtype,$liblevel,$p,$s,$l,$g,$nhalf;
+      }
+    }
+  }
+  close(PARAMS);
+  print "\n  Key \n",
+        "=======\n\n";
+  print   "\tLibrary = options used when linking with bspfront(1):\n",
+          "\t          van-X  = -flibrary-level X\n",
+          "\t          prof-X = -flibrary-level X -prof\n",
+
+          "\tP       = number of processes\n";
+  if ($Time) {
+    print "\ts       = mflop/sec rate of each of the processes\n",
+          "\tL/s     = is the synchronisation latency cost in usecs\n",
+          "\tg/s     = the number of usecs/word required for all processes\n",
+          "\t          to simultaneosly communicate a message\n",
+          "\tn_half  = is the size of message that produces half the optimal\n",
+          "\t          bandwidth of the machine\n\n";
+  } else {
+    print "\ts       = mflop/sec rate of each of the processes\n",
+          "\tL       = is the synchronisation latency cost in flops\n",
+          "\tg       = the number of flops/word required for all processes\n",
+          "\t          to simultaneosly communicate a message\n",
+          "\tn_half  = is the size of message that produces half the optimal\n",
+          "\t          bandwidth of the machine\n\n";
+  }
+
+
+
+  if ($override) {
+    print STDERR "\n$Pgm warning:\n",
+                 "\tThe environment variable BSP_SLG overrides \n",
+                 "\tthe BSP parameters for a ",$name_env{$ThisArch},"\n";
+  }
+
+}
+

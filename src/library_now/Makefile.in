@@ -1,0 +1,383 @@
+###########################################################################
+##      Copyright (C) 1995,1996,1997 University of Oxford                ##
+##                                                                       ##
+## Permission to use, copy, modify, and distribute this software,        ##
+## and to incorporate it, in whole or in part, into other software,      ##
+## is hereby granted without fee, provided that                          ##
+##   (1) the above copyright notice and this permission notice appear in ##
+##       all copies of the source code, and the above copyright notice   ##
+##       appear in clearly visible form on all supporting documentation  ##
+##       and distribution media;                                         ##
+##   (2) modified versions of this software be accompanied by a complete ##
+##       change history describing author, date, and modifications made; ##
+##       and                                                             ##
+##   (3) any redistribution of the software, in original or modified     ##
+##       form, be without fee and subject to these same conditions.      ##
+###########################################################################
+
+###########################################################################
+##            D O N T  C H A N G E  A N Y T H I N G  !!                  ##
+###########################################################################
+
+SHELL      = /bin/sh
+
+prefix     = @prefix@
+exec_prefix= @exec_prefix@
+bindir     = @bindir@
+includedir = @includedir@
+libdir     = @libdir@
+top_srcdir = @top_srcdir@/../
+
+BSP_ONLINE_PROCS= @BSP_ONLINE_PROCS@
+RANLIB          = @RANLIB@
+GCC             = @GCC@
+INSTALL          = @INSTALL@
+INSTALL_PROGRAM  = @INSTALL_PROGRAM@
+INSTALL_DATA     = @INSTALL_DATA@
+
+mpiincludedir   = @mpiincludedir@
+
+editpl = sed -e 's,@''includedir''@,$(includedir),g'       \
+             -e 's,@''bindir''@,$(bindir),g'               \
+             -e 's,@''binarchdir''@,$(bindir)/$(ARCH)/,g'  \
+             -e 's,@''libdir''@,$(libdir),g'               \
+             -e 's,@''mandir''@,$(mandir),g'               \
+             -e 's,@''GCC''@,$(GCC),g'                     \
+             -e 's,@''G77''@,$(G77),g'                     \
+             -e 's,@''GPLUSPLUS''@,$(GPLUSPLUS),g'         \
+             -e 's,@''mpiincludedir''@,$(mpiincludedir),g' \
+             -e 's,@''mpilibdir''@,$(mpilibdir),g'         \
+             -e 's,@''PERL_DBMOK''@,$(PERL_DBMOK),g'       \
+             -e 's,@''PERL''@,$(PERL),g'                   \
+             -e 's,@''PWD''@,$(PWD),g'
+
+##########################################################################
+# Architecture independent modules
+##########################################################################
+SRCS_DAEMON_LC 	= bspnowd.lc  bsptcpsio.lc
+SRCS_LOAD_LC    = bsploadd.lc bsploadfuns.lc bsptcpsio.lc
+SRCS_PORT_LC    = bspportd.lc bsptcpsio.lc
+SRCS_MASTER_LC  = bspnowm.lc  bsploadfuns.lc bsptcpsio.lc 
+SRCS_SLAVE_LC   = bspnows.lc  bsptcpsio.lc
+SRCS_SHUTD_LC   = bspshutd.lc bsptcpsio.lc
+SRCS_LEXER      = bspnowlex.l
+SRCS_PARSER     = bspnowpar.y
+
+SRCS_LC         = ${SRCS_LIB_LC} ${SRCS_DAEMON_LC}  ${SRCS_MASTER_LC} \
+                  ${SRCS_SLAVE_LC} ${SRCS_LOAD_LC}                  
+
+SRCS_LH   = bspnowdefs.lh   bspnowerrs.lh   bsptcpsio.lh bsploadfuns.lh
+
+.SUFFIXES: .lc .lh .c .tex .c.tex .h.tex .s
+
+#############################################################
+##             Flags and conversions                       ##
+#############################################################
+
+LIBRARIES     = @SOCKET_LIBRARY@ @NSL_LIBRARY@ 
+INCLUDES      = 
+
+SRCS_DAEMON_O = $(SRCS_DAEMON_LC:.lc=.o)
+SRCS_LOAD_O   = $(SRCS_LOAD_LC:.lc=.o)
+SRCS_PORT_O   = $(SRCS_PORT_LC:.lc=.o)
+SRCS_MASTER_O = $(SRCS_MASTER_LC:.lc=.o)
+SRCS_SLAVE_O  = $(SRCS_SLAVE_LC:.lc=.o)
+SRCS_SHUTD_O  = $(SRCS_SHUTD_LC:.lc=.o)
+
+SRCS_O        = $(SRCS_DAEMON_O) $(SRCS_MASTER_O) \
+	        $(SRCS_SLAVE_O)  $(SRCS_LOAD_O)   \
+                $(SRCS_PORT_O) $(SRCS_SHUTD_O)
+
+SRCS_C        = $(SRCS_DAEMON_LC:.lc=.c) \
+	        $(SRCS_MASTER_LC:.lc=.c) \
+	        $(SRCS_SLAVE_LC:.lc=.c)  \
+                $(SRCS_LOAD_LC:.lc=.c)   \
+	        $(SRCS_PORT_LC:.lc=.c)   \
+                $(SRCS_SHUTD_LC:.lc=.c)
+
+SRCS_H        = $(SRCS_LH:.lh=.h)
+
+SRCS_TEX      = $(SRCS_LH:.lh=.h.tex)        \
+	        $(SRCS_DAEMON_LC:.lc=.c.tex) \
+	        $(SRCS_MASTER_LC:.lc=.c.tex) \
+	        $(SRCS_SLAVE_LC:.lc=.c.tex)  \
+                $(SRCS_LOAD_LC:.lc=.c.tex)   \
+                $(SRCS_PORT_LC:.lc=.c.tex)   \
+                $(SRCS_SHUTD_LC:.lc=.c.tex)
+
+CC         = cc
+YACC       = @YACC@
+LEX        = @LEX@
+CFLAGS     =  ${BUILD_DEFINES}  
+
+.SUFFIXES: .lc .lh .h .c .tex .c.tex .h.tex
+
+#############################################################
+##             Compilation rules                           ##
+#############################################################
+
+
+.lh.h:
+	rm -f $*.h $*.tmp;				\
+	litToPgm $<;					\
+	$(editpl) $*.h > $*.tmp && mv $*.tmp $*.h
+
+
+.lc.o:
+	rm -f $*.c $*.tmp;				\
+	litToPgm $<;					\
+	$(editpl) $*.c > $*.tmp && mv $*.tmp $*.c;	\
+	${CC} ${CFLAGS} $(INCLUDES) -c $*.c 
+
+.lc.c:
+	litToPgm $<;					\
+	rm -f $*.tmp;					\
+	$(editpl) $*.c > $*.tmp && mv $*.tmp $*.c
+
+.y.c:
+	${YACC} $<
+
+.l.c:
+	${LEX} -t $< > $*.c
+
+.c.o:
+	${CC} ${CFLAGS} $(INCLUDES) -c $*.c 
+
+.lh.h.tex:
+	litToTex $<
+
+.lc.c.tex:
+	litToTex $<
+
+
+
+#############################################################
+##             Main Targets                                ##
+#############################################################
+all::
+	
+
+build:
+	@$(MAKE) clean; $(MAKE) machine 
+
+develop:
+	@$(MAKE) machine
+
+#############################################################
+##             Machine Targets                             ##
+#############################################################
+machine:
+	@case `bsparch -arch` in					   \
+	SGICHALL64) 							   \
+		$(MAKE) banner TYPE="machine" FOR="SGI PowerChallenge";    \
+                $(MAKE) daemon 	           		                   \
+                     BUILD_DEFINES="-DBSPTCP_SETENV                        \
+                                    -D__INLINE_INTRINSICS     		   \
+                                    -xansi -64 -mips4                      \
+                                    -GCM:pointer_speculation=ON            \
+                                    -GCM:static_load_speculation=ON        \
+                                    -O3 -DSGICHALL64"                      \
+ 		     ARCH="SGICHALL64"					   \
+                     AR=ar                                                 \
+                     CC=cc;;                                               \
+                                                                           \
+	SP2)    $(MAKE) banner TYPE="machine" FOR="IBM Sp2";               \
+                $(MAKE) daemon	              		                   \
+                     BUILD_DEFINES="-O2 -DSP2 -DBSPTCP_OSAIX" 		   \
+		     ARCH="SP2"						   \
+                     AR=ar                                                 \
+                     CC=mpcc;;                                             \
+                                                                           \
+        CONVEXSPP)							   \
+		$(MAKE) banner TYPE="machine" FOR="Convex SPP";            \
+                $(MAKE) daemon	                	                   \
+                     BUILD_DEFINES="-or none -DCONVEXSPP"                  \
+		     ARCH="CONVEXSPP"					   \
+                     AR=ar                                                 \
+                     CC="/usr/convex/bin/cc";;                             \
+                                                                           \
+	PARSYTEC)                                                          \
+                $(MAKE) banner TYPE="machine" FOR="Parsytec Explorer";     \
+                $(MAKE) daemon	                     	                   \
+                     BUILD_DEFINES=""                  	 		   \
+		     ARCH="PARSYTEC"					   \
+                     AR=ar                                                 \
+                     CC="px ancc";;                                        \
+                                                                           \
+	PARAMID)                                                           \
+                $(MAKE) banner TYPE="machine" FOR="Transtech Paramid";     \
+                $(MAKE) daemon	                    	                   \
+                     BUILD_DEFINES=""                  	 		   \
+		     ARCH="PARAMID"					   \
+                     AR=ar860                                              \
+                     CC="pgcc";;                                           \
+                                                                           \
+	HITACHIMPP)                                                        \
+                $(MAKE) banner TYPE="machine" FOR="Hitachi SR2001";        \
+                $(MAKE) daemon	                          	           \
+                     BUILD_DEFINES="+O3 -DHITACHIMPP"      		   \
+		     ARCH="HITACHIMPP"					   \
+                     AR=ar                                                 \
+                     CC="srcc";;                                           \
+                                                                           \
+	FUJIAP1000)                                                        \
+                $(MAKE) banner TYPE="machine" FOR="Fujitsu AP1000";        \
+                $(MAKE) daemon	                    	                   \
+                     BUILD_DEFINES="-O3 -DFUJIAP1000"      		   \
+		     ARCH="HITACHIMPP"					   \
+                     AR=ar                                                 \
+                     CC="cc.c7";;                                          \
+                                                                           \
+	CRAYT3D) 							   \
+		$(MAKE) banner TYPE="machine" FOR="Cray T3D";              \
+                $(MAKE) daemon 	                  	                   \
+                     BUILD_DEFINES="-O3 -DCRAYT3D"             		   \
+		     ARCH="CRAYT3D"					   \
+                     CC=cc;;                                               \
+                                                                           \
+	RS6000) $(MAKE) banner TYPE="machine" FOR="IBM RS6000";            \
+                $(MAKE) daemon	                      	                   \
+                     BUILD_DEFINES="-DRS6000 -DBSPTCP_OSAIX 		   \
+				    -DBSPTCP_SETENV"                       \
+		     ARCH="RS6000"					   \
+                     AR=ar                                                 \
+                     CC=cc;;                                               \
+                                                                           \
+	OSF1)   $(MAKE) banner TYPE="machine" FOR="Digital Alpha";         \
+                $(MAKE) daemon	                          	           \
+                     BUILD_DEFINES="-O5 -migrate -DOSF1"                   \
+ 		     ARCH="OSF1"					   \
+                     AR=ar                                                 \
+                     CC=cc;;                                               \
+                                                                           \
+	SGI) 							           \
+		$(MAKE) banner TYPE="machine" FOR="Uniprocessor SGI";      \
+                $(MAKE) daemon 	                                   	   \
+                     BUILD_DEFINES="-DSGI -O2 -DBSPTCP_SETENV"             \
+		     ARCH="SGI"					           \
+                     AR=@AR@                                               \
+                     CC=cc;;                                               \
+                                                                           \
+	SGIN32) 						           \
+		$(MAKE) banner TYPE="machine" FOR="Uniprocessor SGI";      \
+                $(MAKE) daemon 	                                   \
+                     BUILD_DEFINES="-DSGI -O2 -n32 -DBSPTCP_SETENV"        \
+		     ARCH="SGI"					           \
+                     AR=@AR@                                               \
+                     CC=cc;;                                               \
+                                                                           \
+	SunOS)  $(MAKE) banner TYPE="machine" FOR="SunOs";                 \
+                if test -n "${GCC}"; then                                  \
+                  $(MAKE) daemon	                              	   \
+                     BUILD_DEFINES="-ansi -DSunOS -O2"        		   \
+		     ARCH="SunOS"					   \
+                     AR=@AR@                                               \
+                     CC=gcc;                                               \
+                else                                                       \
+                   $(MAKE) daemon	                                   \
+                     BUILD_DEFINES="-DSunOS -O2"              		   \
+		     ARCH="SunOS"					   \
+                     AR=@AR@                                               \
+                     CC=cc;                                                \
+                fi;;                                                       \
+                                                                           \
+	Solaris)                                                           \
+                $(MAKE) banner TYPE="machine" FOR="Sun Solaris";           \
+                if test -n "${GCC}"; then                                  \
+                  $(MAKE) daemon	                              	   \
+                     BUILD_DEFINES=" -DBSPTCP_SETENV -DSolaris -O2"        \
+		     ARCH="Solaris"					   \
+                     AR=@AR@                                               \
+                     CC=gcc;                                               \
+                else                                                       \
+                  $(MAKE) daemon	                              	   \
+                     BUILD_DEFINES="-DBSPTCP_SETENV -DSolaris -fast -xO4"  \
+		     ARCH="Solaris"					   \
+                     AR=@AR@                                               \
+                     CC=cc;                                                \
+                fi;;                                                       \
+                                                                           \
+	SolarisX86)                                                        \
+                $(MAKE) banner TYPE="machine" FOR="Intel Solaris";         \
+                if test -n "${GCC}"; then                                  \
+                  $(MAKE) daemon	                              	   \
+                     BUILD_DEFINES=" -DBSPTCP_SETENV -DSolarisX86 -O2"     \
+		     ARCH="SolarisX86"					   \
+                     AR=@AR@                                               \
+                     CC=gcc;                                               \
+                else                                                       \
+                  $(MAKE) daemon	                              	   \
+                     BUILD_DEFINES="-DBSPTCP_SETENV -DSolarisX86           \
+                                    -fast -xO4"                            \
+		     ARCH="SolarisX86"					   \
+                     AR=@AR@                                               \
+                     CC=cc;                                                \
+                fi;;                                                       \
+                                                                           \
+        LINUX)  $(MAKE) banner TYPE="machine" FOR="Linux";                 \
+                $(MAKE) daemon                                             \
+                     BUILD_DEFINES="-ansi -DLINUX -D_I386_BITOPS_H -O2     \
+		                    -D_GNU_SOURCE"                         \
+		     ARCH="LINUX"					   \
+                     AR=ar                                                 \
+                     CC=gcc;;                                              \
+                                                                           \
+        *)      echo "I dont know how to BUILD for a `bsparch -arch`";     \
+		exit 1;;						   \
+        esac
+
+#############################################################
+##             Generic Compilation targets                 ##
+#############################################################
+
+objects: ${SRCS_H} ${SRCS_O}
+
+delit: ${SRCS_C} ${SRCS_H} 
+
+root.dvi: $(SRCS_TEX)
+	latex root.tex
+
+daemon:
+	@$(MAKE) banner TYPE="BSPlib TCP Daemons " FOR=""
+	$(MAKE) objects SRCS_LC="${SRCS_LC}" SRCS_LH="${SRCS_LH}"              \
+                        SRCS_O="${SRCS_O}" CFLAGS="${CFLAGS} @DEFS@"           \
+                        CC="${CC}";                                            \
+	${CC} ${CFLAGS} -o  bspportd $(SRCS_PORT_O)  ${LIBRARIES};             \
+	${CC} ${CFLAGS} -o  bspnowd $(SRCS_DAEMON_O) ${LIBRARIES};             \
+	${CC} ${CFLAGS} -o  bspnows $(SRCS_SLAVE_O)  ${LIBRARIES};             \
+	${CC} ${CFLAGS} -o  bspnowm $(SRCS_MASTER_O) ${LIBRARIES};             \
+	${CC} ${CFLAGS} -o  bspshutd $(SRCS_SHUTD_O) ${LIBRARIES};             \
+	${CC} ${CFLAGS} -o  bsploadd $(SRCS_LOAD_O)  ${LIBRARIES};             \
+	if [ ! -d ${top_srcdir}/bin/`bsparch -arch` ] ;                        \
+        then  mkdir -p ${top_srcdir}/bin/`bsparch -arch`; fi;                  \
+	${INSTALL_PROGRAM} bspportd $(top_srcdir)/bin/`bsparch -arch`/bspportd;\
+	${INSTALL_PROGRAM} bspshutd $(top_srcdir)/bin/`bsparch -arch`/bspshutd;\
+	${INSTALL_PROGRAM} bspnowd  $(top_srcdir)/bin/`bsparch -arch`/bspnowd; \
+	${INSTALL_PROGRAM} bsploadd $(top_srcdir)/bin/`bsparch -arch`/bsploadd;\
+	${INSTALL_PROGRAM} bspnows  $(top_srcdir)/bin/`bsparch -arch`/bspnows; \
+	${INSTALL_PROGRAM} bspnowm  $(top_srcdir)/bin/`bsparch -arch`/bspnowm
+      
+
+clean:
+	rm -f $(SRCS_O) $(SRCS_ANY_O) $(BINARY_TARGET)   \
+              $(SRCS_H) $(SRCS_TEX) mon.out $(SRCS_C)    \
+	      y.tab.c bspnowd bspnows bspnowm bspportd bsploadd bspshutd
+
+banner:
+	@echo "#########################################################"; \
+        echo  "#####   ${TYPE} = ${FOR}";                                  \
+        echo  "#########################################################"
+
+
+#############################################################
+##             Dependencies                                ##
+#############################################################
+
+bspnowm.o: bspnowm.lc bspnowdefs.h bspnowerrs.h  bspnowpar.c y.tab.c \
+           bspnowlex.c bspnowerrs.h bsptcpsio.h
+bspnows.o: bspnows.lc bspnowdefs.h bspnowerrs.h
+bspnowd.o: bspnowd.lc bspnowdefs.h bspnowerrs.h
+bspportd.o: bspnowd.lc bspnowdefs.h bspnowerrs.h
+bsploadd.o: bsploadd.lc bspnowdefs.h bspnowerrs.h   \
+            bsploadfuns.h bspnowlex.c bsptcpsio.h
+bsploadfuns.o: bsploadfuns.lc bspnowdefs.h bspnowerrs.h bsptcpsio.h

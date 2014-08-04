@@ -1,0 +1,132 @@
+
+
+
+bspparam(1)               User Commands               bspparam(1)
+
+
+
+NAME
+     bspparm - prints a table of the BSP machine parameters
+
+
+SYNOPSIS
+     bspparam [ -v ] [ -help ] [  ] [ -time ]
+
+
+DESCRIPTION
+     This command generates  a  table  containing  the  BSP  cost
+     parameters for the machine the command is executed upon. The
+     entries in the table are read from a database, and not  gen-
+     erated on demand.
+
+     The BSP parameter database is used by bspprof(1),  bspsig(1)
+     and   the  bsplib_level1(3)  functions  bsp_s(3),  bsp_l(3),
+     bsp_g(3) and bsp_nhalf(3). These functions are used  in  the
+     definition of the bsplib_level1(3) collective communucations
+     operations such that alternative implementations of  a  col-
+     lective  operation  may be choosen at runtime depending upon
+     the values of a machines BSP parameters.
+
+
+
+OPTIONS
+     -v    Print (on standard error output) the  phases  involved
+          in the execution of the command.
+
+     -help
+          Print this manual page on standard output.
+
+     -time
+          The BSP parameters are given  with  respect  to  micro-
+          seconds  instead of equivalent number of floating point
+          operations.
+
+     -a    Generate entries for all machines  stored in  the  BSP
+          parameter database.
+
+
+NOTES
+     The environment variable BSP_SLG can be used to override the
+     database entry for a machines BSP parameters. For example,
+
+     > setenv BSP_SLG 50.0,1000,10.0,12
+
+     has the effect of setting s=50.0 mflops/sec, L=1000  mflops,
+     g=10.0 flops/word, and n_half=20 words.
+
+
+FILES
+     The  file  _P_R_E_F_I_X/include/bsp_parameters.ascii  contains   a
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    1
+
+
+
+
+
+
+bspparam(1)               User Commands               bspparam(1)
+
+
+
+     table  of  the BSP parameters read by these functions; where
+     _P_R_E_F_I_X is  the  installation  prefix  set  when  configuring
+     BSPlib.
+
+
+SEE ALSO
+     bsplib(3), bspfront(1), bsparch(1)
+
+     The Oxford BSP toolset web pages can be found  at:
+     _h_t_t_p://_w_w_w._b_s_p-_w_o_r_l_d_w_i_d_e._o_r_g/_i_m_p_l_m_n_t_s/_o_x_t_o_o_l/
+     _h_t_t_p://_w_w_w._b_s_p-_w_o_r_l_d_w_i_d_e._o_r_g/_i_m_p_l_m_n_t_s/_o_x_t_o_o_l/_p_a_r_a_m_s._h_t_m_l
+
+
+BUGS
+     Problems  and  bug  reports  should  be  mailed  to  _b_s_p_l_i_b-
+     _b_u_g_s@_c_o_m_l_a_b._o_x._a_c._u_k
+
+
+AUTHORS
+     Jonathan.Hill@comlab.ox.ac.uk
+
+     http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    2
+
+
+

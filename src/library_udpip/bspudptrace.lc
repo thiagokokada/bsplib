@@ -1,0 +1,172 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1998 Stephen Donaldson                             %%
+%%                      &  The University of Oxford                      %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it into other software, is hereby granted          %%
+%% without fee, provided that                                            %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#ifndef __KERNEL__
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#else
+#include <linux/time.h>
+#endif
+
+#if !defined(MPASS_3C905B)
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <netdb.h>
+#endif
+
+#include "../library_now/bspnowdefs.h"
+#include "../library_udpip/bspudpdefs.h"
+
+#ifdef __KERNEL__
+#define gettimeofday(x,y) do_gettimeofday(x)
+#endif
+\end{code}
+
+\begin{code}
+#ifndef BSPUDP_MSC_TRACE
+char bspudp_msc_trace[] = "BSP/UDP Trace: not compiled with tracing";
+#else
+#ifndef __KERNEL__
+static FILE *msctrace = NULL;    /* MSC trace file */
+#endif
+extern int bspudp_pid;           /* local process's BSP pid */
+extern bspudp_anch_t  *bspudp_anchor;
+#endif
+
+#ifdef BSPUDP_MSC_TRACE
+
+static char *msg_type[] = {
+   "Data", "LastData", "Retry", "Ack"};
+
+static char *edge_colour[] = {
+   "green", "blue", "red"};
+
+double msc_time(void)
+   {
+   struct timeval tv;
+   long micsecs;
+
+   gettimeofday(&tv,NULL);
+   tv.tv_sec = tv.tv_sec - bspudp_anchor->base_time.tv_sec;
+   micsecs = ((long int) tv.tv_usec) - 
+             ((long int) bspudp_anchor->base_time.tv_usec);
+
+
+   return (double)tv.tv_sec + (double)micsecs/1000000.0;
+   }
+
+
+#ifndef __KERNEL__
+void msc_open(void)
+   {
+   char tracename[80];
+
+   sprintf(tracename,"/tmp/bspudp.msc.trace.%d",bspudp_pid);
+   msctrace = fopen(tracename,"w");
+   if (!msctrace)
+      {
+      fprintf(stderr,"BSP/UDP Trace: Error opening trace file %s.\n",
+         tracename);
+      msctrace = stdout;
+      }
+      
+   bspudp_anchor->msc_id = 0;
+   gettimeofday(&bspudp_anchor->base_time,NULL);
+   }
+#endif
+
+void msc_data(char *operation, bspudp_msghdr_t *msg, int assign_msc_id)
+   {
+   char   nodename[50];
+   char   nodepos[50];
+   double timenow;
+#ifdef MPASS_3C905B
+   char *trace_buff;
+   trace_buff = USER_OR_KERNEL(bspudp_anchor->vtrace_buff,
+			       bspudp_anchor->ptrace_buff);
+#endif
+
+
+   if (assign_msc_id)
+      msg->msgmscnum = bspudp_anchor->msc_id++;
+
+   sprintf(nodename,"%hd-%hd-%d-%c",msg->msgspid,msg->msgdpid,
+      msg->msgmscnum,*operation);
+
+   timenow = msc_time();
+   /* The kernel doesn't support %f in format strings */
+   sprintf(nodepos,"%d %d.%06d",
+	   bspudp_pid,
+	   (int) timenow,
+	   (int) (1000000.0*(timenow - ((int) timenow))));
+
+#ifdef MPASS_3C905B
+   if (bspudp_anchor->trace_offset+80 < bspudp_anchor->trace_len)
+      bspudp_anchor->trace_offset+=
+         sprintf(trace_buff+bspudp_anchor->trace_offset,
+	         " %s %s %c %d %d %d %d\n",
+                 nodename,nodepos,*msg_type[msg->msgprot],msg->msgtype,
+	         msg->msgseq,msg->msgack,msg->msghigh);
+#ifndef __KERNEL__
+   fprintf(msctrace,trace_buff);
+   fflush(msctrace);
+   bspudp_anchor->trace_offset=0;
+#endif
+
+#else
+   fprintf(msctrace," %s %s %c %d %d %d %d\n",
+               nodename,nodepos,*msg_type[msg->msgprot],msg->msgtype,
+	       msg->msgseq,msg->msgack,msg->msghigh);
+#endif
+
+   }
+
+#ifndef MPASS_3C905B
+int tsendto(int s, const void *msg, int  len,  unsigned  int
+       flags, const struct sockaddr *to, int tolen)
+   {
+   int rc;
+
+   if (!msctrace) msc_open();
+
+   msc_data("Send",(bspudp_msghdr_t *)msg,1);
+   rc = sendto(s,msg,len,flags,to,tolen);
+
+   return rc;
+   }
+
+int trecvfrom(int s, void *buf, int len, unsigned int flags,
+       struct sockaddr *from, int *fromlen)
+   {
+   int rc;
+
+   if (!msctrace) msc_open();
+
+   rc = recvfrom(s,buf,len,flags,from,fromlen); 
+   if (rc > 0)
+      msc_data("Receive",(bspudp_msghdr_t *)buf,0);
+
+   return rc;
+   }
+#endif
+#endif /* BSPUDP_MSC_TRACE */
+\end{code}

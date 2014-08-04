@@ -1,0 +1,209 @@
+.TH "bsplibd" 1 "1.4 25/9/98" "Oxford BSP Toolset"
+.SH NAME
+bsplibd \- daemon for BSPlib programs running over TCP/IP and UDP/IP.
+
+.SH SYNOPSIS
+.B bsplibd
+[ \-all ]
+
+.SH DESCRIPTION
+The purpose of this command is to start two daemons, 
+.I bspnowd
+and
+.I bspportd\c
+\&, that enable a machine to be involved in a BSPlib computation when
+using the TCP/IP or UDP/IP versions of the library. These daemon controls the
+startup of programs on remote nodes:
+
+.TP
+.B "bspnowd (user process daemon)"
+The daemon 
+.I bspnowd
+controls access to a machine for a particular user (this daemon is
+used to start processes on the local node as a result of a remote
+startup request). Security is controlled by only allowing processes to
+be initiated if the user-id and password on the machine that initiates
+the BSP job is the same as the machine on which the user daemon is
+running. This daemon is started by the user by running the command
+.I bsplibd(1)
+on each machine in a cluster. If a daemon for the user is already
+running on a machine, then starting a new daemon will cause the older
+one to shutdown (and kill all uncompleted BSP jobs for that user)
+before the new one is started.
+
+.TP
+.B "bspportd: port daemon"
+The daemon 
+.I bspportd
+maintains a correspondence between port numbers and BSPlib user
+daemons. There is only one port daemon per machine (it can be started
+by anyone), although there is one 
+.I bspnowd
+per user. This daemon is also started by running the command
+.I bsplibd
+on each machine in a cluster. If a port daemon is already active
+(i.e., started by another user), then there is no need to start
+another daemon, and an error (which can be ignored) will be reported
+that the bind fails:
+
+.nf
+pine.comlab> bsplibd
+BSP/NOW Port Daemon(pine): bind() call failed: Address already in use
+BSP/NOW Daemon(pine): forked with pid 26840.
+.fi
+.PP
+
+A short-cut that will start the daemons on all the machines specified
+in a cluster, and establish a correct BSPlib environment for a
+single user is shown below:
+
+.nf
+pine.comlab> bsplibd -all
+pine.comlab> bspload -start -all
+.fi
+
+This short-cut requires that 
+.I pine
+has an entry in the .rhost files on all the machines in the cluster,
+as it uses 
+.I rsh(1)\c
+\&. If rsh is not available on your platform, you will have to start
+the daemons on each of the machines individually. The daemons need
+only be started once, and this will establish the environment for all
+subsequent BSPlib jobs for that user. The user need not log onto
+each of the machines once the daemons are started. Any user
+interaction with all the daemons can be performed remotely from a
+single workstation of a BSPlib cluster.
+
+The load manager (\c
+.I bspload(1)\c
+\&), the program that starts up BSP processes (\c
+.I bsprun(1)\c
+), and the TCP/IP or UDP/IP message passing systems used in the implementation of
+BSPlib all require that a user specified cluster of workstations is
+defined in the file 
+.I "~/.bsptcphosts"\c
+\&. As an example of such a file, consider a cluster of four workstations
+called 
+.I pine,
+.I ash,
+.I oak,
+and
+.I mercury\c
+\&, some of which are multiprocessor SMPs, and two of which are connected
+by an FDDI ring seperate from the normal lab Ethernet network:
+
+.nf
+pine.comlab> cat ~/.bsptcphosts
+host(oak);
+host(pine);  
+host(ash)     ncpus(2) adapter(ash-fddi);
+host(mercury) ncpus(4) adapter(mercury-fddi);
+.fi
+
+The file contains a number of descriptors each delimited by a
+semi-colon. The first descriptor on a line has to be 
+.I host\c
+\&, and has to be a name-server queriable name of the machine. The
+other entries are optional, but change the behaviour of the BSP
+cluster. For example, the 
+.I ncpus
+keyword specifies the number of processors in a workstation. This
+information is used by 
+.I bspload(1) 
+so that multiple processes may be started on the same processor.
+
+If a host is not listed in the host list, then it is not considered
+part of a cluster. Since the load daemon maintains loads for the entire
+user community, the host list used when the load daemon was started
+should be a superset of all users' host lists.
+
+
+To compile a BSP program for TCP/IP execution, the program must be
+compiled with 
+.I bspfront(1)
+and the environment variable
+.I BSP_DEVICE
+must be set to 
+.I MPASS_TCPIP\c
+\&; to compile a BSP program for TCP/IP execution, the program must be
+compiled with 
+.I bspfront(1)
+and the environment variable
+.I BSP_DEVICE
+must be set to 
+.I MPASS_UDPIP\c
+\&.The command
+.I bsprun(1) 
+is used to initiate a BSP job. By default, it starts the requested
+number of processes on the least loaded processors in a network. The
+following options can be used to override this default behaviour:
+
+.TP
+.B "bsprun -noload"
+The load daemon is ignored, and processes are started on processors in
+host-list order.
+
+.TP
+.B "bsprun -local"
+The BSP process with 
+.I bsp_pid()
+equal to zero is guarenteed to run on the processor where
+.I bsprun(1)
+was executed. This may be required for I/O purposes.
+
+.TP 
+.B "bsprun -nolocal"
+No BSP process will run on the processor where 
+.I bsprun(1)
+was executed. 
+.PP
+
+A BSP job need not be run on a cluster of workstations that have a
+common NFS file system. For non-NFS clusters, the TCP/IP and UDP/IP
+system assumes that the directory structure above
+.I $HOME
+is the same on each machine in the cluster.
+
+.SH OPTIONS
+.TP
+.B \-v
+Print (on standard error output) the phases involved in the execution
+of the command.
+.TP
+.B \-help
+Print this manual page on standard output
+
+.TP
+.B \-all
+If the machine where the 
+.B bsplibd(1)
+command is executed has an entry in the .rhost files on all the
+machines in the BSP cluster, then the daemons will be started on all
+the machines listed in .bsptcphosts.
+
+
+.SH "NOTES"
+The environment variable
+.I BSP_DEVICE
+must be set to MPASS_TCPIP or MPASS_UDPIP for the message passing
+version of the library to work.
+
+.SH  "SEE ALSO"
+bsprun(3), bsphutd(1)
+
+The Oxford BSP toolset web pages can be found  at:
+.br
+.I http://www.bsp-worldwide.org/implmnts/oxtool/
+
+.SH BUGS
+Problems and bug reports should be mailed to 
+.I bsplib-bugs@comlab.ox.ac.uk
+
+.SH AUTHORS
+Stephen.Donaldson@comlab.ox.ac.uk and Jonathan.Hill@comlab.ox.ac.uk
+.PP
+.B http://www.comlab.ox.ac.uk/oucl/people/stephen.donaldson.html
+.BR
+.B http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+

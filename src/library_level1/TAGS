@@ -1,0 +1,277 @@
+
+bsp_bcast.lc,152
+\label{38,1864
+void bsp_bcast_init(68,2808
+void bsp_bcast_stat(94,3456
+void bsp_bcast(111,4036
+void bsp_bcast_cpp(115,4156
+void BSPBCAST(186,6151
+
+bsp_fold.lc,310
+#define FOLD_CACHE_SIZE 39,1770
+\begin{60,2629
+%                                    ln(84,3413
+%                     3ln(p) + ln(86,3525
+void bsp_fold_init(99,3840
+void bsp_fold_stat(128,4694
+static void bsp_fold_totex(144,5331
+void bsp_fold_cpp(194,6645
+void BSPFOLD(211,7145
+void bsp_fold(227,7583
+
+bsp_fold_funs.lc,2017
+void _bsp_op_addI(39,1660
+void _bsp_op_andI(40,1739
+void _bsp_op_orI(41,1819
+void _bsp_op_addR(42,1899
+void _bsp_op_addD(43,1978
+void _bsp_op_multI(44,2057
+void _bsp_op_multR(45,2136
+void _bsp_op_multD(46,2215
+void _bsp_op_eqI(47,2294
+void _bsp_op_maxI(49,2374
+void _bsp_op_maxR(54,2470
+void _bsp_op_maxD(58,2565
+void _bsp_op_minI(62,2660
+void _bsp_op_minR(66,2755
+void _bsp_op_minD(70,2850
+void bsp_fold_funs_init(80,3026
+int bsp_any(92,3270
+int bsp_all(97,3355
+int bsp_any_prefix(102,3441
+int bsp_all_prefix(107,3533
+int bsp_constantI(118,3762
+int bsp_sumI(140,4274
+float bsp_sumR(146,4362
+double bsp_sumD(151,4455
+int bsp_sumI_prefix(156,4551
+float bsp_sumR_prefix(161,4645
+double bsp_sumD_prefix(166,4745
+int bsp_productI(176,4921
+float bsp_productR(181,5013
+double bsp_productD(186,5111
+int bsp_productI_prefix(191,5212
+float bsp_productR_prefix(196,5311
+double bsp_productD_prefix(201,5416
+int bsp_maxI(211,5597
+float bsp_maxR(216,5684
+double bsp_maxD(221,5777
+int bsp_maxI_prefix(226,5873
+float bsp_maxR_prefix(231,5967
+double bsp_maxD_prefix(236,6067
+int bsp_minI(246,6243
+float bsp_minR(251,6330
+double bsp_minD(256,6423
+int bsp_minI_prefix(261,6519
+float bsp_minR_prefix(266,6613
+double bsp_minD_prefix(271,6713
+int BSPALL(281,6947
+int BSPANY(282,7003
+int    BSPSUMI(284,7060
+float  BSPSUMR(285,7117
+double BSPSUMD(286,7174
+int    BSPSUMI_PREFIX(287,7231
+float  BSPSUMR_PREFIX(288,7295
+double BSPSUMD_PREFIX(289,7359
+int    BSPPRODUCTI(291,7424
+float  BSPPRODUCTR(292,7489
+double BSPPRODUCTD(293,7554
+int    BSPPRODUCTI_PREFIX(294,7619
+float  BSPPRODUCTR_PREFIX(295,7691
+double BSPPRODUCTD_PREFIX(296,7763
+int    BSPMAXI(298,7832
+float  BSPMAXR(299,7889
+double BSPMAXD(300,7946
+int    BSPMAXI_PREFIX(301,8003
+float  BSPMAXR_PREFIX(302,8067
+double BSPMAXD_PREFIX(303,8131
+int    BSPMINI(305,8196
+float  BSPMINR(306,8253
+double BSPMIND(307,8310
+int    BSPMINI_PREFIX(308,8367
+float  BSPMINR_PREFIX(309,8431
+double BSPMIND_PREFIX(310,8495
+
+bsp_fortran77.lc,202
+void bsp_f77_init(35,1548
+void BSPPUT_COMMON(43,1798
+void BSPHPPUT_COMMON(47,1935
+void BSPGET_COMMON(51,2076
+void BSPHPGET_COMMON(56,2214
+void CPPSYNC_NUMBER(62,2371
+void BSPSYNC_NUMBER(114,3760
+
+bsp_gather.lc,49
+void bsp_gather(26,1391
+void BSPGATHER(43,1839
+
+bsp_scan.lc,243
+\label{60,2639
+%                                   ln(71,2992
+void bsp_scan_init(86,3470
+void bsp_scan_stat(109,4087
+static void bsp_scan_prefix(124,4686
+static void bsp_scan_totex(157,5488
+void bsp_scan(202,6641
+void BSPSCAN(215,7027
+
+bsp_scatter.lc,26
+void bsp_scatter(26,1392
+
+bsp_slg.lc,240
+#define MAX_LINE_LENGTH 23,1317
+double bsp_s(37,1712
+double bsp_g(38,1750
+double bsp_l(39,1788
+int   bsp_nhalf(40,1826
+double BSPS(47,1996
+double BSPG(48,2033
+double BSPL(49,2070
+int   BSPNHALF(50,2107
+void bspparams_init(57,2297
+
+bsp_sort.lc,316
+small values of $N$ this will probably be the most efficient 32,1590
+void bsp_sort(35,1698
+int _bsp_op_lessThanI(71,2671
+int _bsp_op_lessThanR(72,2744
+int _bsp_op_lessThanD(73,2817
+int _bsp_op_lessThanC(74,2890
+int bsp_sortI(81,3105
+float bsp_sortR(88,3255
+double bsp_sortD(95,3413
+char bsp_sortC(102,3576
+
+bsp_tcpstartup.lc,19
+void main(25,1327
+
+bsp_f77_names.lh,3476
+#define BSPBCAST 21,1262
+#define BSPGATHER 22,1304
+#define BSPSCAN 23,1347
+#define BSPFOLD 24,1388
+#define BSPALL 25,1429
+#define BSPANY 26,1469
+#define BSPSUMI 27,1509
+#define BSPSUMR 28,1550
+#define BSPSUMD 29,1591
+#define BSPSUMI_PREFIX 30,1632
+#define BSPSUMR_PREFIX 31,1680
+#define BSPSUMD_PREFIX 32,1728
+#define BSPPRODUCTI 33,1776
+#define BSPPRODUCTR 34,1821
+#define BSPPRODUCTD 35,1866
+#define BSPPRODUCTI_PREFIX 36,1911
+#define BSPPRODUCTR_PREFIX 37,1963
+#define BSPPRODUCTD_PREFIX 38,2015
+#define BSPMINI 39,2067
+#define BSPMINR 40,2108
+#define BSPMIND 41,2149
+#define BSPMINI_PREFIX 42,2190
+#define BSPMINR_PREFIX 43,2238
+#define BSPMIND_PREFIX 44,2286
+#define BSPMAXI 45,2334
+#define BSPMAXR 46,2375
+#define BSPMAXD 47,2416
+#define BSPMAXI_PREFIX 48,2457
+#define BSPMAXR_PREFIX 49,2505
+#define BSPMAXD_PREFIX 50,2553
+#define BSPPUT_COMMON 52,2602
+#define BSPHPPUT_COMMON 53,2649
+#define BSPGET_COMMON 54,2698
+#define BSPHPGET_COMMON 55,2745
+#define BSPSYNC_NUMBER 56,2794
+#define CPPSYNC_NUMBER 57,2842
+#define BSPS 59,2891
+#define BSPL 60,2929
+#define BSPG 61,2967
+#define BSPNHALF 62,3005
+#define BSPBCAST 66,3078
+#define BSPGATHER 67,3121
+#define BSPSCAN 68,3165
+#define BSPFOLD 69,3207
+#define BSPALL 70,3249
+#define BSPANY 71,3290
+#define BSPSUMI 72,3331
+#define BSPSUMR 73,3373
+#define BSPSUMD 74,3415
+#define BSPSUMI_PREFIX 75,3457
+#define BSPSUMR_PREFIX 76,3506
+#define BSPSUMD_PREFIX 77,3555
+#define BSPPRODUCTI 78,3604
+#define BSPPRODUCTR 79,3650
+#define BSPPRODUCTD 80,3696
+#define BSPPRODUCTI_PREFIX 81,3742
+#define BSPPRODUCTR_PREFIX 82,3795
+#define BSPPRODUCTD_PREFIX 83,3848
+#define BSPMINI 84,3901
+#define BSPMINR 85,3943
+#define BSPMIND 86,3985
+#define BSPMINI_PREFIX 87,4027
+#define BSPMINR_PREFIX 88,4076
+#define BSPMIND_PREFIX 89,4125
+#define BSPMAXI 90,4174
+#define BSPMAXR 91,4216
+#define BSPMAXD 92,4258
+#define BSPMAXI_PREFIX 93,4300
+#define BSPMAXR_PREFIX 94,4349
+#define BSPMAXD_PREFIX 95,4398
+#define BSPPUT_COMMON 97,4448
+#define BSPHPPUT_COMMON 98,4496
+#define BSPGET_COMMON 99,4546
+#define BSPHPGET_COMMON 100,4594
+#define BSPSYNC_NUMBER 101,4644
+#define CPPSYNC_NUMBER 102,4693
+#define BSPS 104,4743
+#define BSPL 105,4782
+#define BSPG 106,4821
+#define BSPNHALF 107,4860
+#define BSPBCAST 114,4958
+#define BSPGATHER 115,4999
+#define BSPSCAN 116,5041
+#define BSPFOLD 117,5081
+#define BSPALL 118,5121
+#define BSPANY 119,5160
+#define BSPSUMI 120,5199
+#define BSPSUMR 121,5239
+#define BSPSUMD 122,5279
+#define BSPSUMI_PREFIX 123,5319
+#define BSPSUMR_PREFIX 124,5366
+#define BSPSUMD_PREFIX 125,5413
+#define BSPPRODUCTI 126,5460
+#define BSPPRODUCTR 127,5504
+#define BSPPRODUCTD 128,5548
+#define BSPPRODUCTI_PREFIX 129,5592
+#define BSPPRODUCTR_PREFIX 130,5643
+#define BSPPRODUCTD_PREFIX 131,5694
+#define BSPMINI 132,5745
+#define BSPMINR 133,5785
+#define BSPMIND 134,5825
+#define BSPMINI_PREFIX 135,5865
+#define BSPMINR_PREFIX 136,5912
+#define BSPMIND_PREFIX 137,5959
+#define BSPMAXI 138,6006
+#define BSPMAXR 139,6046
+#define BSPMAXD 140,6086
+#define BSPMAXI_PREFIX 141,6126
+#define BSPMAXR_PREFIX 142,6173
+#define BSPMAXD_PREFIX 143,6220
+#define BSPPUT_COMMON 145,6268
+#define BSPHPPUT_COMMON 146,6314
+#define BSPGET_COMMON 147,6362
+#define BSPHPGET_COMMON 148,6408
+#define BSPSYNC_NUMBER 149,6456
+#define CPPSYNC_NUMBER 150,6503
+#define BSPS 152,6551
+#define BSPL 153,6588
+#define BSPG 154,6625
+#define BSPNHALF 155,6662
+
+bsp_level1.lh,122
+#define LINKAGE 23,1366
+#define LINKAGE 25,1392
+#define bsp_bcast(bsp_bcast82,3391
+#define bsp_fold(bsp_fold83,3459
+
+fbsp_level1.lh,9
+C 8,451

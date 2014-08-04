@@ -1,0 +1,76 @@
+\contentsline {section}{\numberline {0.1}Tunable paramaters}{5}
+\contentsline {section}{\numberline {0.2}Component paths and names}{6}
+\contentsline {section}{\numberline {0.3}Structure of a packet header}{7}
+\contentsline {section}{\numberline {0.4}msgtype values indicating message payload}{7}
+\contentsline {section}{\numberline {0.5}Hostname data structures}{7}
+\contentsline {chapter}{\numberline {1}TCP/IP communications library}{12}
+\contentsline {section}{\numberline {1.1}Setting the buffer size}{14}
+\contentsline {section}{\numberline {1.2}Setting environment variables before process startup}{14}
+\contentsline {section}{\numberline {1.3}Spawn processes on remote nodes}{16}
+\contentsline {section}{\numberline {1.4}Auxillary receive function, only to be used internally}{25}
+\contentsline {section}{\numberline {1.5}Send predicate}{27}
+\contentsline {section}{\numberline {1.6}Non-blocking send}{27}
+\contentsline {section}{\numberline {1.7}Blocking receive}{30}
+\contentsline {section}{\numberline {1.8}Wait for any posted sends to drain from the sending process}{32}
+\contentsline {section}{\numberline {1.9}Predicate to check if a message has come into a process}{32}
+\contentsline {section}{\numberline {1.10}Abort: one process stops all}{35}
+\contentsline {section}{\numberline {1.11}Tidy exit from the message passing system}{35}
+\contentsline {section}{\numberline {1.12}$\mu s$ based waiting function}{36}
+\contentsline {section}{\numberline {1.13}Random number generator}{37}
+\contentsline {chapter}{\numberline {2}Master process}{38}
+\contentsline {section}{\numberline {2.1}Global variables}{39}
+\contentsline {section}{\numberline {2.2}Macros for guard functions}{39}
+\contentsline {section}{\numberline {2.3}Prototypes}{41}
+\contentsline {section}{\numberline {2.4}The main program}{41}
+\contentsline {section}{\numberline {2.5}Kill the spmd program and broadcast signal}{62}
+\contentsline {section}{\numberline {2.6}Reap Exiting children}{63}
+\contentsline {chapter}{\numberline {3}Slave process}{64}
+\contentsline {section}{\numberline {3.1}Global variables}{65}
+\contentsline {section}{\numberline {3.2}Macros for guard functions}{65}
+\contentsline {section}{\numberline {3.3}Prototypes}{66}
+\contentsline {section}{\numberline {3.4}The main program}{66}
+\contentsline {section}{\numberline {3.5}Kill the spmd program and broadcast signal}{79}
+\contentsline {section}{\numberline {3.6}Reap exiting children}{79}
+\contentsline {chapter}{\numberline {4}Auxillary functions}{81}
+\contentsline {section}{\numberline {4.1}setenv}{81}
+\contentsline {section}{\numberline {4.2}sendall}{82}
+\contentsline {section}{\numberline {4.3}recvall}{83}
+\contentsline {chapter}{\numberline {5}Port Daemon}{86}
+\contentsline {paragraph}{Security:}{86}
+\contentsline {section}{\numberline {5.1}Additional structures for recording registered user daemons}{87}
+\contentsline {section}{\numberline {5.2}Global variables}{87}
+\contentsline {section}{\numberline {5.3}Prototypes}{88}
+\contentsline {section}{\numberline {5.4}The main program}{88}
+\contentsline {section}{\numberline {5.5}Exit chain}{97}
+\contentsline {section}{\numberline {5.6}Shuting down the daemon}{98}
+\contentsline {chapter}{\numberline {6}Processor daemon}{100}
+\contentsline {section}{\numberline {6.1}Prototypes}{101}
+\contentsline {section}{\numberline {6.2}Global variables}{101}
+\contentsline {section}{\numberline {6.3}Main program}{101}
+\contentsline {section}{\numberline {6.4}Terminate all slaves}{113}
+\contentsline {section}{\numberline {6.5}Inform the system of slave creation}{113}
+\contentsline {section}{\numberline {6.6}Inform the system of slave deletion}{113}
+\contentsline {section}{\numberline {6.7}Signal handler: cleanup terminated slaves}{114}
+\contentsline {section}{\numberline {6.8}Register a user request}{115}
+\contentsline {chapter}{\numberline {7}Closing down the daemons}{118}
+\contentsline {section}{\numberline {7.1}The main program}{119}
+\contentsline {chapter}{\numberline {8}Load daemon}{123}
+\contentsline {section}{\numberline {8.1}Sanity checking}{123}
+\contentsline {section}{\numberline {8.2}Lexer and Parser}{124}
+\contentsline {section}{\numberline {8.3}Main server loop}{124}
+\contentsline {section}{\numberline {8.4}Kill a slave}{140}
+\contentsline {section}{\numberline {8.5}Signal handler to wait on exiting child}{140}
+\contentsline {section}{\numberline {8.6}Accounting for adding a slave}{140}
+\contentsline {section}{\numberline {8.7}Accounting for deleting a slave}{141}
+\contentsline {section}{\numberline {8.8}Open a connection to a load server}{143}
+\contentsline {section}{\numberline {8.9}Receive a load query}{144}
+\contentsline {section}{\numberline {8.10}Calculate the load average}{145}
+\contentsline {section}{\numberline {8.11}Timestamp of oldest load average}{146}
+\contentsline {section}{\numberline {8.12}Pick random host}{146}
+\contentsline {section}{\numberline {8.13}Sort host list}{147}
+\contentsline {section}{\numberline {8.14}Updates the load average in the list of hosts}{148}
+\contentsline {section}{\numberline {8.15}Merges a remote daemons load averages with the local list}{149}
+\contentsline {section}{\numberline {8.16}Print the load averages}{150}
+\contentsline {section}{\numberline {8.17}Pretty print the load averages}{150}
+\contentsline {section}{\numberline {8.18}Updates the load average in the list of hosts}{152}
+\contentsline {section}{\numberline {8.19}Calculate Mflop rating}{153}

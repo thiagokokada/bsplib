@@ -1,0 +1,177 @@
+head	1.1;
+access;
+symbols;
+locks
+	jonh:1.1; strict;
+comment	@% @;
+
+
+1.1
+date	95.08.31.16.37.03;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995, University of Oxford                         %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id$
+% $Log$
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+\chapter{High level BSP operations} 
+\label{sect:bspirix}
+
+Operations such as \texttt{reduce}, \texttt{broadcast} and
+\texttt{scan} would normally be defined in terms of the BSP library.
+The routines given here are built directly ontop of the IRIX IPC
+library, which use the data-structures available from the IRIX
+implementation of the library.
+
+\begin{code}
+#include "bsp_lib.h"
+#include "bsp_profile.h"
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Broadcast function}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_broadcast(int pid, void *src, void *dst, int nbytes) {
+  int   togo_nbytes  = nbytes;
+  int   chunk_nbytes;
+  void *chunk_dst    = dst;
+  void *chunk_src    = src;
+
+#ifdef PROFILE
+  if (_bsp_pid==pid) _bspprof.broadcast_nbytes+=nbytes;
+#endif
+#ifdef SANITY_CHECK
+  if (bsp_sumI(pid) != pid * _bsp_nprocs)
+    bsp_error("{bsp_broadcast} the broadcasting pid is not constant "
+              "on all the processors");
+
+  if (bsp_sumI(nbytes) != nbytes * _bsp_nprocs)
+    bsp_error("{bsp_broadcast} the broadcasting nbytes is not constant "
+              "on all the processors");
+#endif
+  while (togo_nbytes>0) {
+    if (togo_nbytes > BSP_BUFFER_SIZE) {
+      togo_nbytes -= BSP_BUFFER_SIZE;
+      chunk_nbytes = BSP_BUFFER_SIZE;
+    } else {
+      chunk_nbytes = togo_nbytes;
+      togo_nbytes  = 0;
+    }
+    if (pid == _bsp_pid) {
+#ifdef DEBUG
+      bsp_debug("{broadcast}:Copying %d bytes to shared memory buffer",
+                 chunk_nbytes);
+#endif
+      memcpy((char *)_shmem->buffer,(char*)chunk_src,chunk_nbytes);
+    } 
+    barrier_sync();
+    if (!(pid==_bsp_pid && src==dst)) {
+#ifdef DEBUG
+      bsp_debug("{broadcast}: Copying shared memory buffer to 0x%x",
+                chunk_dst);
+#endif
+      memcpy((char *)chunk_dst,(char *)_shmem->buffer, chunk_nbytes);
+    }
+    barrier_sync();
+    chunk_src = (char*) chunk_src + chunk_nbytes;
+    chunk_dst = (char*) chunk_dst + chunk_nbytes;
+  }
+}
+\end{code}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Gather  function}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Inverse of broadcast. \texttt{src} on each processor is put into
+\texttt{offset} bytes from \texttt{dst} on \texttt{pid}.
+\texttt{offset} is calculated with respect to the sending machine.
+Its semantics are as if it where implemented as:
+
+\begin{verbatim}
+void bsp_gather(int pid, void *src, void *dst, int offset, int nbytes) {
+  bsp_sstep(100);
+  bsp_store(pid,src,dst,offset,nbytes);
+  bsp_sstep_end(100);
+}
+\end{verbatim}
+
+\begin{code}
+void bsp_gather(int pid, void *src, void *dst, int nbytes) {
+  int   togo_nbytes  = nbytes;
+  int   i,chunk_nbytes;
+  void *chunk_dst    = dst;
+  void *chunk_src    = src;
+
+#ifdef PROFILE
+  if (_bsp_pid==pid) _bspprof.gather_nbytes+=nbytes;
+#endif
+#ifdef SANITY_CHECK
+  if (bsp_sumI(pid) != pid * _bsp_nprocs)
+    bsp_error("{bsp_gather} the broadcasting pid is not constant "
+              "on all the processors");
+
+  if (bsp_sumI(nbytes) != nbytes * _bsp_nprocs)
+    bsp_error("{bsp_gather} the gathering nbytes is not constant "
+              "on all the processors");
+#endif
+  while (togo_nbytes>0) {
+    if (togo_nbytes > BSP_BUFFER_SIZE) {
+      togo_nbytes -= BSP_BUFFER_SIZE;
+      chunk_nbytes = BSP_BUFFER_SIZE;
+    } else {
+      chunk_nbytes = togo_nbytes;
+      togo_nbytes  = 0;
+    }
+    
+#ifdef DEBUG
+    bsp_debug("{bsp_gather}:Copying %d bytes from 0x%x to shared buffer",
+              nbytes,src);
+#endif
+    memcpy((char *)_shmem->proc_buffer[_bsp_pid],
+           (char*)chunk_src,chunk_nbytes); 
+    barrier_sync();
+    if (_bsp_pid==pid) {
+      for(i=0;i<_bsp_nprocs;i++) {
+#ifdef DEBUG
+        bsp_debug("{bsp_gather}: copying shared memory buffer + %d to 0x%d",
+                  _bsp_pid*nbytes,(char*) chunk_dst);
+#endif
+        memcpy((char *)chunk_dst+(i*nbytes),
+              (char *)_shmem->proc_buffer[i], chunk_nbytes);
+      }
+    }
+    chunk_src = ((char *)chunk_src) + chunk_nbytes;
+    chunk_dst = ((char *)chunk_dst) + chunk_nbytes;
+  }
+  barrier_sync();
+}
+\end{code}
+
+@

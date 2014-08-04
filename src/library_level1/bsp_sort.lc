@@ -1,0 +1,108 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id$
+% $Log$
+
+\begin{code}
+#include "bsp.h"
+#include "bsp_f77_names.h"
+#include <stdlib.h>
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Sorting routine for machines with few processors}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+This sorting routine takes the rather simplistic approach of gathering
+all the data into one processor, and then sorting it sequentially. For
+small values of $N$ this will probably be the most efficient (and
+easiest :-) way of doing it.
+\begin{code}
+void bsp_sort(int (*lt)(void*,void*,int*),
+          void* src, void* dst, int nbytes) {
+  
+  char *array,*temp;
+  int i,j;
+
+  if (_bsp_pid==0) {
+    array = calloc(_bsp_nprocs,nbytes);
+    temp  = malloc(nbytes);
+  }
+  bsp_gather(0,src,array,nbytes);
+  if (_bsp_pid==0) {
+    /* Using bubble sort to sort elements into increasing order */
+
+    for(i=0;i<_bsp_nprocs-1;i++) 
+      for (j=_bsp_nprocs-1;i<j;j--)
+        if (lt(array+(j*nbytes),array+((j-1)*nbytes),&nbytes)) {
+          /* Using dst on 1 as temporary scratch space */
+          memcpy(temp, array+(j*nbytes),nbytes);
+          memcpy(array+(j*nbytes), array+((j-1)*nbytes), nbytes);
+          memcpy(array+((j-1)*nbytes), temp,nbytes);
+        }
+  }
+  bsp_get(0,array,bsp_pid()*nbytes,dst,nbytes);
+  bsp_sync();
+  if (_bsp_pid==0) {
+    free(temp);
+    free(array);
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Instances of ordering predicates}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+int _bsp_op_lessThanI(int    *x, int    *y, int *nbytes){return(*x<*y);}
+int _bsp_op_lessThanR(float  *x, float  *y, int *nbytes){return(*x<*y);}
+int _bsp_op_lessThanD(double *x, double *y, int *nbytes){return(*x<*y);}
+int _bsp_op_lessThanC(char   *x, char   *y, int *nbytes){return(*x<*y);}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Instances of sorting the standard types}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+int bsp_sortI(int x) {
+  int result;
+  bsp_sort((int (*)(void*,void*,int*))_bsp_op_lessThanI,
+           &x,&result,sizeof(int));
+  return result;
+}
+
+float bsp_sortR(float x) {
+  float result;
+  bsp_sort((int (*)(void*,void*,int*))_bsp_op_lessThanR,
+           &x,&result,sizeof(float));
+  return result;
+}
+
+double bsp_sortD(double x) { 
+  double result;
+  bsp_sort((int (*)(void*,void*,int*))_bsp_op_lessThanD,
+           &x,&result,sizeof(double));
+  return result;
+}
+
+char bsp_sortC(char x) {
+  char result;
+  bsp_sort((int (*)(void*,void*,int*))_bsp_op_lessThanC,
+           &x,&result,sizeof(char));
+  return result;
+}
+\end{code}

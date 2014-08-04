@@ -1,0 +1,900 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Load daemon}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#include "bspnowdefs.h"
+#include "bsploadfuns.h"
+#include "bsptcpsio.h" 
+
+volatile int numslaves=0;          /* outstanding child processes */
+volatile int slave_pids[BSPTCP_LOAD_CHILDREN];
+volatile int slave_in_hand=0;
+bsphost_t *bsptcp_host_list;      /* first candidate host */
+
+void slaveadd(int);
+void slavedel(int);
+void slavereap(int);
+void slavekill(int);
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Sanity checking}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#define BSPTCP_COMPONENT "BSP/NOW Load" 
+void *GUARDNZP(void *fn, char *name)
+   {
+   if (!fn)
+      {
+      fprintf(stderr,"%s(%s): Error in %s call\n",
+	      BSPTCP_COMPONENT,bsp_my_hostname,name);
+      exit(3);
+      }
+   return fn;
+   }
+
+int GUARDNZ(int x, char *name)
+   {
+   if (!x)
+      {
+      fprintf(stderr,"%s(%s): Error in %s call\n",
+	      BSPTCP_COMPONENT,bsp_my_hostname, name);
+      exit(3);
+      }
+   return x;
+   }
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Lexer and Parser}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#include "y.tab.c"               /* host name table parser */
+#include "bspnowlex.c"           /* host name table lexical analyser */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Main server loop}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+void main(int argc, char *argv[]) {
+  int i;
+
+  int pid, lookup_pid;              /* for fork/waitpid/getpid/etc */
+  char  filename[BSPTCP_STR_LEN];   /* genearated temporary filenames */
+  char *load_msg;
+  int reload_attempts;
+  bsphost_t *walk;
+
+  int lsock;                        /* listen socket fd */
+  struct sockaddr_in lsaddr;        /* listen socket address/name */
+  int lbacklog = BSPTCP_BACKLOG;    /* listen backlog */
+  struct sockaddr_in rsaddr;        /* controlling socket address/name */
+  int rsaddrlen;                    /* controlling socket addr length */
+  int csock, rsock;                 /* controlling socket fd */
+  struct linger linger;             /* sockets linger on close */
+  int optval;                       /* value for setting socket option */
+  fd_set readfd;                    /* fd to watch for accept */
+  int fd_count;                     /* ready fds from select() */
+  bsptcp_msghdr_t msghdr;           /* socket message header */ 
+
+  double loadavg,mflops;            /* Load average of this machine */
+  struct timeval polltime,timenow,
+         timethen, timeenq;
+  char bsp_hostnames[BSPTCP_STR_LEN];
+  FILE *hostnames;
+  int send_bytes,recv_bytes,lookup_load=0;
+  struct hostent *host_info;        /* netdb format host info */
+  struct sigaction sigchild;        /* action for SIGCHLD signal */
+\end{code}
+
+
+Process command line arguments:
+\begin{code}
+  if (gethostname(bsp_my_hostname,BSPTCP_STR_LEN)) {
+    fprintf(stderr,"BSP/NOW Load: failed to lookup host name\n");
+    exit(1);
+  }
+  host_info = gethostbyname(bsp_my_hostname);
+  GUARDNZ(strlen(host_info->h_name)<BSPTCP_STR_LEN,"my hostname length");
+  strcpy(bsp_my_hostname,host_info->h_name);
+
+  for(i=0;i<BSPTCP_LOAD_CHILDREN;i++) slave_pids[i]=0;
+
+  INIT_RANDOM();
+  strcpy(bsp_enq_hostname,"localhost");
+  strcpy(bsp_reload_hostname,"localhost");
+  strcpy(bsp_hostnames,".bsptcphosts");
+
+  for (i = 1; i < argc; i += 2)
+    if (argv[i][0] == '-' && i+1 < argc)
+      switch (argv[i][1]) {
+      case 'p': 
+	if (1 != sscanf(argv[i+1],"%hd",&bsp_loadport)) {
+	  fprintf(stderr,"BSP/NOW Load: port number error.\n");
+	  exit(1);
+	}
+	break;
+
+      case 'i':
+	if (1 != sscanf(argv[i+1],"%d",&lookup_load)) {
+	  fprintf(stderr,"BSP/NOW Load: lookup load.\n");
+	  exit(1);
+	}
+	break;
+
+      case 'u':
+	bsp_formated_output=0;
+	break;
+
+      case 'b': 
+	if (1 != sscanf(argv[i+1],"%d",&lbacklog)) {
+	  fprintf(stderr,"BSP/NOW Load: listen backlog invalid.\n");
+	  exit(1);
+	}
+	break;
+
+      case 's': 
+	if (1 != sscanf(argv[i+1],"%s",bsp_enq_hostname)) {
+	  fprintf(stderr,"BSP/NOW Load: enquire hostname invalid.\n");
+	  exit(1);
+	}
+	break;
+
+      case 'r': 
+	if (1 != sscanf(argv[i+1],"%s",bsp_reload_hostname)) {
+	  fprintf(stderr,"BSP/NOW Load: reload hostname invalid.\n");
+	  exit(1);
+	}
+	break;
+
+      case 'f':
+	if (1 != sscanf(argv[i+1],"%s",bsp_hostnames)) {
+	  fprintf(stderr,"BSP/NOW Load: hostnames invalid.\n");
+	  exit(1);
+	}
+	break;
+
+      default: 
+	fprintf(stderr,"BSP/NOW Load: command line open error.\n");
+	fprintf(stderr,
+		"BSP/NOW Load: Invalid option \"%s\".\n",argv[i]);
+	exit(1);
+      }
+    else {
+      fprintf(stderr,
+	      "BSP/NOW Load: invalid/incomplete command line options.\n");
+      exit(1);
+    }
+\end{code}
+
+If the program is run as a client, then contact the server:
+\begin{code}  
+  switch (lookup_load) {
+  case 1: /* Load enquiry */
+    rsock=open_connection_load_daemon(bsp_enq_hostname);
+    if (rsock<0) {
+      fprintf(stderr,"BSP/NOW Load(%s): failed to enquire load at %s\n",
+	      bsp_my_hostname,bsp_enq_hostname);
+      exit(1);
+    }
+    msghdr.msgtype=BSPTCP_MSG_LD_ENQ;
+    msghdr.msglen =0;
+    send_bytes=sendall(rsock,(char*)&msghdr,sizeof(msghdr),0);
+    if (send_bytes!=sizeof(msghdr)) {
+      fprintf(stderr,"BSP/NOW Load(%s): failed to send enquire load to %s\n",
+	      bsp_my_hostname,bsp_enq_hostname);
+      exit(1);
+    } else {
+      recv_bytes=recvall(rsock,(char*)&msghdr,sizeof(msghdr),MSG_WAITALL);
+      if (recv_bytes==sizeof(msghdr)) {
+	load_msg=lookup_remote_load_recv(rsock,msghdr);
+	if (bsp_formated_output)
+	  ppr_load_averages(load_msg,bsp_time_out_recv,
+			    bsp_time_out_hostname_recv);
+	else
+	  pr_load_averages(load_msg);
+      }
+      close(rsock);
+    }
+    exit(0);
+    break;
+
+  case 2: /* Reload from a named server */
+    /* First canonicalize reload name */
+    host_info = gethostbyname(bsp_reload_hostname);
+    GUARDNZ(strlen(host_info->h_name)<BSPTCP_STR_LEN,"hostname length");
+    strcpy(bsp_reload_hostname,host_info->h_name);
+
+    rsock=open_connection_load_daemon(bsp_enq_hostname);
+    if (rsock<0) {
+      fprintf(stderr,"BSP/NOW Load(%s): failed to contact %s to force "
+	      "reload from %s\n",
+	      bsp_my_hostname,bsp_enq_hostname,bsp_reload_hostname);
+      exit(0);
+    }
+    msghdr.msgtype=BSPTCP_MSG_LD_RLD;
+    msghdr.msglen =strlen(bsp_reload_hostname);
+    send_bytes=sendall(rsock,(char*)&msghdr,sizeof(msghdr),0); 
+    if (send_bytes==sizeof(msghdr)) 
+      sendall(rsock,bsp_reload_hostname,msghdr.msglen,0);
+    close(rsock);
+    exit(0);
+    break;
+
+  case 3: /* Closedown server */
+    rsock=open_connection_load_daemon(bsp_enq_hostname);
+    if (rsock<0) {
+      fprintf(stderr,"BSP/NOW(%s) Load daemon on %s has failed to be "
+	      "shutdown (may not be present?).\n",
+	      bsp_my_hostname,bsp_enq_hostname);
+      exit(0);
+    }
+    msghdr.msgtype=BSPTCP_MSG_EXIT;
+    msghdr.msglen =0;
+    sendall(rsock,(char*)&msghdr,sizeof(msghdr),0);
+    close(rsock);
+    fprintf(stderr,"BSP/NOW(%s) Load daemon on %s has been shutdown\n",
+	    bsp_my_hostname,bsp_enq_hostname);
+    exit(0);
+    break;
+  }
+\end{code}
+
+Load the host name data structure.
+\begin{code}
+  /* open the file containing the list of host names */
+  filename[0]='\0';
+  if (getenv("HOME")) sprintf(filename,"%s/",getenv("HOME"));
+  strcat(filename,bsp_hostnames);
+
+  hostnames = fopen(filename,"r");
+  if (!hostnames) {
+    printf("BSP/NOW Load: error opening host names file %s.\n",
+	   filename);
+    exit(1);
+  }
+
+  yyin = hostnames;
+  yyout = stderr;
+  if (yyparse()) {
+    fprintf(stderr,"BSP/NOW(%s) Shutdown: Error parsing host names file.\n",
+	    bsp_my_hostname);
+    exit(1);
+  }
+  fclose(hostnames);
+\end{code}
+
+Setup socket to listen on for incoming processor requests.
+\begin{code}
+  /* create a socket fd */
+  lsock = socket(AF_INET,SOCK_STREAM,0);
+  if (lsock < 0) {
+    perror("BSP/NOW Load: socket() call failed");
+    exit(1);
+  }
+
+  /* initialise the socket addressing structure */
+  memset(&lsaddr,0,sizeof(struct sockaddr_in));
+  lsaddr.sin_family = AF_INET;
+  lsaddr.sin_port = htons(bsp_loadport);
+  lsaddr.sin_addr.s_addr = INADDR_ANY;
+
+  /* bind the socket to local address */
+  if (bind(lsock,(struct sockaddr *)&lsaddr,sizeof(struct sockaddr_in)) <0) {
+    printf("BSP/NOW Load(%s):\n"
+           "\tA call to bind() failed. This means that a bsp load\n"
+	   "\tdaemon (or another service) is already running on port %d.\n",
+	   bsp_my_hostname,bsp_loadport);
+    close(lsock);
+    exit(1);
+  }
+
+  /* indicate listen for incomming connections */
+  if (listen(lsock,lbacklog) < 0) {
+    perror("BSP/NOW Load: listen() call failed");
+    close(lsock);
+    exit(1);
+  }
+\end{code}
+
+The daemon runs in the background. Fork off copy, report pid of
+daemon, and exit.
+\begin{code}
+  if ((pid = fork()) > 0) {
+    printf("BSP/NOW Load(%s): forked with pid %d.\n",bsp_my_hostname,pid);
+    exit(0);
+  } else if (pid) {
+    fprintf(stderr,"BSP/NOW Load(%s): fork() failed with errno = %d.\n",
+	    bsp_my_hostname,errno);
+    exit(1);
+  }
+
+  /*
+   * The program is now running in the background. 
+   * Re-direct stdout and stderr. 
+   */
+
+  pid = getpid();
+  close(1);
+  sprintf(filename,"/tmp/bspload.stdout.%d",pid);
+  if (open(filename,O_WRONLY|O_CREAT|O_TRUNC,0666) != 1) {
+    fprintf(stderr,"BSP/NOW Load(%s): could not reopen stdout "
+	    "as \"%s\".\n",bsp_my_hostname,filename);
+    exit(1);
+  }
+  printf("BSP/NOW Load log started with pid %d\n",pid); 
+  fflush(stdout);
+  close(2);
+  sprintf(filename,"/tmp/bspload.stderr.%d",pid);
+  if (open(filename,O_WRONLY|O_CREAT|O_TRUNC,0666) != 2) {
+    printf("BSP/NOW Load: could not reopen stdout "
+	   "as \"%s\".\n",filename);
+    exit(1);
+  }
+  fprintf(stderr,"BSP/NOW Load log started with pid %d\n",pid); 
+  fflush(stderr);
+\end{code}
+
+If the server goes down, make sure that all the children are killed.
+\begin{code}
+  signal(SIGHUP,  slavekill);
+  signal(SIGTERM, slavekill);
+  signal(SIGINT,  slavekill);
+  signal(SIGQUIT, slavekill);
+  signal(SIGABRT, slavekill);
+  signal(SIGFPE,  slavekill);
+  signal(SIGSEGV, slavekill);
+  signal(SIGBUS,  slavekill);
+#ifndef LINUX
+  signal(SIGSYS,  slavekill);
+#endif
+\end{code} 
+
+Ssetup reaper for child slave process termination.
+\begin{code}
+  memset(&sigchild,0,sizeof(sigchild));
+  sigchild.sa_handler = slavereap;
+#ifdef SA_RESTART
+  sigchild.sa_flags = SA_NOCLDSTOP+SA_RESTART;
+#else
+  sigchild.sa_flags = SA_NOCLDSTOP;
+#endif
+
+  if (sigaction(SIGCHLD,&sigchild,NULL)) {
+    fprintf(stderr,"BSP/NOW Load: error in sigaction(SIGCHLD) call.\n");
+    close(lsock);
+    exit(1);
+  }
+\end{code}
+
+\begin{code}
+  gettimeofday(&timenow,NULL);
+  timeenq=timenow;
+  loadavg=load_average();
+  mflops =getMflopRating();
+  update_load_average(bsp_my_hostname,loadavg,timenow.tv_sec,mflops);
+  /* Process the incomming requests. This accepts a socket and forks a 
+   * new process to handle the session.
+   */
+
+  reload_attempts=0;
+  walk=bsptcp_host_list;;
+  while (walk) {
+    reload_attempts++;
+    walk=walk->link;
+  }
+  reload_attempts=(reload_attempts<BSPTCP_LOAD_CONNECTS)?
+                     1:BSPTCP_LOAD_CONNECTS;
+
+  /* take/wait on pending request */
+  bsp_time_out = BSPTCP_MINTIMEOUT_LOAD+ 
+                 RANDOM(BSPTCP_MAXTIMEOUT_LOAD-BSPTCP_MINTIMEOUT_LOAD);
+  strcpy(bsp_time_out_hostname,random_host_name());
+  while (1) {
+#ifdef DEBUG
+    printf("BSP/NOW Load: waiting for a fresh connection\n");
+    fflush(stdout);
+#endif
+    do {
+      /* setup for wait for incomming requests */
+      FD_ZERO(&readfd);
+      FD_SET(lsock,&readfd);
+
+      
+      polltime.tv_sec = bsp_time_out;
+      polltime.tv_usec= 0;
+#ifdef DEBUG
+      printf("BSP/NOW Load: select(%d secs)\n",bsp_time_out);
+      fflush(stdout);
+#endif
+      gettimeofday(&timethen,NULL);
+      if (((fd_count = select(lsock+1,&readfd,NULL,NULL,&polltime)) < 0) &&
+	  errno != EINTR) {
+	perror("BSP/NOW Load: error in select() call");
+	close(lsock);
+	exit(1);
+      }
+      gettimeofday(&timenow,NULL);
+      bsp_time_out -= timenow.tv_sec - timethen.tv_sec;
+      if (fd_count < 0) {
+	fd_count = 0; /* system call interrupted */
+      } else if (fd_count>0) {
+        /* Do nothing */
+      } else if (fd_count==0) {
+	loadavg=load_average();
+	mflops=(loadavg>BSPTCP_LOAD_MFLOP)?0.0:(getMflopRating());
+	update_load_average(bsp_my_hostname,loadavg,timenow.tv_sec,mflops);
+	load_msg = load_average_info();
+#ifdef DEBUG
+	printf("BSP/NOW Load(timeout %d secs) load at %d on %s is %f\n",
+	       bsp_time_out,timenow.tv_sec,bsp_my_hostname,loadavg);
+	fflush(stdout);
+#endif
+	for(i=0;i<reload_attempts;i++) {
+#ifdef DEBUG
+	  printf("BSP/NOW Load: getting load info from %s\n",
+		 bsp_time_out_hostname);
+	  fflush(stdout); 
+#endif
+	  if (numslaves>=BSPTCP_LOAD_CHILDREN) {
+            /* Too many child processes. The oldest is killed, and we
+	       continue into the main loop again.
+	     */
+	    fprintf(stdout,"BSP/NOW load: too many children(%d),killing %d.\n",
+		   numslaves, slave_pids[0]);
+	    fflush(stdout);
+	    for(i=0;i<BSPTCP_LOAD_CHILDREN; i++) {
+	      if (slave_pids[i]>0) {
+		kill(slave_pids[i],9);
+		slavedel(slave_pids[i]);
+	      }
+	    }
+
+	  } else if (lookup_pid=fork()) {
+
+	      /*Parent process continues to fork off reload attempts */
+	    if (lookup_pid<0) {
+	      fprintf(stderr,
+		      "BSP/NOW Load: fork() failed, errno = %d.\n",errno);
+	      fflush(stderr);
+	    } else {
+              slaveadd(lookup_pid);
+#ifdef DEBUG
+	      printf("BSP/NOW Load: forked process %d for gather\n",
+		     lookup_pid);
+	      fflush(stdout);
+#endif
+	    }
+	    if (i!=(reload_attempts-1))
+	      strcpy(bsp_time_out_hostname,random_host_name());  
+
+	  } else {	    
+	    rsock=open_connection_load_daemon(bsp_time_out_hostname);
+	    if (rsock<0) {
+	      fprintf(stdout,"BSP/NOW(pid=%d) Load gather from %s failed\n",
+		      getpid(),bsp_time_out_hostname);
+	      fflush(stdout);
+	      /* Send a packet back to the server telling it to update
+		 its table with infinity load for the host */
+	      rsock=open_connection_load_daemon("localhost");
+	      if (rsock<0) {
+		fprintf(stdout,"BSP/NOW Load(pid=%d): unable to send "
+			"infty packet\n",getpid());
+		fflush(stdout);
+	      } else {
+		msghdr.msgtype=BSPTCP_MSG_LD_INFTY;
+		msghdr.msglen =strlen(bsp_time_out_hostname);
+		send_bytes=sendall(rsock,(char*)&msghdr,sizeof(msghdr),0);
+		if (send_bytes==sizeof(msghdr)) 
+		  send_bytes=sendall(rsock,(char*)bsp_time_out_hostname,
+				     strlen(bsp_time_out_hostname),0);
+		close(rsock);
+	      }
+	    } else {
+	      msghdr.msgtype=BSPTCP_MSG_LD_UPD;
+	      msghdr.msglen =strlen(load_msg);
+	      send_bytes=sendall(rsock,(char*)&msghdr,sizeof(msghdr),0);
+	      if (send_bytes==sizeof(msghdr)) {
+		send_bytes=sendall(rsock,(char*)&bsp_time_out,sizeof(int),0);
+		if (send_bytes==sizeof(int)) {
+		  send_bytes=sendall(rsock,(char*)bsp_my_hostname,
+				     BSPTCP_STR_LEN,0);
+		  if (send_bytes==BSPTCP_STR_LEN)
+		    sendall(rsock,load_msg,strlen(load_msg),0);
+		}
+	      }
+	      close(rsock);
+	    }
+	    exit(0);
+	  }
+	}
+	bsp_time_out = BSPTCP_MINTIMEOUT_LOAD;
+        if (time_oldest_load_average()<BSPTCP_MAXAGE_LOAD)
+	  bsp_time_out+=RANDOM(BSPTCP_MAXTIMEOUT_LOAD-BSPTCP_MINTIMEOUT_LOAD);
+        /* Guess next random host name when the update comes in */  
+      }     
+    } while (!fd_count);
+
+#ifdef DEBUG
+    printf("BSP/NOW Load: something coming in on select\n");
+    fflush(stdout);
+#endif
+    memset(&rsaddr,0,sizeof(struct sockaddr_in));
+    rsaddrlen = sizeof(struct sockaddr_in);
+    if (((csock=accept(lsock,(struct sockaddr*)&rsaddr,&rsaddrlen)) < 0) &&
+	errno != EINTR) {
+      perror("BSP/NOW Load: accept() call failed");
+      close(lsock);
+      exit(1);
+    }
+#ifdef DEBUG
+    printf("BSP/NOW Load: accept come in\n");
+    fflush(stdout);
+#endif
+    if (csock < 0) continue; /* interrupted system call */
+
+    /* sockets must linger on close in presence of data */
+    linger.l_onoff = 1;
+    linger.l_linger = BSPTCP_LINGER_INT;
+    if (setsockopt(csock,SOL_SOCKET,SO_LINGER,(char*)&linger,sizeof(linger)))
+      perror("BSP/NOW Load: error in setsockopt() call");
+
+    optval = 1;
+    if (setsockopt(csock,IPPROTO_TCP,TCP_NODELAY,(char *)&optval,
+		   sizeof(optval)))
+      perror("BSP/NOW Load: error in setsockopt() call");
+
+#ifdef DEBUG
+    printf("BSP/NOW Load: receiving %d bytes message\n",sizeof(msghdr));
+    fflush(stdout);
+#endif
+    recv_bytes=recvall(csock,(char *)&msghdr,sizeof(msghdr),MSG_WAITALL);
+    if (recv_bytes!=sizeof(msghdr)) {
+      fprintf(stderr,"BSP/NOW Load: Error(%d) %d bytes of header only.\n",
+	      errno,recv_bytes);
+      fflush(stderr);
+      close(csock);
+    } else {
+#ifdef DEBUG
+      printf("BSP/NOW Load received a message of type %d\n",
+	     msghdr.msgtype);
+      fflush(stdout);
+#endif
+
+      switch (msghdr.msgtype) {
+      case BSPTCP_MSG_EXIT:
+	printf("BSP/NOW Load: Shutdown connection request received.\n");
+	close(csock);
+	close(lsock);
+	slavekill(SIGQUIT);
+	exit(0);
+	break;
+
+      case BSPTCP_MSG_LD_ENQ:  
+	gettimeofday(&timenow,NULL);
+
+	/* Perform update to local load. However, don't do it if
+	   requests come in too fast. */
+	if ((timenow.tv_sec-timeenq.tv_sec)>BSPTCP_TIMEOUT_ENQ) {
+	  timeenq=timenow;
+	  loadavg=load_average();
+	  mflops=(loadavg>BSPTCP_LOAD_MFLOP)?0.0:(getMflopRating());
+	  update_load_average(bsp_my_hostname,loadavg,timenow.tv_sec,mflops);
+	}
+	    
+	load_msg = load_average_info();
+	msghdr.msgtype = BSPTCP_MSG_LD_DATA;
+	msghdr.msgspid = 0;
+	msghdr.msgdpid = 0;
+	msghdr.msglen  = strlen(load_msg);  
+#ifdef DEBUG
+	printf("BSP/NOW Load: sending %d bytes of data back over socket\n",
+	       sizeof(msghdr));
+	fflush(stdout);
+#endif
+	send_bytes=sendall(csock,(char*)&msghdr,sizeof(msghdr),0);
+	if (send_bytes==sizeof(msghdr)) {
+	  send_bytes=sendall(csock,(char*)&bsp_time_out,sizeof(int),0);
+	  if (send_bytes==sizeof(int)) {
+	    send_bytes=sendall(csock,(char*)bsp_time_out_hostname,
+			       BSPTCP_STR_LEN,0);
+	    if (send_bytes==BSPTCP_STR_LEN)
+	      sendall(csock,load_msg,strlen(load_msg),0);
+	  }
+	}
+	close(csock);
+	break;
+
+      case BSPTCP_MSG_LD_INFTY:
+	GUARDNZ(msghdr.msglen<BSPTCP_STR_LEN,"hostname length");
+	recv_bytes=recvall(csock,bsp_hostnames,msghdr.msglen,MSG_WAITALL);
+	gettimeofday(&timenow,NULL);
+	update_load_average(bsp_hostnames,
+			    BSPTCP_INFTY_LOAD,timenow.tv_sec,0.0);
+	close(csock);
+	break;
+
+      case BSPTCP_MSG_LD_RLD:
+	recv_bytes=recvall(csock,bsp_hostnames,msghdr.msglen,MSG_WAITALL);
+	close(csock);
+	if (recv_bytes!=msghdr.msglen) {
+	  fprintf(stdout,"BSP/NOW Load: RLD message wrong size\n");
+	  fflush(stdout);
+	} else if (strcmp(bsp_hostnames,bsp_my_hostname)==0) {
+	  fprintf(stdout,"BSP/NOW Load: RLD to myself (%s)\n",
+		  bsp_my_hostname);
+	  fflush(stdout);
+	} else {
+	  bsp_hostnames[msghdr.msglen]='\0';
+	  if (numslaves>=BSPTCP_LOAD_CHILDREN) {
+	    fprintf(stdout,"BSP/NOW Load: reload failed. %d children\n",
+		    numslaves);
+	    fflush(stdout);
+
+	  } else if (lookup_pid=fork()) {
+
+	      /* Parent process continues to deal with requests*/
+	    if (lookup_pid<0) {
+	      fprintf(stderr,
+			"BSP/NOW Load: fork() failed with errno = %d.\n",
+			errno);
+	      fflush(stderr);
+	    } else {
+	      slaveadd(lookup_pid);
+#ifdef DEBUG
+	      printf("BSP/NOW: forked process %d for reload\n",lookup_pid);
+	      fflush(stdout);
+#endif
+	    }      
+	  } else {
+	    rsock=open_connection_load_daemon(bsp_hostnames);
+	    if (rsock<0) {
+#ifdef DEBUG
+	      printf("BSP/NOW Load(pid=%d): forced gather from "
+		      "%s failed\n",getpid(), bsp_hostnames);
+	      fflush(stdout);
+#endif
+	      /* Send a packet back to the server telling it to update
+		 its table with infinity load for the host */
+	      rsock=open_connection_load_daemon("localhost");
+	      if (rsock<0) {
+		fprintf(stdout,"BSP/NOW Load(pid=%d) reload unable to "
+			"send infty\n",getpid());
+		fflush(stdout);
+	      } else {
+		msghdr.msgtype=BSPTCP_MSG_LD_INFTY;
+		msghdr.msglen =strlen(bsp_hostnames);
+		send_bytes=sendall(rsock,(char*)&msghdr,sizeof(msghdr),0);
+		if (send_bytes==sizeof(msghdr)) 
+		  send_bytes=sendall(rsock,(char*)bsp_hostnames,
+				     strlen(bsp_hostnames),0);
+		close(rsock);
+	      }
+	    } else {
+	      load_msg=load_average_info();
+	      msghdr.msgtype=BSPTCP_MSG_LD_UPD;
+	      msghdr.msglen =strlen(load_msg);
+	      send_bytes=sendall(rsock,(char*)&msghdr,sizeof(msghdr),0);
+	      if (send_bytes==sizeof(msghdr)) {
+		send_bytes=sendall(rsock,(char*)&bsp_time_out,sizeof(int),0);
+		if (send_bytes==sizeof(int)) {
+		  send_bytes=sendall(rsock,(char*)bsp_my_hostname,
+				     BSPTCP_STR_LEN,0);
+		  if (send_bytes==BSPTCP_STR_LEN)
+		    sendall(rsock,load_msg,strlen(load_msg),0);
+		}
+	      }
+	      close(rsock);
+	    }
+	    exit(0);
+	  }
+	}
+	break;
+      
+      case BSPTCP_MSG_LD_UPD:
+	load_msg = lookup_remote_load_recv(csock,msghdr);
+	close(csock);
+	update_load_averages(load_msg);
+#ifdef DEBUG
+	fprintf(stdout,"BSP/NOW Load: sending update back to %s.\n",
+		bsp_time_out_hostname_recv);
+	fflush(stdout);
+#endif
+	if (numslaves>=BSPTCP_LOAD_CHILDREN) {
+#ifdef DEBUG
+	    fprintf(stdout,"BSP/NOW Load: update failed. %d children\n",
+		    numslaves);
+	    fflush(stdout);
+#endif
+
+	} else if (lookup_pid=fork()) {
+
+	  /* Parent process continues to deal with requests*/
+	  if (lookup_pid<0) {
+	    fprintf(stderr,
+		    "BSP/NOW Load: fork() failed with errno = %d.\n",
+		    errno);
+	    fflush(stderr);
+	  } else {
+	    slaveadd(lookup_pid);
+#ifdef DEBUG
+	    printf("BSP/NOW Load: forked process %d for update\n",
+		   lookup_pid);
+	    fflush(stdout);
+#endif
+	  }	      	
+	} else {
+	  rsock=open_connection_load_daemon(bsp_time_out_hostname_recv);
+	  if (rsock<0) {
+	    fprintf(stderr,"BSP/NOW Load: unable to connect to %s\n",
+		    bsp_time_out_hostname_recv);
+	    fflush(stderr);
+	  } else {
+	    gettimeofday(&timenow,NULL);
+	    loadavg=load_average();
+	    mflops=(loadavg>BSPTCP_LOAD_MFLOP)?0.0:(getMflopRating());
+	    update_load_average(bsp_my_hostname,
+				loadavg,timenow.tv_sec,mflops);
+	    load_msg = load_average_info();
+	    msghdr.msgtype = BSPTCP_MSG_LD_DATA;
+	    msghdr.msgspid = 0;
+	    msghdr.msgdpid = 0;
+	    msghdr.msglen  = strlen(load_msg);  
+#ifdef DEBUG
+	    printf("BSP/NOW Load: sending a packet of size %d bytes to %s\n",
+		   sizeof(msghdr),bsp_hostnames);
+	    fflush(stdout);
+#endif
+	    send_bytes=sendall(rsock,(char*)&msghdr,sizeof(msghdr),0);
+	    if (send_bytes==sizeof(msghdr)) {
+	      send_bytes=sendall(csock,(char*)&bsp_time_out,sizeof(int),0);
+	      if (send_bytes==sizeof(int)) {
+		send_bytes=sendall(csock,(char*)bsp_time_out_hostname,
+				   BSPTCP_STR_LEN,0);
+		if (send_bytes==BSPTCP_STR_LEN)
+		  sendall(rsock,load_msg,strlen(load_msg),0);
+	      }
+	    }
+	    close(rsock);
+	  }
+	  exit(0);
+	}
+      break;
+
+      case BSPTCP_MSG_LD_DATA:
+	load_msg = lookup_remote_load_recv(csock,msghdr);
+	close(csock);
+#ifdef DEBUG
+	printf("BSP/NOW Load: load data coming in from %s\n",
+	      bsp_time_out_hostname_recv);
+	ppr_load_averages(load_msg,bsp_time_out,bsp_time_out_hostname);
+	fflush(stdout);
+#endif
+	update_load_averages(load_msg);
+	/* Choose new hostname to contact */
+	strcpy(bsp_time_out_hostname,random_host_name());  
+	break;
+
+      default:
+	printf("BSP/NOW Load: unknown message. type=%d len=%d\n",
+	       msghdr.msgtype,msghdr.msglen);
+	fflush(stdout);
+	close(csock);
+      }
+    }
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%
+\section{Kill a slave}
+%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void slavekill(int sig) {
+  int i;
+
+  for(i=0;i<BSPTCP_LOAD_CHILDREN;i++) {
+    if (slave_pids[i]>0) {
+      printf("BSP/NOW Load: pid %d received signal %d, killing child pid %d\n",
+	     getpid(),sig,slave_pids[i]);
+      fflush(stdout);
+      kill(slave_pids[i],9);
+    }
+  }
+  exit(1);
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%
+\section{Signal handler to wait on exiting child}
+%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void slavereap(int sig) {
+   int status;                       /* process exit status */ 
+   int i,pid,olderrno;               /* PID of terminated child */
+
+   olderrno=errno;
+   /* clear out all terminated slaves */
+   while (numslaves && (pid=waitpid(-1,&status,WNOHANG)) > 0) {
+      slavedel(pid); 
+#ifdef DEBUG
+      if (WIFEXITED(status))
+         printf("BSP/NOW Load: slave %d exited with code %d (%d left)\n",
+                pid,WEXITSTATUS(status),numslaves);
+      else
+         if (WIFSIGNALED(status))
+            printf("BSP/NOW Load: slave %d received signal %d (%d left)\n",
+                   pid,WTERMSIG(status),numslaves);
+#endif
+      fflush(stdout);
+   }
+   errno=olderrno;
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%
+\section{Accounting for adding a slave}
+%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void slaveadd(int pid) {
+  int i;
+
+  if (slave_in_hand==pid) slave_in_hand=0;
+  else {    
+    numslaves++;
+    for(i=0;i<BSPTCP_LOAD_CHILDREN;i++) {
+      if (slave_pids[i]==0) {
+	slave_pids[i]=pid;
+	break;
+      }
+    }
+    if (i==BSPTCP_LOAD_CHILDREN) {
+      printf("BSP/NOW Load: unable to add slave %d\n",pid);
+      fflush(stdout);
+    }
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%
+\section{Accounting for deleting a slave}
+%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void slavedel(int pid) {
+  int i;
+
+  for(i=0;i<BSPTCP_LOAD_CHILDREN;i++) {
+    if (slave_pids[i]==pid) {
+      slave_pids[i]=0;
+      numslaves--;
+      break;
+    }
+  }
+  if (i==BSPTCP_LOAD_CHILDREN) {
+    if (slave_in_hand==0)  slave_in_hand=pid;
+    else {
+      printf("BSP/NOW Load: slavdel error, more than one in hand.\n");
+      fflush(stdout);
+    }
+  }
+}
+\end{code}

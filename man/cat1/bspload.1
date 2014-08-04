@@ -1,0 +1,198 @@
+
+
+
+bspload(1)                User Commands                bspload(1)
+
+
+
+NAME
+     bspload - BSP load manager
+
+
+SYNOPSIS
+     bspload [-v] [-help] [-u] [ -all ] [-start] [- end]-s  _h_o_s_t_-
+     _n_a_m_e  -r _h_o_s_t_n_a_m_e -p _p_o_r_t-_n_u_m_b_e_r [-reloadlocal] [-reloadglo-
+     bal]
+
+DESCRIPTION
+     The daemon _b_s_p_l_o_a_d_d is used to  ensure  that  BSP  jobs  are
+     started  on the least loaded nodes in a network. A daemon is
+     started on a node  of  a  cluster  by  running  the  command
+     _b_s_p_l_o_a_d  -_s_t_a_r_t.  The  load of a cluster of workstations can
+     then be enquired by the user as follows:
+
+     pine.comlab> bspload
+
+             ***Next update in 9 secs from ash.comlab***
+
+     Priority|    Machine     | CPUs |    Flop rate    | Load |        Age
+     --------+----------------+------+-----------------+------+--------------
+      1.0000 |     ash.comlab |    2 |   41.29 Mflop/s | 0.04 |        23 sec
+      0.3555 |    pine.comlab |    1 |   29.36 Mflop/s | 0.04 |         0 sec
+      0.3507 |     oak.comlab |    1 |   28.96 Mflop/s | 0.04 |  3 min 15 sec
+      0.0151 | mercury.comlab |    4 |   20.13 Mflop/s | 2.59 |        23 sec
+
+     When a BSP job requests _p  processes,  the  _p  least  loaded
+     machines  are  chosen  automatically, which provides a crude
+     load balancing facility at process startup time. In the next
+     release  of the library, a general purpose process migration
+     and checkpoint facility will be provided that  enables  run-
+     time load balancing and fault tolerance of bsplib(3) jobs.
+
+
+
+OPTIONS
+     -v    Print (on standard error output) the  phases  involved
+          in the execution of the command.
+
+     -help
+          Print this manual page on standard output.
+
+
+     -u    The output from the load daemon is an unformated  list
+          with an entry per line.
+
+
+     -all  Changes the meaning of the -_s_t_a_r_t and -_e_n_d options.
+
+
+     -start
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    1
+
+
+
+
+
+
+bspload(1)                User Commands                bspload(1)
+
+
+
+          Start the daemon on the local workstation. If the - _a_l_l
+          option  has  already been set, then a daemon is started
+          on  each  processor  specified  in  .bsptcphosts.  This
+          option requires that the local workstation has an entry
+          in the .rhost files on all the machines in the cluster,
+          as  it  uses  _r_s_h(_3).  If  _r_s_h is not available on your
+          platform, you will have to start the daemons on each of
+          the machines individually.
+
+
+     -end  Close down the daemon on the  local  workstations.  If
+          the  -_a_l_l option has already been set, then the daemons
+          are stopped on all the workstations.
+
+
+     -s _h_o_s_t_n_a_m_e
+          Connect to the load manager on  processor  _h_o_s_t_n_a_m_e  in
+          preference to _l_o_c_a_l_h_o_s_t.
+
+
+     -r _h_o_s_t_n_a_m_e
+          Forces the local load manager to update it's local load
+          information with the load information from _h_o_s_t_n_a_m_e.
+
+
+     -p _p_o_r_t_n_u_m_b_e_r
+          Ensure that the load manager listens on port _p_o_r_t_n_u_m_b_e_r
+          for incoming requests. The default port it 4445.
+
+
+     -reloadlocal
+          Causes the local load manager to update it's local load
+          information with loads from every other machine.
+
+
+     -reloadglobal
+          Causes all the load managers to  exchange  their  local
+          load information.
+
+
+SEE ALSO
+     bsprun(1), bsplib(3)
+
+     The Oxford BSP toolset web pages can be found  at:
+     _h_t_t_p://_w_w_w._b_s_p-_w_o_r_l_d_w_i_d_e._o_r_g/_i_m_p_l_m_n_t_s/_o_x_t_o_o_l/
+
+
+BUGS
+     Problems  and  bug  reports  should  be  mailed  to  _b_s_p_l_i_b-
+     _b_u_g_s@_c_o_m_l_a_b._o_x._a_c._u_k
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    2
+
+
+
+
+
+
+bspload(1)                User Commands                bspload(1)
+
+
+
+AUTHORS
+     The Oxford BSP Toolset implementation of BSPlib was  written
+     by Jonathan.Hill@comlab.ox.ac.uk
+     http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    3
+
+
+

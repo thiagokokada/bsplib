@@ -1,0 +1,66 @@
+' $Id: oop.n,v 1.5 1995/10/15 18:55:49 jfontain Exp $
+.TH oop tcl
+.BS
+.SH NAME
+Object Oriented Programming in Tcl
+.SH DESCRIPTION
+Simple techniques are used. The \fBnew\fR, \fBdelete\fR and \fBvirtual\fR operators are available and are implemented as Tcl procedures. Some responsibility is left to the programmer which must be familiar with object oriented techniques and an object oriented language (C++ is recommended).
+.SH MEMBER DATA ACCESS
+The object members can be accessed using the object identifier and the global class array, as in:
+.PP
+\fBglobal className\fR
+.in
+\fBputs $className(\fIobjectId\fB,memberName)\fR
+.PP
+The class member data array is at the global level, so the \fBglobal\fR command needs be used within procedures.
+.SH MEMBER FUNCTION ACCESS
+The member functions are called using the object identifier, as in:
+.PP
+\fBclassName::functionName \fIobjectId parameter ...\fR
+.SH INHERITANCE
+It is the programmer's responsibility to implement inheritance, as in:
+.sp
+.RS
+.nf
+proc \fBbase::base\fR {this parameter} {
+    global base
+    \fI# base members initialization ...\fR
+}
+proc \fBbase::~base\fR {this} {
+    global base
+    \fI# use base members data for some cleanup ...\fR
+}
+proc \fBderived::derived\fR {this parameter} {
+    \fI# initialize object base part by directly calling the base constructor
+    \fBbase::base\fR $this
+    global derived
+    \fI# derived members initialization ...\fR
+    global base
+    \fI# more initialization using base members ...\fR
+}
+proc \fBderived::~derived\fR {this} {
+    global derived
+    \fI# use derived members data for some cleanup ...\fR
+    global base
+    \fI# and eventually base members data for some cleanup ...\fR
+    \fI# now delete base part\fR
+    \fBdelete base\fR $this
+}
+.fi
+.RE
+.PP
+The derived class constructor calls the base constructor, and the derived class destructor takes care of deleting the base part of the object by calling \fBdelete\fR directly for the base part.
+.SH VIRTUAL FUNCTIONS
+Virtual functions and destructors can be very simply and automatically handled provided they are allowed through a simple setup at the base class constructor level. Please refer to the \fBvirtual\fR manual page for further information and examples.
+.SH MULTIPLE INHERITANCE
+The simple inheritance technique is simply extended.
+.PP
+The derived class constructor calls the base constructors, and the derived class destructor takes care of deleting the base parts of the object by calling \fBdelete\fR directly as many times as there are base parts.
+.PP
+As in C++, use of multiple inheritance is not recommended, object aggregation should be used instead.
+.SH LIMITATIONS
+There is no member access control, but this is simple and as it is implemented in Tcl requires no extension.
+.PP
+
+.SH KEYWORDS
+oop, new, delete, virtual, object

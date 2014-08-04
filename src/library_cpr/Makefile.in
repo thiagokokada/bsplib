@@ -1,0 +1,234 @@
+###########################################################################
+##      Copyright (C) 1995,1996,1997 University of Oxford                ##
+##                                                                       ##
+## Permission to use, copy, modify, and distribute this software,        ##
+## and to incorporate it, in whole or in part, into other software,      ##
+## is hereby granted without fee, provided that                          ##
+##   (1) the above copyright notice and this permission notice appear in ##
+##       all copies of the source code, and the above copyright notice   ##
+##       appear in clearly visible form on all supporting documentation  ##
+##       and distribution media;                                         ##
+##   (2) modified versions of this software be accompanied by a complete ##
+##       change history describing author, date, and modifications made; ##
+##       and                                                             ##
+##   (3) any redistribution of the software, in original or modified     ##
+##       form, be without fee and subject to these same conditions.      ##
+###########################################################################
+
+###########################################################################
+##            D O N T  C H A N G E  A N Y T H I N G  !!                  ##
+###########################################################################
+
+SHELL      = /bin/sh
+
+prefix     = @prefix@
+exec_prefix= @exec_prefix@
+bindir     = @bindir@
+includedir = @includedir@
+libdir     = @libdir@
+top_srcdir = @top_srcdir@/../
+
+BSP_ONLINE_PROCS= @BSP_ONLINE_PROCS@
+RANLIB          = @RANLIB@
+GCC             = @GCC@
+INSTALL          = @INSTALL@
+INSTALL_PROGRAM  = @INSTALL_PROGRAM@
+INSTALL_DATA     = @INSTALL_DATA@
+
+mpiincludedir   = @mpiincludedir@
+
+editpl = sed -e 's,@''includedir''@,$(includedir),g'       \
+             -e 's,@''bindir''@,$(bindir),g'               \
+             -e 's,@''binarchdir''@,$(bindir)/$(ARCH)/,g'  \
+             -e 's,@''libdir''@,$(libdir),g'               \
+             -e 's,@''mandir''@,$(mandir),g'               \
+             -e 's,@''GCC''@,$(GCC),g'                     \
+             -e 's,@''G77''@,$(G77),g'                     \
+             -e 's,@''GPLUSPLUS''@,$(GPLUSPLUS),g'         \
+             -e 's,@''mpiincludedir''@,$(mpiincludedir),g' \
+             -e 's,@''mpilibdir''@,$(mpilibdir),g'         \
+             -e 's,@''PERL_DBMOK''@,$(PERL_DBMOK),g'       \
+             -e 's,@''PERL''@,$(PERL),g'                   \
+             -e 's,@''PWD''@,$(PWD),g'
+
+##########################################################################
+# Architecture independent modules
+##########################################################################
+
+SRCS_LH   = chkprest.lh
+
+.SUFFIXES: .lc .lh .c .tex .c.tex .h.tex .s
+
+#############################################################
+##             Flags and conversions                       ##
+#############################################################
+
+LIBRARIES     = 
+INCLUDES      = 
+
+SRCS_O        = $(SRCS_LC:.lc=.o) $(SRCS_S:.s=.o)
+
+SRCS_C        = $(SRCS_LC:.lc=.c)
+
+SRCS_H        = $(SRCS_LH:.lh=.h)
+
+SRCS_TEX      = $(SRCS_LH:.lh=.h.tex) \
+	        $(SRCS_LC:.lc=.c.tex) 
+
+CC         = cc
+CPP        = @CPP@
+CFLAGS     =  ${BUILD_DEFINES}  
+LIBNAME    = "libcpr"
+
+.SUFFIXES: .lc .lh .h .c .tex .c.tex .h.tex
+
+#############################################################
+##             Compilation rules                           ##
+#############################################################
+
+
+.lh.h:
+	rm -f $*.h $*.tmp;				\
+	litToPgm $<;					\
+	$(editpl) $*.h > $*.tmp && mv $*.tmp $*.h
+
+
+.lc.o:
+	rm -f $*.c $*.tmp;				\
+	litToPgm $<;					\
+	$(editpl) $*.c > $*.tmp && mv $*.tmp $*.c;	\
+	${CC} ${CFLAGS} $(INCLUDES) -c $*.c 
+
+.lc.c:
+	litToPgm $<;					\
+	rm -f $*.tmp;					\
+	$(editpl) $*.c > $*.tmp && mv $*.tmp $*.c
+
+.s.o:
+	rm -f tmpas.s
+	cp $*.s tmpas.c
+	${CPP} tmpas.c | grep -v '^#'> tmpas.s && ${AS} -o $*.o tmpas.s
+
+.c.o:
+	${CC} ${CFLAGS} $(INCLUDES) -c $*.c 
+
+.lh.h.tex:
+	litToTex $<
+
+.lc.c.tex:
+	litToTex $<
+
+
+
+#############################################################
+##             Main Targets                                ##
+#############################################################
+all::
+	
+
+sample: 
+	@make machine;						\
+	litToPgm testprog.lc;					\
+	${CC} -o testprog testprog.c 				\
+	      -L${top_srcdir}/lib/`bsparch -arch`/ -lcpr;	\
+        rm -f testprog.c
+
+build:
+	@$(MAKE) clean; $(MAKE) machine 
+
+develop:
+	@$(MAKE) machine
+
+#############################################################
+##             Machine Targets                             ##
+#############################################################
+machine:
+	@case `bsparch -arch` in					   \
+	Solaris)                                                           \
+                $(MAKE) banner TYPE="machine" FOR="Solaris on Sun";        \
+                if test -n "${GCC}"; then                                  \
+                  $(MAKE) lib	                              	           \
+                     SRCS_LC="unexelf.lc" SRCS_S="chkprest_sparc.s"        \
+                     BUILD_DEFINES=""                                      \
+                     AR=@AR@                                               \
+                     AS="gcc -c"                                           \
+                     CC=gcc;                                               \
+                else                                                       \
+                  $(MAKE) lib		                              	   \
+                     SRCS_LC="unexelf.lc" SRCS_S="chkprest_sparc.s"        \
+                     BUILD_DEFINES=""  					   \
+                     AR=@AR@                                               \
+                     AS=as                                                 \
+                     CC=cc;                                                \
+                fi;;                                                       \
+                                                                           \
+	SolarisX86)                                                        \
+                $(MAKE) banner TYPE="machine" FOR="Solaris on Intel";      \
+                if test -n "${GCC}"; then                                  \
+                  $(MAKE) lib	                              	           \
+                     SRCS_LC="unexelf.lc" SRCS_S="chkprest_soli386.s"      \
+                     BUILD_DEFINES=""                                      \
+                     AR=@AR@                                               \
+                     AS="gcc -c"                                           \
+                     CC=gcc;                                               \
+                else                                                       \
+                  $(MAKE) lib		                              	   \
+                     SRCS_LC="unexelf.lc" SRCS_S="chkprest_soli386.s"      \
+                     BUILD_DEFINES=""  					   \
+                     AR=@AR@                                               \
+                     AS=as                                                 \
+                     CC=cc;                                                \
+                fi;;                                                       \
+                                                                           \
+        LINUX)  $(MAKE) banner TYPE="machine" FOR="Linux";                 \
+                $(MAKE) lib                                                \
+                     SRCS_LC="unexelf.lc" SRCS_S="chkprest_i386.s"         \
+                     BUILD_DEFINES=""                                      \
+		     ARCH="LINUX"					   \
+                     AR=@AR@                                               \
+                     AS="gcc -c"                                           \
+                     CC=gcc;;                                              \
+                                                                           \
+        *)      echo "Not building checkpointing library `bsparch -arch`";;\
+        esac
+
+#############################################################
+##             Generic Compilation targets                 ##
+#############################################################
+
+objects: ${SRCS_H} ${SRCS_O}
+
+delit: ${SRCS_C} ${SRCS_H} 
+
+root.dvi: $(SRCS_TEX)
+	latex root.tex
+
+lib:
+	@$(MAKE) banner TYPE="library prefix "     			 \
+              FOR="\"${LIBNAME}\"; flags are $(CFLAGS)";                 \
+	if [ ! -d ${top_srcdir}/lib/`bsparch -arch` ] ;                  \
+        then  mkdir -p ${top_srcdir}/lib/`bsparch -arch`; fi;            \
+	rm -f ${top_srcdir}/lib/`bsparch -arch`/${LIBNAME}.a;            \
+	$(MAKE) objects SRCS_LC="${SRCS_LC}" SRCS_LH="${SRCS_LH}"        \
+                        SRCS_O="${SRCS_O}" CFLAGS="${CFLAGS} @DEFS@"     \
+                        AS="${AS}" CC="${CC}";                           \
+	${AR} crv ${top_srcdir}/lib/`bsparch -arch`/${LIBNAME}.a         \
+                  $(SRCS_O);                                             \
+        ${RANLIB} ${top_srcdir}/lib/`bsparch -arch`/${LIBNAME}.a
+
+            
+
+clean:
+	rm -f $(SRCS_H) $(SRCS_TEX) mon.out *.c *.o \
+	testprog testprog.1* *.o tmpas.s
+
+banner:
+	@echo "#########################################################"; \
+        echo  "#####   ${TYPE} = ${FOR}";                                  \
+        echo  "#########################################################"
+
+
+#############################################################
+##             Dependencies                                ##
+#############################################################
+

@@ -1,0 +1,240 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id$
+% $Log$
+
+\begin{code}
+#include "bsp_timer.h" 
+#ifdef LIBC_HAS_CPU_TIMER
+#include <sys/times.h>
+#include <limits.h>
+#endif
+#ifndef CLK_TCK
+#undef LIBC_HAS_CPU_TIMER
+#endif
+
+
+TIMER_TYPE _bsptimer_start,      /* Time at start of program           */
+           _bsptimer_idle,       /* Intentional idle time since start  */
+           _bsptimer_last,       /* Time of last bsp_time call         */
+           _bsptimer_lastidle,   /* Accum idle time since last bsp_time*/
+           _bsptimer_now;        /* Time now                           */
+
+double     _bsptimer_resolution;
+
+#ifdef LIBC_HAS_CPU_TIMER
+clock_t    _bspcputimer_start=0;
+double     _bspcputimer_tick =0.0;
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%
+\section{Initialise the timer}
+%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_time_init() {
+#ifdef LIBC_HAS_CPU_TIMER
+  struct tms cputime;
+#endif
+
+#if !defined(BSD_TIMER) && (defined(SGICHALL64) || defined(SGIORIGIN))
+  _bsptimer_resolution =  bsp_time_init_sgi();
+#else
+  _bsptimer_resolution = (double) TIMER_RESOLUTION;
+#endif
+  _bsptimer_start = TIMER_READ();
+  _bsptimer_idle     = (TIMER_TYPE) 0;
+  _bsptimer_lastidle = (TIMER_TYPE) 0;
+  _bsptimer_last     = _bsptimer_start;
+  
+#ifdef LIBC_HAS_CPU_TIMER
+  if (times(&cputime)!=-1) {
+    _bspcputimer_start = cputime.tms_utime + cputime.tms_stime;
+  }
+  _bspcputimer_tick=(double) CLK_TCK;
+#endif
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%
+\section{Return the time in seconds since \texttt{bsp\_time\_init}}
+%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+double bsp_time() {
+  double result;
+  TIMER_TYPE delta;
+  _bsptimer_now  = TIMER_READ();
+#ifdef DEBUG
+  bsp_debug("{bsp_time} start=%u now=%u idle=%u",
+	    _bsptimer_start,_bsptimer_now,_bsptimer_idle);
+#endif
+
+  delta = _bsptimer_now  - _bsptimer_start -_bsptimer_idle;
+  result = _bsptimer_resolution * ((double) delta);
+  return (result>0.0?result:0.0);
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%
+\section{Return CPU time in seconds since \texttt{bsp\_time\_init}}
+%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+double bsp_cputime() {
+#ifndef LIBC_HAS_CPU_TIMER
+  return (bsp_time());
+#else
+   struct tms cputime;
+   clock_t elapsed_cputime;
+   if (times(&cputime)==-1) return (bsp_time());
+   else {
+     elapsed_cputime = cputime.tms_utime + cputime.tms_stime - 
+                       _bspcputimer_start;
+     return (((double)elapsed_cputime)/_bspcputimer_tick);
+  }
+#endif
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%
+\section{Return the time in seconds since last \texttt{bsp\_time}}
+%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+double bsp_dtime() {
+  double result;
+  TIMER_TYPE delta;
+  _bsptimer_now  = TIMER_READ();
+
+  delta = _bsptimer_now  - _bsptimer_last - _bsptimer_lastidle;
+  result = _bsptimer_resolution * ((double) delta);
+#ifdef DEBUG
+  bsp_debug("{bsp_dtime} %.10f sec [last=%u now=%u lastidle=%u delta=%u]",
+	    result,_bsptimer_last,_bsptimer_now,_bsptimer_lastidle,delta);
+#endif
+  _bsptimer_last     =  _bsptimer_now;
+  _bsptimer_lastidle = 0.0;
+  return (result>0.0?result:0.0);
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%
+\section{Pause timer}
+%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_time_stop() {
+  _bsptimer_now = TIMER_READ();
+}
+\end{code}
+
+\begin{code}
+void bsp_time_restart() {
+  TIMER_TYPE temp;
+
+  temp = TIMER_READ();
+  temp = temp - _bsptimer_now;
+#ifdef DEBUG
+  bsp_debug("{bsp_time_restart) asleep %u",temp);
+#endif
+  _bsptimer_lastidle = _bsptimer_lastidle + temp;
+  _bsptimer_idle     = _bsptimer_idle     + temp;
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%
+\section{Machine specific timing routines}
+%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%%%%%
+\section{SGI}
+%%%%%%%%
+See \texttt{syssgi(2)} for details.
+\begin{code}
+#if !defined(BSD_TIMER) && (defined(SGICHALL64) || defined(SGIORIGIN))
+double bsp_time_init_sgi() {
+  __psunsigned_t phys_addr, raddr;
+  unsigned int   cycleval;
+  int            fd, poffmask;
+
+  poffmask     = getpagesize() - 1;
+  if ((phys_addr= syssgi(SGI_QUERY_CYCLECNTR, &cycleval))==-1)
+    bsp_abort("{bsp_time_init} unable to get clock cycle time");
+  raddr        = phys_addr & ~poffmask;
+  if ((fd= open("/dev/mmem", O_RDONLY))==-1)
+    bsp_abort("{bsp_time_init} unable to open /dev/mmem");
+
+  iotimer_addr=(volatile TIMER_TYPE*) mmap(0, poffmask, PROT_READ,
+                                           MAP_PRIVATE, fd, (off_t)raddr);
+  close(fd);
+  iotimer_addr = (TIMER_TYPE *)((__psunsigned_t)iotimer_addr +
+                               (phys_addr & poffmask));
+
+#ifdef DEBUG
+  bsp_debug("{bsp_time_init} time is %u clock cycle=%d timer=%d bytes",
+	    *iotimer_addr,cycleval,sizeof(TIMER_TYPE));
+#endif
+  return (cycleval*1.0e-12);
+}
+#else
+\end{code}
+
+
+%%%%%%%%
+\section{SP2}
+%%%%%%%%
+\begin{code}
+#if !defined(BSD_TIMER) && defined(SP2)
+TIMER_TYPE bsp_time_read_sp2() {
+  static TIMER_TYPE first_time=0;
+  int sec, nsec;
+  TIMER_TYPE result;
+
+  /* Try and reduce overflow when doing multiplication below*/
+  if (first_time==0) first_time=rtc_upper();
+  sec     = rtc_upper();
+  nsec    = rtc_lower(); 
+  result  = (((TIMER_TYPE) (1000000000*(sec-first_time))) + nsec);
+#ifdef DEBUG
+  bsp_debug("{bsp_time_read_sp2} sec=%d+nsec=%d=%u nsec",
+	    sec-first_time,nsec,result);
+#endif
+  return result;
+}
+#else
+\end{code}
+
+
+%%%%%%%%
+\section{BSD timer}
+%%%%%%%%
+\begin{code}
+#ifdef BSD_TIMER
+TIMER_TYPE bsp_time_read_bsd() {
+  static struct timeval now;
+
+  gettimeofday(&now,0);
+  return ((1000000*now.tv_sec) + now.tv_usec);
+}
+#endif
+#endif
+#endif
+\end{code}
+

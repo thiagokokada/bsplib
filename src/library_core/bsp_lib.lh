@@ -1,0 +1,432 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsp_lib.lh,v 1.3 1995/08/31 16:37:35 jonh Exp jonh $
+% $Log: bsp_lib.lh,v $
+% Revision 1.3  1995/08/31  16:37:35  jonh
+% *** empty log message ***
+%
+\begin{code}
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include "bsp_lib_user.h"
+#include "bsp_register.h"
+#include "../library_shared/bsp_types.h"
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Define \texttt{BSP\_ARCH} and \texttt{BSP\_DEVICE}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef  CONVEXSPP
+#define BSP_ARCH  "CONVEXSPP"
+#endif
+
+#ifdef  CRAYC90
+#define BSP_ARCH  "CRAYC90"
+#endif
+
+#ifdef  CRAYJ90
+#define BSP_ARCH  "CRAYJ90"
+#endif
+
+#ifdef  CRAYT3D
+#define BSP_ARCH  "CRAYT3D"
+#endif
+
+#ifdef  CRAYT3E
+#define BSP_ARCH  "CRAYT3E"
+#endif
+
+#ifdef  CRAYYMP
+#define BSP_ARCH  "CRAYYMP"
+#endif
+
+#ifdef  FUJIAP1000
+#define BSP_ARCH  "FUJIAP1000"
+#endif
+
+#ifdef  HITACHIMPP
+#define BSP_ARCH  "HITACHIMPP"
+#endif
+
+#ifdef  HP
+#define BSP_ARCH  "HP"
+#endif
+
+#ifdef  LINUX
+#define BSP_ARCH  "LINUX"
+#endif
+
+#ifdef  OSF1
+#define BSP_ARCH  "OSF1"
+#endif
+
+#ifdef  PARAMID
+#define BSP_ARCH  "PARAMID"
+#endif
+
+#ifdef  PARSYTEC
+#define BSP_ARCH  "PARSYTEC"
+#endif
+
+#ifdef  RS6000
+#define BSP_ARCH  "RS6000"
+#endif
+
+#ifdef  SGI
+#define BSP_ARCH  "SGI"
+#endif
+
+#ifdef SGIN32
+#define BSP_ARCH  "SGIN32"
+#endif
+
+#ifdef  SGICHALL64
+#define BSP_ARCH  "SGICHALL64"
+#endif
+
+#ifdef  SGIORIGIN
+#define BSP_ARCH  "SGIORIGIN"
+#endif
+
+#ifdef  SP2
+#define BSP_ARCH  "SP2"
+#endif
+
+#ifdef  Solaris
+#define BSP_ARCH  "Solaris"
+#endif
+
+#ifdef  SolarisX86
+#define BSP_ARCH  "SolarisX86"
+#endif
+
+#ifdef  SunOS
+#define BSP_ARCH  "SunOS"
+#endif
+
+#ifdef  WindowsNT
+#define BSP_ARCH  "WindowsNT"
+#endif
+
+#ifdef  WIN32
+#define BSP_ARCH  "WIN32"
+#endif
+\end{code}
+
+\begin{code}
+#ifdef  SHMEM_SYSV
+#define BSP_DEVICE  "SHMEM_SYSV"
+#endif
+#ifdef  SHMEM_SGI
+#define BSP_DEVICE  "SHMEM_SGI"
+#endif
+#ifdef  SHMEM_NULL
+#define BSP_DEVICE  "SHMEM_NULL"
+#endif
+#ifdef  SHMEM_WIN32
+#define BSP_DEVICE  "SHMEM_WIN32"
+#endif
+#ifdef  MPASS_MPI
+#define BSP_DEVICE  "MPASS_MPI"
+#endif
+#ifdef  MPASS_TCPIP
+#define BSP_DEVICE  "MPASS_TCPIP"
+#endif
+#ifdef  MPASS_UDPIP
+#define BSP_DEVICE  "MPASS_UDPIP"
+#endif
+#ifdef  MPASS_3C905B
+#define BSP_DEVICE  "MPASS_3C905B"
+#endif
+#ifdef  MPASS_MPL
+#define BSP_DEVICE  "MPASS_MPL"
+#endif
+#ifdef  MPASS_PARIX
+#define BSP_DEVICE  "MPASS_PARIX"
+#endif
+#ifdef  MPASS_EXPRESS
+#define BSP_DEVICE  "MPASS_EXPRESS"
+#endif
+#ifdef  MPASS_PARMACS
+#define BSP_DEVICE  "MPASS_PARMACS"
+#endif
+#ifdef  MPASS_FUJICELL
+#define BSP_DEVICE  "MPASS_FUJICELL"
+#endif
+#ifdef  DRMA_SHMEM
+#define BSP_DEVICE  "DRMA_SHMEM"
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{BSMP padding size}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#define BSMP_PADDING_SIZE 8
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Sizeof}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+#define SIZEOF(x) ((int) sizeof(x))
+\end{code}
+Redefine SIZEOF to return a signed integer so that the following
+program doesn't print \texttt{0 1}.
+\begin{verbatim}
+void main() {
+        int x,y;
+
+        x = 2*SIZEOF(int);
+        y = -42;
+        printf("x<y=%d x<y=%d\n",x<y,(2*SIZEOF(int))<y);
+}
+\end{verbatim}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Message combining}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+When messages are combined (turned on with the \texttt{-fcombine-puts}
+flag to \texttt{bspfront}), then \texttt{MAX\_FCOMBINE\_MESSAGE\_SIZE}
+is the largest size of a message that will be combined. This value
+should really be set to $\approx \nhalf{}$ because the message size
+at $\nhalf{}$ is tending towards the asymptotic communication
+rate. At larger message sizes, there is no need to do any combining.
+\begin{code}
+#if defined(SGICHALL64) || defined(MPASS_UDPIP) || defined(MPASS_TCPIP) || defined(MPASS_3C905B)
+#define MAX_FCOMBINE_MESSAGE_SIZE 888
+#else
+#if defined(CRAYT3D) || defined(CRAYT3E)
+#define MAX_FCOMBINE_MESSAGE_SIZE 32
+#else
+#define MAX_FCOMBINE_MESSAGE_SIZE 400
+#endif
+#endif
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{BSMP message buffer size}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Initial size of the message passing system buffer (must be $>0$, as
+$-1$ is used to identify that infinite message passing buffers are to
+be used).
+\begin{code}
+#define BSMP_MIN_BUFFER_SIZE 100
+#define BSMP_INFINITE_BUFFERS (-1)
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Contention removal}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+See \cite{hill:lessonsta} and \texttt{bsp\_lib\_mpass.lh} and
+\texttt{bsp\_lib\_shmem.lh} for message passing and shared memory
+specific contention removal techniques. By default all contention
+removal is on. Use the \texttt{bspfront} flag
+\texttt{-fcontention-resolve} to change the severity of contention
+elimination. 
+\begin{code}
+#define CONTENTION_REMOVAL_NONE()   (_bsp_opt_contention_level==0)
+#define CONTENTION_REMOVAL_SOME()   (_bsp_opt_contention_level==2)
+#define CONTENTION_REMOVAL_ALL()    (_bsp_opt_contention_level>0)
+\end{code}
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Misc. programming macros}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+This fast memcpy macro is to be used when there is a good chance that
+\texttt{nbytes} is either a 32 or 64bit word.
+\begin{code}
+#define FAST_MEMCPY(dst,src,count)                          \
+do {                                                        \
+      char *srcnew=(char*)(src);                            \
+      char *dstnew=(char*)(dst);                            \
+      if ((count==sizeof(double)) &&                        \
+          ((((long int)dstnew)&(sizeof(double)-1))==0) &&   \
+          ((((long int)srcnew)&(sizeof(double)-1))==0)) {  \
+        *((double*)(dstnew))=*((double*)(srcnew));          \
+      } else if ((count==sizeof(int)) &&                    \
+          ((((long int)dstnew)&(sizeof(int)-1))==0) &&      \
+          ((((long int)srcnew)&(sizeof(int)-1))==0)) {      \
+        *((int*)(dstnew))=*((int*)(srcnew));                \
+      } else {                                              \
+        memcpy(dstnew,srcnew,count);                        \
+      }                                                     \
+} while(0)
+\end{code}
+
+\begin{code}
+#ifdef USE_BCOPY
+#define MEMCPY(dst,src,nbytes) bcopy(src,dst,nbytes)
+#else
+#define MEMCPY(dst,src,nbytes) memcpy(dst,src,nbytes)
+#endif
+\end{code}
+
+\begin{code}
+#ifdef SANITY_CHECK
+#define MALLOC(size)       calloc(size,SIZEOF(char))
+#define CALLOC(nelem,size) calloc(nelem,size)
+#else
+#define MALLOC(size)       malloc(size)
+#define CALLOC(nelem,size) malloc((nelem)*(size))
+#endif
+\end{code}
+
+Random number generator. Defined as a macro as some implementations of
+\texttt{rand(3)} contain the following bug:
+\begin{quote}
+     The low bits of the numbers generated are not very random; use
+     the middle bits.  In particular the lowest bit alternates between
+     0 and 1.
+\end{quote}
+\begin{code}
+#define RAND_SEED(m) srand(m)
+#define RAND()       (rand()>>2)
+\end{code}
+
+The Digital Alpha doesn't have a division instruction, so modulo and
+divisions can be expensive as they are done in software. The macro
+\texttt{MOD\_POW2} can only be used if the divisor is \emph{known} to
+be a power of two. 
+\begin{code}
+#define CEILING_DIV(x,y) (((x) != 0) ? ((((x) - 1)/(y)) + 1) : 0)
+#ifdef TURBO
+#define MOD_POW2(x,y) ((x) & ((y)-1))
+#else
+#define MOD_POW2(x,y) ((x)%(y))
+#endif
+
+#define PAIRMAX(x,y) (((x)>(y))?(x):(y))
+#define PAIRMIN(x,y) (((x)<(y))?(x):(y))
+\end{code}
+
+In some debuggers, it isn't possible to add a breakpoint in a static
+function. Therefore when debugging the library, we don't use the
+static function definitions.
+\begin{code}
+#if defined(REALDEBUG) || defined(CALLGRAPH_PROFILE)
+#define STATIC /* static */
+#else
+#define STATIC static
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Put, get, and  send smashed with pid}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+The following set of macros coalesce two pieces of information into a
+single word. The bottom two bits are used to represent the type of
+communication (i.e., put, hpput, get, hpget, or send), and the rest
+the destination process identifer:
+\begin{verbatim}
+0 0 Put
+1 0 Send
+
+0 1 Get
+1 1 HpGet
+\end{verbatim}
+
+\begin{code}
+#define COMM_IS_PUT(pid)      ((pid & 3)==0) 
+#define COMM_IS_SEND(pid)     ((pid & 3)==2) 
+#define COMM_IS_PUTLIKE(pid)  ((pid & 1)==0)
+
+#define COMM_IS_GET(pid)      ((pid & 3)==1)
+#define COMM_IS_HPGET(pid)    ((pid & 3)==3)
+#define COMM_IS_GETLIKE(pid)  ((pid & 1)==1)
+
+#define COMM_SET_PUT(pid)     (pid<<2)
+#define COMM_SET_SEND(pid)    ((pid<<2) +2)
+#define COMM_SET_GET(pid)     ((pid<<2) +1)
+#define COMM_SET_HPGET(pid)   ((pid<<2) +3)
+#define COMM_GET_PID(pid)     (pid>>2)
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Misc flags}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+This macro is used in some of the error messages that are concerned
+with registration. If the recipient of any data doesn't know where
+data came from, then this will be used as the senders pid. 
+\begin{code}
+#define UNKNOWN_SENDER (-1)
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Communication closures}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+All \bsplib{} communications such as put, get, or send are actually
+delayed---they are transfered at the end of the superstep. The
+following data-structure stores all the information from a put,get, or
+send operation in a delayed communication closure.
+\begin{code}
+typedef struct {
+   bsp_int32 comm_pid; /* See put, get, and  send smashed with pid macros */
+   bsp_int32 addr_global;
+   bsp_int32 offset;
+   void *addr_real;
+   bsp_int32 nbytes;
+ } _BSPcomm_thunk;
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{External variables passed via bspfront}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+extern int _bsp_throttle_procs;
+extern int _bsp_check_syncs;
+extern int _bsp_do_stat;
+extern int _bsp_buffer_size;
+extern int _bsp_buffer_stalls;
+extern int _bsp_nbuffers;
+extern int _bsp_comm_fifo_size;
+extern int _bsp_opt_fcombine_puts;
+extern int _bsp_opt_fcombine_puts_max;
+extern int _bsp_opt_fcombine_puts_min;
+extern int _bsp_opt_contention_level;
+extern int _bsp_opt_flibrary_level;
+extern char _bsp_library_type;
+extern char *_bsp_arch;
+extern char *_bsp_device;
+extern char *_bsp_exec_file;
+extern int _bsp_do_prof;
+extern int _bsp_do_cgprof;
+
+
+#ifdef BSP_SHMEM
+#include "bsp_lib_shmem.h"
+#else
+#ifdef BSP_MPASS
+#include "bsp_lib_mpass.h"
+#else
+#include "bsp_lib_drma.h"
+#endif
+#endif
+\end{code}

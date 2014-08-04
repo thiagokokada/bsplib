@@ -1,0 +1,352 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1997, 1998 Stephen Donaldson                       %%
+%%                      &  The University of Oxford                      %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+  /*
+   * Header file for BSP/UDP components: 
+   * - bspudpl.c - Library interface routines for BSPLib.
+   */
+
+#ifndef BSPUDPDEFS_H
+#define BSPUDPDEFS_H
+#include "../library_shared/bsp_types.h"
+
+#define BSPETH_STATS 0
+
+typedef struct bspudp_sess bspudp_sess_t;
+typedef struct bspudp_msghdr bspudp_msghdr_t;
+typedef struct bspudp_stat bspudp_stat_t;
+typedef struct bspudp_anch bspudp_anch_t;
+\end{code}
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Structure of a packet header when using UDP/IP}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+typedef char bspudp_payload_t[4];
+
+struct bspudp_msghdr
+   {
+   unsigned long msgack;    /* message sequence number ack'ed  */
+   unsigned long msghigh;   /* highest sequence number seen    */
+   unsigned long msgseq;    /* message sequence number         */
+   unsigned char msgprot;   /* protocol frame type             */
+   unsigned char msgtype;   /* indicates content of payload    */
+   short msglen;            /* payload length (must be signed) */
+   short msgspid;           /* source BSP process              */
+   short msgdpid;           /* destination BSP process         */
+#ifdef BSPTCP_TRACE
+   int   msgid;             /* Unique message identifier       */
+#endif
+#ifdef BSPUDP_MSC_TRACE
+   unsigned int msgmscnum;  /* message identifier for msg seq chart */
+#endif
+   bspudp_payload_t data;   /* first word of payload */
+   };
+
+/* protocol message types used in UDP/IP implementation */
+
+#define BSPUDP_PROT_SDATA      0  /* higher level PDU data send   */
+#define BSPUDP_PROT_ADATA      1  /* data send + forced ack       */
+#define BSPUDP_PROT_RDATA      2  /* higher level PDU data resend */
+#define BSPUDP_PROT_ACK        3  /* postive acknowledgement      */
+
+#define BSPUDP_MSG_EXIT       253  /* process is exiting */
+#define BSPUDP_MSG_EXITOK     254  /* process is exiting */
+#define BSPUDP_MSG_EXITGOING  255  /* process is exiting */
+\end{code}
+
+\begin{code}
+#include "../library_udpip/bspqueue.h"
+\end{code}
+
+\subsection{Ethernet frame and NIC descriptor format}
+
+See page 6-2 and 7-2 of Appendix C of ``3C90x
+Network Interface Cards Technical Reference'' Part
+Number:09-1163000, December 1997. 3Com. \verb!http://www.3com.com/!
+
+\begin{code}
+#ifdef MPASS_3C905B
+typedef struct bspeth_dpd   bspeth_dpd_t;
+typedef struct bspeth_pref  bspeth_pref_t;
+
+/* DPD frame on 8 byte boundary */
+struct bspeth_dpd {
+   bsp_uint32     DnNextPtr;           
+   bsp_uint32     DnFrameStartHeader;  
+   bsp_uint32     DnFragAddr1;
+   bsp_uint32     DnFragLen1;         
+   bsp_uint32     DnFragAddr2;
+   bsp_uint32     DnFragLen2;         
+   bsp_uint32     DnFragAddr3;
+   bsp_uint32     DnFragLen3;         
+   bspeth_pref_t* DnFrame;            /* associated frame */
+   bsp_uint32     expedited;            
+};
+
+
+struct bspeth_pref {
+   /* Fields used by a send DPD */
+   bsp_uint32       DnComplete;      /* Cache of down complete bit */
+   bspeth_dpd_t    *DnDPD;           /* Last descriptor associated
+					with this frame */
+
+   /* Fields used by a receive DPD */
+   bspudp_buff_t   *udpBackPtr;      /* Ptr back to high-level queueing */
+   bsp_uint32       padding;         /* UPD frame on 8 byte boundary */
+   
+   bsp_uint32       UpNextPtr; 
+   bsp_uint32       UpPktStatus;     /* begin,end  NIC up descriptor */
+
+   /* Fields used by both */
+   bspeth_macaddr_t ieee802_3_dmac;  /* start, IEEE 802.3 frame */
+   bspeth_macaddr_t ieee802_3_smac;    
+   bsp_uint16       ieee802_3_type;
+   short int        bsp_jobid;       /* unique number for a BSP job */
+   /* bspudp_msghdr_t frame from here */
+};    
+
+/* bit fields in the frame start header */
+#define dnIndicate          BIT31   /* download complete */
+#define dpdEmpty            BIT29   /* empty descriptor */
+#define rndupDefeat         BIT28   /* override packet length roundup */
+#define dnComplete          BIT16   /* packet downloaded to fifo */
+#define txIndicate          BIT15   /* interrupt xmit complete */
+
+/* bit field in the fragment length field */
+#define dnFragLast          BIT31   /* last fragAddr fgragLen pair */
+#define upFragLast          BIT31   /* last fragAddr fgragLen pair */
+/* bit fields in the UpPktStatus field */
+#define upError             BIT14   /* error in packet receipt */
+#define upComplete          BIT15   /* upload of packet complete */
+#define impliedBufferEnable BIT28   /* Special upload mode */
+
+#define KERNEL_BUFFER_SPACE (8*1024*1024)
+#endif
+
+#ifdef __KERNEL__
+#ifndef kern_user_to_phys
+char *kern_user_to_phys(char *user_ptr,int lineno, char* fname);
+#endif
+#ifndef kern_phys_to_user
+char *kern_phys_to_user(char *phys_ptr,int lineno, char* fname);
+#endif
+
+#define USER_TO_PHYS(t,x) ((t*) kern_user_to_phys((char*)x,__LINE__,__FILE__))
+#define PHYS_TO_USER(t,x) ((t*) kern_phys_to_user((char*)x,__LINE__,__FILE__))
+#define USER_OR_KERNEL(x,y) (y)
+#else
+#define USER_TO_PHYS(t,x) (x)
+#define PHYS_TO_USER(t,x) (x) 
+#define USER_OR_KERNEL(x,y) (x)
+#endif
+
+#ifdef MPASS_3C905B
+#define UDPIP_OR_3COM(x,y) (y)
+#else
+#define UDPIP_OR_3COM(x,y) (x)
+#endif
+
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Volatile data shared between user and signal handler (and/or kernel)}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+struct bspudp_stat
+   {
+   unsigned long expands;       /* count buffer pool epansions */
+   unsigned long wstimeouts;    /* count number of wait sends timeouts */
+   unsigned long prtimeouts;    /* count number of probe timeouts */
+   unsigned long sigio_fails;   /* count missing SIGIOs */ 
+   unsigned long send_fails;    /* failure to cleanup due to pktsent */
+   volatile int pending_count;  /* number of times signal handler can 
+                                   not service incoming message */
+   volatile int empty_sio_count;/* Socket io called when no data */
+   volatile int multi_sio_count;/* Socket io collects mores than one mesage*/
+   volatile int user_socketio;  /* Count of user forced socketio */
+#if BSPETH_STATS >= 3   
+   volatile int min_recv_usecs; /* Time spent in user forced socketio */
+   volatile int max_recv_usecs; /* Time spent in user forced socketio */ 
+   volatile int sum_recv_usecs;
+   volatile int sio_packets;
+#endif
+   };
+  
+#define MAX_CONTROL_PACKETS 50
+#define MAX_SEND_DPDS       6000
+
+struct bspudp_anch {
+   volatile int sigio_called;  /* check for missing SIGIO */
+   volatile int delta_socketio;/* change in state due to socketio */
+   volatile int pendingack_max;/* pid of last pending ack process */
+   volatile int pendingack_min;/* pid of first pending ack process */
+   volatile int llock_q;       /* local non-reentrant Q op in progress */
+   volatile int glock_q;       /* global non-reentrant Q op in progress */
+   volatile int io_pending;    /* io operation pending */
+   bspudp_buff_t   *sio_buff;  /* socketio cached buffer */
+   bspudp_msghdr_t *control_buff[MAX_CONTROL_PACKETS]; /* control pkts */
+   int              control_next;
+   bspudp_queue_t freeq;       /* free Q */
+   bspudp_stat_t stats;
+#ifdef MPASS_3C905B
+   volatile int userbusy;      /* user accessing kernel shared data */
+   
+   /* packets sent to and recived from NIC */
+   unsigned long nic_sends;    /* number of packets passed to nic */
+   unsigned long nic_exsends;  /* number of expedited sends */
+   unsigned long nic_recvs;    /* number of packets received from nic */
+
+#if BSPETH_STATS >= 3
+   volatile int   recv_time_set;
+   struct timeval recv_time;
+#endif
+
+   bspeth_pref_t *null_frame;      /* Bogus frame for nulling DPDs */
+   bspeth_pref_t *recv_queuehead;  /* First receive descriptor */
+   bspeth_pref_t *recv_queuetail;  /* Last  receive descriptor */
+
+   unsigned int send_dpd_next;     /* Next free descriptor */
+   unsigned int send_dpd_tail;     /* Index at tail of the queue */
+   unsigned int send_dpd_first;    /* First used descriptor */
+   unsigned int send_dpd_expedited;/* Last expedited packet */
+   unsigned int send_dpd_size;     /* Number of descriptors */
+   bspeth_dpd_t *send_dpds;        /* An array of send descriptors */
+
+#ifdef BSPUDP_MSC_TRACE
+   volatile int   trace_offset;
+   volatile int   trace_len;
+   char *ptrace_buff;
+   char *vtrace_buff;
+#endif
+#endif
+#ifdef BSPUDP_MSC_TRACE
+   volatile int   msc_id;      /* Unique trace number */
+   struct timeval base_time;   /* MSC trace start time */
+#endif
+};
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Session management structures}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+struct bspudp_sess
+   {
+   int pid;                     /* which session */
+   int state;                   /* session state */
+#ifdef MPASS_3C905B
+   bspeth_macaddr_t macaddr;    /* remote processors MAC address */
+   char hostname[256];          /* remote processors host name */
+#else
+   struct sockaddr_in peer;     /* remote socket address of BSP processor */
+   int peer_len;                /* remote socket address length */
+#endif
+   unsigned long last_ack;      /* last ack sent */
+   unsigned long seq_out;       /* sequence number of next buffer sent */
+   unsigned long seq_in;        /* sequence number of next buffer processed */
+
+   /* chain of buffers sent but not acknowledged */
+   bspudp_queue_t send;         /* buffers sent and not ack'ed */
+
+   /* chain of buffers received but processed */
+   bspudp_queue_t recv;         /* unprocessed buffers received */
+
+   /* flow control and recovery data */
+   unsigned long high;          /* returned highest message seen */
+   unsigned long acked;         /* returned highes ack */
+   unsigned long waitseq;       /* ack seq no to trigger recovery */
+   unsigned long last_npack;    /* last ack of non piggy ack */
+   volatile unsigned long stem_flow;     /* count times partner still behind */
+   int           ack_pending;   /* socketio request ack */
+   int           ack_reason;    /* debugging crap */
+    
+  /*
+   * Implicit acknowledgements:
+   * When bspudp_record_seq() is called, the seq_out fields are copied  
+   * to the corresponding purge fields of each session.                  
+   * When bspudp_purge_seq() is called all seq numbers before purge are 
+   * implicitly acknowledged and the corresponding buffers are freed.
+   * The higher layer protocol bases these calls on the superstep 
+   * structure.
+   */
+   unsigned long purge;            /* first seq used in next purge */
+   unsigned long implicits;        /* number of implicit acks */
+
+   /* session stats collected */
+   unsigned long duplicates;       /* duplicate packets dropped */
+   unsigned long ws_retransmits;   /* number of packet retransmissions */
+   unsigned long sio_retransmits;  /* number of packet retransmissions */
+   unsigned long snd_retransmits;  /* number of packet retransmissions */
+   unsigned long prodded;          /* number times source prodded for data */
+   unsigned long nopiggy;          /* acks not piggy backed */
+   unsigned long block_recvs;      /* number of blocking receives */
+   };
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Data shared between user-kernel}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+/* values for state in bspudp_sess_t */
+
+#define BSPUDP_STATE_INACTIVE  0       /* connection with peer is not active */
+#define BSPUDP_STATE_ACTIVE    1       /* connection with peer is active */
+
+/* waiting times */ 
+
+#ifdef MPASS_3C905B
+/* 3c905B needs a couple extra as the NIC may be holding a packet in
+   hand before an expedited packet can be downloaded */
+
+#define BSPUDP_RECVQ_TIMEOUT       6    /* probe timemout factor      */
+#define BSPUDP_SENDQ_TIMEOUT       6    /* wait_sends timeout factor  */
+#else
+#define BSPUDP_RECVQ_TIMEOUT       4    /* probe timemout factor      */
+#define BSPUDP_SENDQ_TIMEOUT       4    /* wait_sends timeout factor  */
+#endif
+
+/* send-low > recv-low, send-low < send-high, all < bspudp_min_packets */
+
+
+
+#define BSPUDP_SEND_LOWWATER    (BSP_ONLINE_PROCS+30)
+#define BSPUDP_SEND_HIGHWATER   (BSP_ONLINE_PROCS+50)
+#define BSPUDP_RECV_LOWWATER    (BSP_ONLINE_PROCS+2)
+
+
+
+#define BSPUDP_RECVQ_MAXFACTOR  1024    /* limit of exponential decay */
+
+/* When to send non piggy backed acks */
+#define BSPUDP_PKTS_BEFORE_NONPIGGY_ACK \
+   (bspudp_min_packets/(2*(bspudp_nprocs-1)))
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Additional msgtype values indicating message payload for UDP/IP}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#define BSPUDP_MSG_whatever  (BSPTCP_MAX_TYPE+1)  /* whatever */
+
+#define BSPUDP_MAX_TYPE   BSPUDP_MSG_whatever
+#endif /* BSPUDPDEFS_H */
+\end{code}

@@ -1,0 +1,38 @@
+\contentsline {section}{\numberline {1}C interface to SLG}{3}
+\contentsline {section}{\numberline {2}Fortran interface to SLG}{3}
+\contentsline {section}{\numberline {3}Reading in text file containing SLG parameters}{3}
+\contentsline {section}{\numberline {4}\texttt {bsp\_bcast}}{6}
+\contentsline {paragraph}{Simple}{6}
+\contentsline {paragraph}{Two phase}{6}
+\contentsline {subsection}{\numberline {4.1}Initialisation}{6}
+\contentsline {subsection}{\numberline {4.2}Statistics output}{7}
+\contentsline {subsection}{\numberline {4.3}The routine}{7}
+\contentsline {section}{\numberline {5}\texttt {bsp\_scan}}{9}
+\contentsline {paragraph}{Parallel prefix}{9}
+\contentsline {paragraph}{Total exchange}{9}
+\contentsline {subsection}{\numberline {5.1}Initialisation}{9}
+\contentsline {subsection}{\numberline {5.2}Statistics output}{10}
+\contentsline {subsection}{\numberline {5.3}Parallel Prefix Scan}{10}
+\contentsline {subsection}{\numberline {5.4}Parallel Prefix Scan}{11}
+\contentsline {subsection}{\numberline {5.5}The scan function itself}{11}
+\contentsline {section}{\numberline {6}\texttt {bsp\_fold}}{13}
+\contentsline {paragraph}{Total exchange based}{13}
+\contentsline {paragraph}{Scan based}{13}
+\contentsline {subsection}{\numberline {6.1}Initialisation}{13}
+\contentsline {subsection}{\numberline {6.2}Statistics output}{14}
+\contentsline {subsection}{\numberline {6.3}Toltal exchange fold}{14}
+\contentsline {subsection}{\numberline {6.4}The fold function itself}{15}
+\contentsline {section}{\numberline {7}Instances of scan and reduce}{17}
+\contentsline {subsection}{\numberline {7.1}Initialisation}{18}
+\contentsline {subsection}{\numberline {7.2}All and Any}{18}
+\contentsline {subsection}{\numberline {7.3}Constant}{18}
+\contentsline {subsection}{\numberline {7.4}Sum}{19}
+\contentsline {subsection}{\numberline {7.5}Product}{19}
+\contentsline {subsection}{\numberline {7.6}Maximum}{20}
+\contentsline {subsection}{\numberline {7.7}Mimimum}{20}
+\contentsline {section}{\numberline {8}Instances of scan and reduce}{21}
+\contentsline {section}{\numberline {9}Gather function}{23}
+\contentsline {section}{\numberline {10}Scatter function}{24}
+\contentsline {section}{\numberline {11}Sorting routine for machines with few processors}{25}
+\contentsline {section}{\numberline {12}Instances of ordering predicates}{25}
+\contentsline {section}{\numberline {13}Instances of sorting the standard types}{26}

@@ -1,0 +1,132 @@
+
+
+
+bsp_fold(3)               BSPlib level1               bsp_fold(3)
+
+
+
+NAME
+     bsp_fold - fold (aka reduce) an associate operator between a
+     single data item held in each process
+
+
+
+C SYNOPSIS
+     #include "bsp_level1.h"
+
+     void bsp_fold(void (*_o_p)(void*,void*,void*,int*),
+                   void *_s_r_c, void *_d_s_t, int _n_b_y_t_e_s)
+
+FORTRAN SYNOPSIS
+     SUBROUTINE bspfold(_o_p,_s_r_c,_d_s_t,_n_b_y_t_e_s)
+       INTERFACE
+         SUBROUTINE op(_r_e_s,_l_e_f_t,_r_i_g_h_t,_n)
+           INTEGER, intent(IN) :: _n
+           <TYPE>,  intent(IN) :: _l_e_f_t,_r_i_g_h_t
+           <TYPE>,  intent(OUT):: _r_e_s
+       END INTERFACE
+       INTEGER, intent(IN)  :: _n_b_y_t_e_s
+       <TYPE>,  intent(IN)  :: _s_r_c
+       <TYPE>,  intent(OUT) :: _d_s_t
+
+
+
+DESCRIPTION
+     A collective reduction operation  that  combines  the  local
+     copies  of the data _s_r_c on each processor, using an associa-
+     tive, binary operator _o_p. The result  of  the  reduction  is
+     copied into _d_s_t on all the processors.
+
+     The data-structures _s_r_c and _d_s_t have to be of size _n_b_y_t_e_s on
+     each  process.  The procedure _o_p is defined by the user, and
+     combines the arguments _l_e_f_t and _r_i_g_h_t,  placing  the  result
+     into  _r_i_g_h_t. The size of _l_e_f_t, _r_i_g_h_t, and _r_e_s_u_l_t all have to
+     be _n_b_y_t_e_s. When defining the procedure _o_p, the user does not
+     have  to  cope  with  the  possibility that _r_e_s_u_l_t, _l_e_f_t, or
+     _r_i_g_h_t are aliased.
+
+
+EXAMPLES
+     1)   Consider the definition of a function _b_s_p__s_u_m that sums
+          a single integer stored on each process.
+
+          void addition(int *res, int *left, int *right; int *nbytes) {
+            *res = 0;
+            *res = *left + *right;
+          }
+
+          int bsp_sum(x) {
+            int result;
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    1
+
+
+
+
+
+
+bsp_fold(3)               BSPlib level1               bsp_fold(3)
+
+
+
+            bsp_fold(addition,&x,&result,sizeof(int));
+            return result;
+          }
+
+          The assignment *_r_e_s  =  _0  in  the  definition  is  not
+          semantically necessary as it doesn't change the desired
+          effect of the summation. This is guarenteed as  neither
+          _r_i_g_h_t or _l_e_f_twill be aliased to _r_e_s_u_l_t.
+
+
+
+NOTES
+     In the C implementation of bsp_fold, the _n_b_y_t_e_s argument  to
+     the  operator  _o_p is defined to be a pointer to a integer so
+     that either a C or Fortran 77 subroutine can be used as _o_p.
+
+
+
+SEE ALSO
+     bsplib_level1(3), bsp_scan(3)
+
+
+BUGS
+     Problems  and  bug  reports  should  be  mailed  to  _b_s_p_l_i_b-
+     _b_u_g_s@_c_o_m_l_a_b._o_x._a_c._u_k
+
+
+AUTHORS
+     Jonathan.Hill@comlab.ox.ac.uk
+     http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    2
+
+
+

@@ -1,0 +1,141 @@
+
+BSMP.3,0
+
+BSP.3,0
+
+BSPlib.3,0
+
+DRMA.3,0
+
+bsmp.3,15 drma(8,158
+
+bsp.3,0
+
+bsp_abort.3,18 bsplib(21,449
+
+bsp_bcast.3,22 _r_e_g_i_s_t_e_r_e_d _3_0,_6_2_3
+
+bsp_begin.3,46 program by 23,408
+      PROGRAM Main86,2219
+
+bsp_bsmp_info.3,22 function also 30,801
+
+bsp_end.3,0
+
+bsp_fold.3,44 bsp_fold - fold 3,78 int bsp_sum(85,1720
+
+bsp_g.3,0
+
+bsp_get.3,277
+        SUBROUTINE getarray(125,3105
+        INTEGER  FUNCTION  bspsum(198,4945  bsp_get(35,858   void
+get_array(104,2604
+        SUBROUTINE getarray(125,3105
+        INTEGER        FUNCTION        bspsum(198,4945        int
+cyclic_shift(277,6822 int bsp_allsums(310,7426 void main(327,7750
+
+bsp_get_tag.3,0
+
+bsp_hpget.3,0
+
+bsp_hpmove.3,0
+
+bsp_hpput.3,0
+
+bsp_init.3,67
+        SUBROUTINE spmdpart115,2752
+        PROGRAM MAIN127,3049
+
+bsp_l.3,0
+
+bsp_move.3,52
+      INTEGER FUNCTION allgathersparsevec(106,2744
+
+bsp_nhalf.3,0
+
+bsp_nprocs.3,21 bsp_begin(25,482
+
+bsp_pid.3,0
+
+bsp_pop_reg.3,0
+
+bsp_popregister.3,0
+
+bsp_push_reg.3,0
+
+bsp_pushregister.3,43 program consists 23,472 bsplib(22,459
+
+bsp_put.3,130 function shown 75,2242 function within 78,2441
+        INTEGER FUNCTION reverse(102,2835
+        SUBROUTINE putarray(216,5984
+
+bsp_qsize.3,0
+
+bsp_s.3,0
+
+bsp_send.3,20 bsp_send(24,584
+
+bsp_set_tag_size.3,0
+
+bsp_set_tagsize.3,0
+
+bsp_sync.3,27
+      PROGRAM MAIN76,1853
+
+bsp_time.3,0
+
+bspabort.3,0
+
+bspbcast.3,0
+
+bspbegin.3,0
+
+bspend.3,0
+
+bspg.3,0
+
+bspget.3,0
+
+bspgettag.3,0
+
+bsphpget.3,0
+
+bsphpput.3,0
+
+bspinit.3,0
+
+bspl.3,0
+
+bsplib.3,21 Multiple Data 9,318
+
+bsplib_level1.3,17 bsplib(8,194
+
+bspmove.3,0
+
+bspnhalf.3,0
+
+bspnprocs.3,0
+
+bsppid.3,0
+
+bsppopreg.3,0
+
+bsppopregister.3,0
+
+bsppushreg.3,0
+
+bsppushregister.3,0
+
+bspput.3,0
+
+bspqsize.3,0
+
+bspsend.3,0
+
+bspsettagsize.3,0
+
+bspsync.3,0
+
+bsptime.3,0
+
+drma.3,35 Direct Remote Memory Access 8,202

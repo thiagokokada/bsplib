@@ -1,0 +1,28 @@
+\begin{code}
+  /*
+   * File chkprest.h defines the external interfaces for the check-
+   * pointing and restart code (see chkprest.c). 
+   *
+   * Author: Stephen Donaldson.
+   */
+   
+
+  /*
+   * Flag that can be tested in the application program to determine
+   * whether the code is the original code or a checkpointed version
+   * of the code.
+   */
+
+extern int cpr_restart_count;       /* number of times execution restarted */
+extern int cpr_restart_ind;         /* restart indicator */
+
+  /* 
+   * Prototypes:
+   */
+
+void cpr_init(int depth);
+void cpr_prepare(char *chkp_name, char *prog_name);
+void cpr_take(void);
+void cpr_restart(void);
+
+\end{code}

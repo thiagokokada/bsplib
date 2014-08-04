@@ -1,0 +1,41 @@
+BSPlib		BSPlib (3)	- The Bulk Synchronous Parallel  World-Wide standard library.  
+bsp_abort	bsp_abort (3)	- stop a BSP computation 
+bsp_bcast	bsp_bcast (3)	- broadcast data from one process  
+bsp_begin	bsp_begin (3)	- spawn a number of BSP processes.  
+bsp_end 	bsp_end (3)	- terminate BSP processes.  
+bsp_fold	bsp_fold (3)	- fold (aka reduce) an associate operator between a single data item held in each process  
+bsp_g		bsp_l (3)	- query the BSP's machine  parameters  
+bsp_get 	bsp_get (3)	- copy data from a remote processes memory 
+bsp_get_tag	bsp_get_tag (3) - check the tag on a BSMP packet. 
+bsp_hpget	bsp_get (3)	- copy data from a remote processes memory 
+bsp_hpmove	bsp_hpmove (3)	- a lean method for moving a BSMP packet from the system queue. 
+bsp_hpput	bsp_put (3)	- deposit data into a remote processes memory 
+bsp_init	bsp_init (3)	- initialise the BSPlib system 
+bsp_l		bsp_l (3)	- query the BSP's machine  parameters  
+bsp_move	bsp_move (3)	- move a BSMP packet from the system queue. 
+bsp_nhalf	bsp_l (3)	- query the BSP's machine  parameters  
+bsp_nprocs	bsp_nprocs (3)	- determine the total number of BSP processes. 
+bsp_pid 	bsp_pid (3)	- determines the process identifier of a BSP process. 
+bsp_pop_reg	bsp_pop_reg (3) - remove the visibility of a previously registered data-structure.  
+bsp_push_reg	bsp_push_reg (3)    - register a data-structure as available for direct remote memory access. 
+bsp_put 	bsp_put (3)	- deposit data into a remote processes memory 
+bsp_qsize	bsp_qsize (3)	- checks to see how many BSMP packets arrived. 
+bsp_s		bsp_l (3)	- query the BSP's machine  parameters  
+bsp_send	bsp_send (3)	- transmit a BSMP packet to a remote process. 
+bsp_set_tagsize bsp_set_tagsize (3) - tag size of a BSMP packet. 
+bsp_sync	bsp_sync (3)	- end of a superstep. 
+bsp_time	bsp_time (3)	- high-precision real-time clock.  
+bsparch 	bsparch (1)	- determine the machine architecture and communication device. 
+bspcgprof	bspcgprof (1)	- The Oxford BSP Toolset call-graph profiler for BSPlib 
+bspfront	bspfront (1)	- The Oxford BSP Toolset compilation driver for BSPlib 
+bsplibd 	bsplibd (1)	- daemon for BSPlib programs running over TCP/IP. 
+bspload 	bspload (1)	- BSP load manager 
+bspnm		bspnm (1)	- Generate a symbol table in a standard format 
+bspparm 	bspparm (1)	- prints a table of the BSP machine parameters 
+bspprof 	bspprof (1)	- The Oxford BSP Toolset communication profiler for BSPlib 
+bsprun		bsprun (1)	- Initiates the parallel execution of a BSP job. 
+bspshutd	bspshutd (1)	- stop the BSPlib TCP/IP daemons 
+bspsig		bspsig (1)	- Generate a signature from a BSP profile 
+ipcclean	ipcclean (1)	- cleanup the inter-process communication facilities 
+litToPgm	litToPgm (1)	- Convert a literate file into a program. 
+litTotex	litTotex (1)	- Convert a literate file into LaTeX 

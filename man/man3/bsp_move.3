@@ -1,0 +1,202 @@
+.TH "bsp_move" 3 "1.4 25/9/98" "Oxford BSP Toolset" "BSPlib FUNCTIONS"
+.SH NAME
+bsp_move \- move a BSMP packet from the system queue.
+
+.SH C SYNOPSIS
+.nf
+.B #include \&"bsp.h\&"
+.PP
+.BI "void bsp_move(void *" payload ",int " reception_bytes ");"
+.fi
+.SH FORTRAN SYNOPSIS 
+.nf
+.BI "SUBROUTINE  bspmove(" payload, reception_nbytes )
+.BI    "<TYPE>,  intent(OUT) :: " payload
+.BI    "INTEGER, intent(IN)  :: " reception_nbytes
+.fi
+
+.SH DESCRIPTION
+
+The operation
+.B bsp_move
+copies the payload of the first message in the buffer into
+.I payload\c
+\&, and removes that message from the buffer. 
+.I recpetion_bytes
+specifies the size of the reception area where the 
+.I payload
+will be copied into. At most
+.I reception_nbytes
+will be copied into 
+.I payload\c
+\&.
+
+Note that 
+.B bsp_move 
+serves to flush the corresponding message from the buffer, while
+.B bsp_get_tag(3) 
+does not.  This allows a program to get the tag of a message (as well
+as the payload size in bytes) before obtaining the payload of the
+message.  It does, however, require that even if a program only uses
+the fixed-length tag of incoming messages the program must call
+.B bsp_move
+to get successive message tags.
+
+.SH EXAMPLE
+
+In the algorithm shown below, an 
+.I n
+element vector distributed
+into 
+.I n/p
+chunks on 
+.I p
+processes undergoes a communication whereby all the nonzero elements
+from all the 
+.I p
+chunks are broadcast to 
+.I all
+the processes. Due to the sparse nature of the problem, the
+communication pattern is well suited to BSMP as the amount and
+placement of data is highly data dependent.
+
+.nf
+int all_gather_sparse_vec(float *dense,int n_over_p,
+                          float **sparse_out,
+                          int **sparse_ivec_out){
+  int global_idx,i,j,tag_size,
+      nonzeros,nonzeros_size,status, *sparse_ivec;
+  float *sparse;
+  
+  tag_size = sizeof(int);
+  bsp_set_tagsize(&tag_size);
+  bsp_sync();
+
+  for(i=0;i<n_over_p;i++) 
+    if (dense[i]!=0.0) {
+      global_idx = (n_over_p * bsp_pid())+i;
+      for(j=0;j<bsp_nprocs();j++)
+        bsp_send(j,&global_idx,&dense[i],sizeof(float));
+    }
+  bsp_sync();
+
+  bsp_qsize(&nonzeros,&nonzeros_size);
+  if (nonzeros>0) {
+    sparse      = calloc(nonzeros,sizeof(float));
+    sparse_ivec = calloc(nonzeros,sizeof(int));
+    if (sparse==NULL || sparse_ivec==NULL)
+      bsp_abort("Unable to allocate memory");
+    for(i=0;i<nonzeros;i++) {
+      bsp_get_tag(&status,&sparse_ivec[i]);
+      if (status!=sizeof(float)) 
+         bsp_abort("Should never get here");
+      bsp_move(&sparse[i],sizeof(float));
+    }
+  }
+  bsp_set_tagsize(&tag_size);
+  *sparse_out      = sparse;
+  *sparse_ivec_out = sparse_ivec;
+  return nonzeros;
+}
+.fi
+
+Similarly, the function can be defined in Fortran as:
+
+.nf
+      INTEGER FUNCTION allgathersparsevec(dense,noverp,
+   +                                      sparse,sparseivec)
+        INCLUDE 'fbsp.h'
+        REAL dense(*),sparse(*)
+        INTEGER noverp,sparseivec(*)
+        INTEGER i,j,tagsize,globalidx
+        INTEGER nonzeros,nonzerossize,status
+
+        tagsize = BSPINT
+        CALL bspsettagsize(tagsize)
+        CALL bspsync()
+
+        DO i=1,noverp
+          IF (dense(i) .NE. 0.0) THEN
+            globalidx = (noverp * bsppid()) + i
+            DO j=0,bspnprocs()-1
+              CALL bspsend(j,globalidx,dense(i),BSPINT)
+            END DO
+          END IF
+        END DO
+        CALL bspsync()
+
+        CALL bspqsize(nonzeros,nonzerossize)
+        DO i=1,nonzeros
+          CALL bspgettag(status,sparseivec(i))
+          IF (status .NE. BSPREAL) THEN
+            CALL bspabort('Should never get here')
+          END IF
+          CALL bspmove(sparse(i),BSPREAL)
+        END DO
+        CALL bspsettagsize(tagsize)
+        allgathersparsevec=nonzeros
+      END
+.fi
+
+The algorithm contains three supersteps. In the first superstep, the tag
+size of the messages in the subsequent supersteps is set to the
+size of an integer. The size of the tag prior to the
+.B bsp_set_tagsize(3)
+is remembered so that it can be reinstated at the end of the
+procedure. Next, the nonzero elements of the vector are broadcast to
+each process using 
+.B bsp_send(3)\c
+\&. The tag for each send operation is set to be the position of the
+vector element within the global array of 
+.I n
+ elements; the payload of the message will be the nonzero element. A
+.B bsp_sync(3)
+is used to ensure that all the 
+.B bsp_send(3)
+operations are delivered to the system queue on the remote processes,
+and then 
+.B bsp_qsize(3)
+is used to determine how many messages arrived at each process.
+
+.SH "SEE ALSO"
+bsmp(3) ,bsp_send(3), bsp_set_tagsize(3), bsp_qsize(3),
+bsp_get_tag(3), bsp_hpmove(3)
+
+.I ``BSPlib: The BSP Programming Library''
+Jonathan M. D. Hill, Bill McColl, Dan C. Stefanescu, Mark W. Goudreau,
+Kevin Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and Rob
+Bisseling. Parallel Computing, to appear 1998. See
+.I http://www.bsp-worldwide.org
+for more details.
+
+.NOTES
+.IP i
+The payload length is always measured in bytes
+     
+.IP ii
+.B bsp_get_tag(3)
+can be called repeatedly and will always copy out the same tag until a
+call to 
+.B bsp_move(3)\c
+\&.
+
+.IP iii
+If the payload to be received is larger than 
+.I reception_nbytes\c
+\&, the payload will be truncated.
+
+.IP iv
+If
+.I reception_nbytes
+is zero this simply ``removes'' the message from the system queue.
+This should be efficient in any implementation of the library.
+
+.SH BUGS
+Problems and bug reports should be mailed to 
+.I bsplib-bugs@comlab.ox.ac.uk
+
+.SH AUTHORS
+The Oxford BSP Toolset implementation of BSPlib was written by
+Jonathan.Hill@comlab.ox.ac.uk
+.br
+.B http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html

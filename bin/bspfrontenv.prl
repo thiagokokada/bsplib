@@ -1,0 +1,682 @@
+#! @PERL@
+$bindir        = "@bindir@";
+$includedir    = "@includedir@";
+$libdir        = "@libdir@";
+$mandir        = "@mandir@";
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+push(@INC,$includedir);
+push(@INC,$bindir);
+require "bsputil";
+$includedir        = "@includedir@";
+$gcc               = "@GCC@";
+$g77               = "@G77@";
+$gplusplus         = "@GPLUSPLUS@";
+$updatefile        = "bspfront_inc";
+$defaultslotsize   = "@BSP_DEFAULT_SLOTSIZE@";
+$defaultnoslots    = "@BSP_DEFAULT_NOSLOTS@";
+$defaultroundtrip  = "@BSP_DEFAULT_ROUNDTRIP@";
+$defaultsendlatency= "@BSP_DEFAULT_SENDLATENCY@";
+
+
+
+%ccArch        = (
+  "SGIORIGIN",   "cc",
+  "SGICHALL64",  "cc",
+  "SGI",         "cc",
+  "SGIN32",      "cc",
+  "SP2",         "mpcc",
+  "CONVEXSPP",   "cc",
+  "PARSYTEC",    "px ancc",
+  "PARAMID",     "pgcc",
+  "RS6000",      "cc",
+  "SunOS",       "gcc",
+  "LINUX",       "gcc",
+  "Windows_NT",	 "cc",
+  "WIN32",	 "cl",
+  "Solaris",     "cc",
+  "SolarisX86",  "cc",
+  "OSF1",        "cc",
+  "HP",          "cc",
+  "HITACHIMPP",  "srcc",
+  "CRAYT3D",     "env TARGET=cray-t3d cc",
+  "CRAYT3E",     "env TARGET=cray-t3e cc",
+  "CRAYC90",     "cc");
+
+%gccCanOveride = (
+  "SGIORIGIN",   "0",
+  "SGICHALL64",  "0",
+  "SGI",         "1",
+  "SGIN32",      "1",
+  "SP2",         "0",
+  "CONVEXSPP",   "0",
+  "PARSYTEC",    "0",
+  "PARAMID",     "0",
+  "RS6000",      "1",
+  "SunOS",       "1",
+  "LINUX",       "1",
+  "Windows_NT",  "0",
+  "WIN32",       "0",
+  "Solaris",     "1",
+  "SolarisX86",  "1",
+  "OSF1",        "1",
+  "HP",          "1",
+  "HITACHIMPP",  "0",
+  "CRAYT3D",     "0",
+  "CRAYT3E",     "0",
+  "CRAYC90",     "0");
+
+%cplusplusArch   = (
+  "SGIORIGIN",   "CC",
+  "SGICHALL64",  "CC",
+  "SGI",         "CC",
+  "SGIN32",      "CC",
+  "SP2",         "mpc++",
+  "CONVEXSPP",   "cc",
+  "PARSYTEC",    "px ancc",
+  "PARAMID",     "pgc++",
+  "RS6000",      "CC",
+  "SunOS",       "g++",
+  "LINUX",       "g++",
+  "Windows_NT",	 "cc",
+  "WIN32",	 "cl",
+  "Solaris",     "CC",
+  "SolarisX86",  "CC",
+  "OSF1",        "CC",
+  "HP",          "g++",
+  "HITACHIMPP",  "srCC",
+  "CRAYT3D",     "env TARGET=cray-t3d CC",
+  "CRAYT3E",     "env TARGET=cray-t3e CC",
+  "CRAYC90",     "CC");
+
+%gplusplusCanOveride = (
+  "SGIORIGIN",   "0",
+  "SGICHALL64",  "0",
+  "SGI",         "1",
+  "SGIN32",      "1",
+  "SP2",         "0",
+  "CONVEXSPP",   "0",
+  "PARSYTEC",    "0",
+  "PARAMID",     "0",
+  "RS6000",      "1",
+  "SunOS",       "1",
+  "LINUX",       "1",
+  "Windows_NT",	 "0",
+  "WIN32",	 "0",
+  "Solaris",     "1",
+  "SolarisX86",  "1",
+  "OSF1",        "1",
+  "HP",          "1",
+  "HITACHIMPP",  "0",
+  "CRAYT3D",     "0",
+  "CRAYT3E",     "0",
+  "CRAYC90",     "0");
+
+%cppArch        = (
+  "SGIORIGIN",   "/lib/cpp",
+  "SGICHALL64",  "/lib/cpp",
+  "SGI",         "/lib/cpp",
+  "SGIN32",      "/lib/cpp",
+  "SP2",         "/lib/cpp",
+  "CONVEXSPP",   "/lib/cpp",
+  "PARSYTEC",    "/lib/cpp",
+  "PARAMID",     "/lib/cpp",
+  "RS6000",      "/lib/cpp",
+  "SunOS",       "/lib/cpp",
+  "LINUX",       "/lib/cpp",
+  "Windows_NT",	 "cpp",
+  "WIN32",	 "cl /E",
+  "Solaris",     "/lib/cpp",
+  "SolarisX86",  "/lib/cpp",
+  "OSF1",        "/lib/cpp",
+  "HP",          "/lib/cpp",
+  "HITACHIMPP",  "/lib/cpp",
+  "CRAYT3D",     "cc -E",
+  "CRAYT3E",     "cc -E",
+  "CRAYC90",     "cc -E");
+
+%f77Arch = (
+  "SGIORIGIN", "f77",
+  "SGICHALL64","f77",
+  "SGI",       "f77",
+  "SGIN32",    "f77",
+  "SP2",       "mpxlf",
+  "CONVEXSPP", "fc",
+  "PARSYTEC",  "px f77",
+  "PARAMID",   "pgf77",
+  "RS6000",    "xlf",
+  "SunOS",     "f77",
+  "LINUX",     "f77",
+  "Windows_NT","unknown",
+  "WIN32",     "unknown",
+  "Solaris",   "f77",
+  "SolarisX86","f77",
+  "OSF1",      "f77",
+  "HP",        "f77",
+  "HITACHIMPP","srf77",
+  "CRAYT3D",   "cf77",
+  "CRAYT3E",   "f90",
+  "CRAYC90",   "f90");
+
+%g77CanOveride = (
+  "SGIORIGIN",   "0",
+  "SGICHALL64",  "0",
+  "SGI",         "1",
+  "SGIN32",      "1",
+  "SP2",         "0",
+  "CONVEXSPP",   "0",
+  "PARSYTEC",    "0",
+  "PARAMID",     "0",
+  "RS6000",      "1",
+  "SunOS",       "1",
+  "LINUX",       "1",
+  "Windows_NT",  "0",
+  "WIN32",       "0",
+  "Solaris",     "1",
+  "SolarisX86",  "1",
+  "OSF1",        "1",
+  "HP",          "1",
+  "HITACHIMPP",  "0",
+  "CRAYT3D",     "0",
+  "CRAYT3E",     "0",
+  "CRAYC90",     "0");
+
+%f77doesCpp = (
+  "SGICHALL64",1,
+  "LINUX",1
+);
+
+# Flags to the underlying Compilers
+%ccompFlagsArch = (
+  "SGIORIGIN",  "-64",
+  "SGICHALL64", "",
+  "SGI",        "",
+  "SGIN32",     "-n32",
+  "SP2",        "",
+  "CONVEXSPP",  "",
+  "PARSYTEC",   "",
+  "PARAMID",    "-Mnofptrap",
+  "HITACHIMPP", "-kcubix",
+  "RS6000",     "",
+  "SunOS",      "",
+  "Solaris",    "-Xt -w",
+  "SolarisX86", "-Xt -w",
+  "LINUX",      "",
+  "Windows_NT", "",
+  "WIN32",	"",
+  "OSF1",       "",
+  "HP",         "",
+  "CRAYT3D",    "",
+  "CRAYT3E",    "",
+  "CRAYC90",    "");
+
+%fcompFlagsArch = (
+  "SGIORIGIN",  "-static  -col120",
+  "SGICHALL64", "-static  -col120",
+  "SGI",        "",
+  "SGIN32",     "-n32",
+  "SP2",        "",
+  "CONVEXSPP",  "",
+  "PARSYTEC",   "",
+  "PARAMID",    "",
+  "HITACHIMPP", "-kcubix -i,U",
+  "RS6000",     "",
+  "SunOS",      "-e -fnonstd",
+  "LINUX",      "-f -B108",
+  "Windows_NT", "",
+  "WIN32",	"",
+  "Solaris",    "-fnonstd",
+  "SolarisX86", "-fnonstd",
+  "OSF1",       "-extend_source",
+  "HP",         "",
+  "CRAYT3D",    "-C cray-t3d",
+  "CRAYT3E",    "",
+  "CRAYC90",    "");
+
+%coptFlagsArch = (
+  "SGIORIGIN-O1",  "-O",
+  "SGIORIGIN-O2",  "-O2",
+  "SGIORIGIN-O3",  "-O3",
+
+  "SGICHALL64-O1", "-O",
+  "SGICHALL64-O2", "-O2",
+# "SGICHALL64-O3", "-O3 -sopt,-o=5,-cachesize=16",
+  "SGICHALL64-O3", "-O3",
+
+  "SGI-O1",        "-O",
+  "SGI-O2",        "-O2",
+  "SGI-O3",        "-O3",
+
+  "SGIN32-O1",     "-O",
+  "SGIN32-O2",     "-O2",
+  "SGIN32-O3",     "-O3",
+
+  "SP2-O1",        "-O",
+  "SP2-O2",        "-O2",
+  "SP2-O3",        "-O3",
+
+  "CONVEXSPP-O1",  "+O1",
+  "CONVEXSPP-O2",  "+O2",
+  "CONVEXSPP-O3",  "+O3",
+
+  "PARSYTEC-O1",   "-O",
+  "PARSYTEC-O2",   "-O2",
+  "PARSYTEC-O3",   "-O3",
+
+  "PARAMID-O1",    "-O2",
+  "PARAMID-O2",    "-O3",
+  "PARAMID-O3",    "-O4",
+
+  "HITACHIMPP-O1", "-O",
+  "HITACHIMPP-O2", "-O",
+  "HITACHIMPP-O3", "-O",
+
+
+  "RS6000-O1",     "-O",
+  "RS6000-O2",     "-O2",
+  "RS6000-O3",     "-O3",
+
+  "SunOS-O1",      "-O",
+  "SunOS-O2",      "-O2",
+  "SunOS-O3",      "-O3",
+
+  "Solaris-O1",    "-O",
+  "Solaris-O2",    "-xO3 -fast",
+  "Solaris-O3",    "-xO4 -fast",
+
+  "SolarisX86-O1", "-O",
+  "SolarisX86-O2", "-xO3 -fast",
+  "SolarisX86-O3", "-xO4 -fast",
+
+  "LINUX-O1",      "-O",
+  "LINUX-O2",      "-O2",
+  "LINUX-O3",      "-O3",
+
+  "Windows_NT-O1", "-O1",
+  "Windows_NT-O2", "-O2",
+  "Windows_NT-O3", "-O3",
+
+  "WIN32-O1",	   "/Od",
+  "WIN32-O2",	   "/O2",
+  "WIN32-O3",	   "/Ot /O2",
+
+  "OSF1-O1",       "-O",
+  "OSF1-O2",       "-O5 -migrate",
+  "OSF1-O3",       "-O5 -migrate",
+
+  "HP-O1",         "-O",
+  "HP-O2",         "+O2",
+  "HP-O3",         "+O3",
+
+  "CRAYT3D-O1",    "-O",
+  "CRAYT3D-O2",    "-O2",
+  "CRAYT3D-O3",    "-O3",
+
+  "CRAYT3E-O1",    "-O",
+  "CRAYT3E-O2",    "-O2",
+  "CRAYT3E-O3",    "-O3",
+
+  "CRAYC90-O1",    "-O",
+  "CRAYC90-O2",    "-O2",
+  "CRAYC90-O3",    "-O3");
+
+%foptFlagsArch = (
+  "SGIORIGIN-O1", "-O",
+  "SGIORIGIN-O2", "-O2",
+  "SGIORIGIN-O3", "-sopt,-cachesize=16,-roundoff=3,-scalaropt=3 -GCM:aggressive_speculation=ON -GCM:static_load_speculation=ON -TENV:X=5 -O3",
+
+  "SGICHALL64-O1", "-O",
+  "SGICHALL64-O2", "-O2",
+  "SGICHALL64-O3", "-sopt,-cachesize=16,-roundoff=3,-scalaropt=3 -GCM:aggressive_speculation=ON -GCM:static_load_speculation=ON -TENV:X=5 -O3",
+
+  "SGI-O1",        "-O",
+  "SGI-O2",        "-O2",
+  "SGI-O3",        "-O3",
+
+  "SGIN32-O1",     "-O",
+  "SGIN32-O2",     "-O2",
+  "SGIN32-O3",     "-O3",
+
+  "SP2-O1",        "-O",
+  "SP2-O2",        "-O2",
+  "SP2-O3",        "-Pk -Wp,-r=3 -O3",
+
+  "CONVEXSPP-O1",  "-O",
+  "CONVEXSPP-O2",  "-O2",
+  "CONVEXSPP-O3",  "-O3",
+
+  "PARSYTEC-O1",   "-O",
+  "PARSYTEC-O2",   "-O2",
+  "PARSYTEC-O3",   "-O3",
+
+  "PARAMID-O1",    "-O2",
+  "PARAMID-O2",    "-O3",
+  "PARAMID-O3",    "-O4",
+
+  "HITACHIMPP-O1", "-O",
+  "HITACHIMPP-O2", "-O",
+  "HITACHIMPP-O3", "-O",
+
+  "RS6000-O1",     "-O",
+  "RS6000-O2",     "-O2",
+  "RS6000-O3",     "-Pk -Wp,-r=3 -O3",
+
+  "SunOS-O1",      "-O",
+  "SunOS-O2",      "-O2",
+  "SunOS-O3",      "-O3",
+
+  "Solaris-O1",    "-O",
+  "Solaris-O2",    "-O2",
+  "Solaris-O3",    "-O3",
+
+  "SolarisX86-O1", "-O",
+  "SolarisX86-O2", "-O2",
+  "SolarisX86-O3", "-O3",
+
+  "LINUX-O1",      "-O",
+  "LINUX-O2",      "-O",
+  "LINUX-O3",      "-O",
+
+  "Windows_NT-O1", "-O1",
+  "Windows_NT-O2", "-O2",
+  "Windows_NT-O3", "-O3",
+
+  "WIN32-O1",	   "",
+  "WIN32-O2",	   "",
+  "WIN32-O3",	   "",
+
+  "OSF1-O1",       "-O",
+  "OSF1-O2",       "-O5",
+  "OSF1-O3",       "-O5",
+
+  "HP-O1",         "-O",
+  "HP-O2",         "+O2",
+  "HP-O3",         "+O3",
+
+  "CRAYT3D-O1",    "-O scalar1",
+  "CRAYT3D-O2",    "-O scalar2",
+  "CRAYT3D-O3",    "-O scalar3",
+
+  "CRAYT3E-O1",    "-O 1",
+  "CRAYT3E-O2",    "-O 2",
+  "CRAYT3E-O3",    "-O 3",
+
+  "CRAYC90-O1",    "-O 1",
+  "CRAYC90-O2",    "-O 2",
+  "CRAYC90-O3",    "-O 3");
+
+
+%ldFlagsArch   = (
+  "SGIORIGIN",  "",
+  "SGICHALL64", "",
+  "SGI",        "",
+  "SGIN32",     "-n32",
+  "SP2",        "",
+  "CONVEXSPP",  "",
+  "PARSYTEC",   "-L/usr/lang/ppc/lib/PowerPC/",
+  "PARAMID",    "-L/opt/transtech/i860/lib-coff/",
+  "RS6000",     "",
+  "SunOS",      "",
+  "LINUX",      "",
+  "Windows_NT", "",
+  "WIN32",      "",
+  "Solaris",    "",
+  "SolarisX86", "",
+  "OSF1",       "-non_shared",
+  "HP",         "",
+  "CRAYT3D",    "-Wl,\"-j $includedir/t3d_bsp.cld\"",
+  "CRAYT3E",    "-Wl,\"$includedir/t3e_bsp.cld\"",
+  "CRAYC90",    "");
+
+%ldFlagsDevice = (
+  "SHMEM_SGI",    "",
+  "SHMEM_SYSV",   "",
+  "SHMEM_NULL",   "",
+  "SHMEM_WIN32",  "",
+  "MPASS_MPL",    "",
+  "MPASS_PARIX",  "",
+  "MPASS_PARMACS","",
+  "MPASS_EXPRESS","",
+  "MPASS_MPI",    "",
+  "MPASS_TCPIP",  "",
+  "MPASS_UDPIP",  "",
+  "MPASS_3C905B", "",
+  "DRMA_SHMEM",   "-lsma"
+);
+
+%librariesArch = ( # ignore the first -l 
+  "SGIORIGIN",   "m -lexc -lfetchop",
+  "SGICHALL64",  "m -lexc",
+  "SGI",         "m -lexc",
+  "SGIN32",      "m -lexc",
+  "SP2",         "m",
+  "CONVEXSPP",   "m",
+  "PARSYTEC",    "m",
+  "PARAMID",     "m -lparmacsn",
+  "HITACHIMPP",  "m",
+  "RS6000",      "m -lbsd",
+  "SunOS",       "m",
+  "LINUX",       "m",
+  "Windows_NT",  "m",
+  "WIN32",	 "",
+  "Solaris",     "m -lsocket -lnsl",
+  "SolarisX86",  "m -lsocket -lnsl",
+  "OSF1",        "m -lots -lutil -lexc",
+  "HP",          "m",
+  "CRAYT3D",     "m",
+  "CRAYT3E",     "m",
+  "CRAYC90",     "m");
+
+%cgprofNeedNM = (
+  "SGIORIGIN",   "1",
+  "SGICHALL64",  "1",
+  "SGI",         "1",
+  "SGIN32",      "1",
+  "SP2",         "1",
+  "RS6000",      "1",
+  "SunOS",       "1",
+  "LINUX",       "1",
+  "Windows_NT",  "1",
+  "WIN32",	 "1",
+  "Solaris",     "1",
+  "SolarisX86",  "1",
+  "OSF1",        "1");
+
+%canCheckpoint = (
+  "Solaris",     "1",
+  "SolarisX86",  "1",
+ "LINUX",  	 "1");
+
+
+
+
+
+
+
+%bspfrontOptimisationPackages = (
+"SHMEM_SGI",    "-fcheck-syncs -bspnobuffers 4 -bspbuffer 80K -bspfifo 400 ".
+                "-fcombine-puts   -fcombine-puts-buffer 100K,2M,10K",
+
+"SHMEM_SYSV",   "-fcheck-syncs -bspnobuffers 2 -bspbuffer 10K -bspfifo 100 ".
+                "-fcombine-puts -fcombine-puts-buffer 20K,100K,5K",
+
+"SHMEM_NULL",   "-fnocheck-syncs -bspnobuffers 1 -bspbuffer 1K -bspfifo 500 ".
+                "-fnocombine-puts",
+
+"SHMEM_WIN32",  "-fcheck-syncs -bspnobuffers 2 -bspbuffer 10K -bspfifo 100 ".
+                "-fcombine-puts   -fcombine-puts-buffer 20K,100K,5K",
+
+"MPASS_MPL",    "-fcheck-syncs -bspnobuffers 1 -bspbuffer 1024K -bspfifo 100 ".
+                "-fcombine-puts   -fcombine-puts-buffer 31K,4M,10K",
+
+"MPASS_PARIX",  "-fcheck-syncs -bspnobuffers 1 -bspbuffer 1K -bspfifo 100 ".
+                "-fcombine-puts   -fcombine-puts-buffer 20K",
+
+"MPASS_PARMACS","-fcheck-syncs -bspnobuffers 1 -bspbuffer 10K -bspfifo 100 ".
+                "-fcombine-puts -fcombine-puts-buffer 31K,4M,10K",
+
+"MPASS_EXPRESS","-fcheck-syncs -bspnobuffers 1 -bspbuffer 1024K ".
+	        "-bspfifo 100 -fcombine-puts   -fcombine-puts-buffer 10K",
+
+"MPASS_MPI",    "-fcheck-syncs -bspnobuffers 1 -bspbuffer 1024K -bspfifo 100 ".
+                "-fcombine-puts   -fcombine-puts-buffer 31K,4M,10K",
+
+"MPASS_TCPIP",  "-fcheck-syncs -fcombine-puts ".
+                "-fcombine-puts-buffer 500K,5M,5K -bspfifo 100 ".
+                "-bspnobuffers 10 -bspbuffer 1526 ",
+
+"MPASS_UDPIP",  "-fcheck-syncs -fcombine-puts ".
+                "-fcombine-puts-buffer 500K,5M,5K -bspfifo 100 ".
+                "-bspnobuffers 2000 -bspbuffer 1526 ".
+                "-bsproundtrip 1000",
+
+## -bspnobuffers for 3C905B are the NIC receive buffers. With 8Megs pinned
+## memory, then we should get ~5000 high level send/recv buffers.
+
+"MPASS_3C905B", "-fcheck-syncs -fcombine-puts ".
+                "-fcombine-puts-buffer 500K,5M,5K -bspfifo 100 ".
+                "-bspnobuffers 400 -bspbuffer 1526 ".
+                "-bsproundtrip 120 -bspnoslots 1 -bspsendlatency 25",
+
+"DRMA_SHMEM",   "-fcheck-syncs -bspnobuffers 1 -bspbuffer 1024K -bspfifo 100 ".
+                "-fcombine-puts -fcombine-puts-buffer 100K,10M,10K "
+);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+if ($Arch eq "") {
+  $Arch   = &backtick("$bindir/bsparch -arch");
+  $Arch   = &backtick("bsparch -arch")   if ($Arch eq "");
+  $Device = &backtick("$bindir/bsparch -device");
+  $Device = &backtick("bsparch -device") if ($Device eq "");
+  &updateEnv();
+} else {
+  &readEnv();
+}
+
+
+
+
+
+
+
+sub updateEnv {
+  local($mode) = ">";
+  $mode = ">>" if (-e $includedir . "/$updatefile");
+
+  if (!open(FILENAME,"$mode $includedir/$updatefile")) {
+    print STDERR "bspfrontenv: Unable to write to $includedir/$updatefile";
+    exit(0);
+  }
+  printf FILENAME "\@%s\@%s\@%s\@%s\@%s\@%d\@%d\@%d\@%d\@\n",
+	$Arch, $gcc, $g77, $gplusplus, $Device, 
+        $defaultslotsize,$defaultnoslots,$defaultroundtrip,$defaultsendlatency;
+  close(FILENAME);
+}
+
+
+
+
+
+
+
+sub readEnv {
+  $gcc="";
+  $g77="";
+  $gplusplus="";
+  $compiler_cpponly = "-E";
+  $compiler_cpponly = "/E" if ($Arch eq "WIN32");
+
+  if (!open(FILENAME,"$includedir/$updatefile")) {
+    print STDERR "bspfrontenv: Unable to read $includedir/$updatefile";
+    exit(0);
+  }
+  while (<FILENAME>) {
+    if (/^\@([^\@]*)\@([^\@]*)\@([^\@]*)\@([^\@]*)\@([^\@]*)\@([^\@]*)\@([^\@]*)\@([^\@]*)\@([^\@]*)\@$/  && ($Arch eq $1)) {
+      $gcc       = $2;
+      $g77       = $3;
+      $gplusplus = $4;
+      if ($5 eq $Device) {
+        $defaultslotsize    =$6;
+        $defaultnoslots     =$7;
+        $defaultroundtrip   =$8;
+        $defaultsendlatency =$9;
+      }
+    } 
+  }
+  close(FILENAME);
+  $defaultslotsize = 0 if ($defaultslotsize <=0);
+  $defaultnoslots  = 0 if ($defaultnoslots  <=0);
+  $defaultroundtrip= 0 if ($defaultroundtrip  <=0);
+  $bspfrontOptimisationPackages{$Device}.=" -bspslotsize   $defaultslotsize ";
+  $bspfrontOptimisationPackages{$Device}.=" -bspnoslots    $defaultnoslots ";
+  $bspfrontOptimisationPackages{$Device}.=" -bsproundtrip  $defaultroundtrip ";
+  $bspfrontOptimisationPackages{$Device}.=
+     " -bspsendlatency $defaultsendlatency ";
+
+  if ($gcc ne "" && $gccCanOveride{$Arch} && 
+      (int($gccCanOveride{$Arch})==1)) {
+    $ccArch{$Arch}             = $gcc;
+    $cppArch{$Arch}            = "$gcc $compiler_cpponly";
+    $ccompFlagsArch{$Arch}     = "";
+    $coptFlagsArch{"$Arch-O1"} = "";
+    $coptFlagsArch{"$Arch-O2"} = "-O2";
+    $coptFlagsArch{"$Arch-O3"} = "-O3";
+    $ldFlagsArch{$Arch}        = "";
+    $ldFlagsDevice{$Device}    = "";
+  }
+  if ($g77 ne "" && $g77CanOveride{$Arch} && 
+      (int($g77CanOveride{$Arch})==1)) {
+    $f77Arch{$Arch}            = $g77;
+    $fcompFlagsArch{$Arch}     = "";
+    $foptFlagsArch{"$Arch-O1"} = "";
+    $foptFlagsArch{"$Arch-O2"} = "";
+    $foptFlagsArch{"$Arch-O3"} = "";
+    $ldFlagsArch{$Arch}        = "";
+    $ldFlagsDevice{$Device}    = "";
+  }
+  if ($gplusplus ne "" && $gplusplusCanOveride{$Arch} && 
+      (int($gplusplusCanOveride{$Arch})==1)) {
+    $cplusplusArch{$Arch}      = $gplusplus;
+    $cppArch{$Arch}            = "$gplusplus $compiler_cpponly";
+  }
+}
+
+
+
+1;
+

@@ -1,0 +1,57 @@
+.TH "bsp_get_tag" 3 "1.4 25/9/98" "Oxford BSP Toolset" "BSPlib FUNCTIONS"
+.SH NAME
+bsp_get_tag \- check the tag on a BSMP packet.
+
+.SH C SYNOPSIS
+.nf
+.B #include \&"bsp.h\&"
+.PP
+.BI "void bsp_get_tag(int *" status ", void *" tag ");"
+.fi
+.SH FORTRAN SYNOPSIS 
+.nf
+.BI "SUBROUTINE  bspgettag(" status , tag )
+.BI    "INTEGER, intent(OUT) ::" status
+.BI    "<TYPE>,  intent(OUT) ::" tag
+.fi
+
+.SH DESCRIPTION
+
+To receive a message, the user should use the procedures
+.B bsp_get_tag
+and
+.B bsp_move(3)\c
+\&. The effect of the operation
+.B bsp_get_tag
+is that the argument 
+.I status 
+has the value -1 assigned to it if system buffer is empty.  Otherwise
+it becomes the length of the payload of the first message in the
+buffer. This length can be used to allocate an appropriately sized
+data structure for copying the payload using
+.B bsp_move(3)\c
+\&. The memory referenced by
+.I tag
+is unchanged if the system buffer is empty. Otherwise it is assigned
+the tag of the first message in the buffer.
+
+.SH "SEE ALSO"
+bsmp(3) ,bsp_send(3), bsp_set_tagsize(3), bsp_qsize(3), 
+bsp_move(3), bsp_hpmove(3)
+
+.I ``BSPlib: The BSP Programming Library''
+Jonathan M. D. Hill, Bill McColl, Dan C. Stefanescu, Mark W. Goudreau,
+Kevin Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and Rob
+Bisseling. Parallel Computing, to appear 1998. See
+.I http://www.bsp-worldwide.org
+for more details.
+
+.SH BUGS
+Problems and bug reports should be mailed to 
+.I bsplib-bugs@comlab.ox.ac.uk
+
+.SH AUTHORS
+The Oxford BSP Toolset implementation of BSPlib was written by
+Jonathan.Hill@comlab.ox.ac.uk
+.br
+.B http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html

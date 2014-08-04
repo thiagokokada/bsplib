@@ -1,0 +1,65 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+\section{Random routing for contention removal} 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+
+There can be $p \times \mathtt{CONTENTION\_FREE\_INIT\_FREQ}$ calls to
+\texttt{next\_contention\_free\_pid} without checking that an
+out-of-bound error has occured. There will be
+\texttt{CONTENTION\_FREE\_RANDOM\_SIZE} latin squares generated at
+runtime.
+
+\begin{code} 
+#define CONTENTION_FREE_RANDOM_SIZE   53
+#define CONTENTION_FREE_INIT_FREQ     4
+
+#define init_contention_free_communication()                \
+  do {                                                      \
+    int temp_mod;                                           \
+    if (_bsp_nprocs==1) {                                   \
+	/* do nothing */                                    \
+    } else if (contentionfree.next==contentionfree.last)    \
+      contentionfree.next += (_bsp_nprocs-1);               \
+    else if (temp_mod=contentionfree.next%(_bsp_nprocs-1))  \
+      contentionfree.next += (_bsp_nprocs-1)-temp_mod;      \
+    else {                                                  \
+      /* donothing, at next already */                      \
+    }                                                       \
+    if (contentionfree.next>=contentionfree.size)           \
+      contentionfree.next=0;                                \
+    contentionfree.last=contentionfree.next;                \
+  } while(0)
+
+#define next_contention_free_pid() \
+  contentionfree.randoms[contentionfree.next++]
+\end{code}
+
+
+\begin{code}
+typedef struct {
+   int *randoms;
+   int  next;
+   int  last;
+   int  size;
+} _BSPcontention;
+
+extern _BSPcontention contentionfree;
+extern void config_contention_free_communication();
+\end{code}
+

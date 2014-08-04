@@ -1,0 +1,163 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997,1998 University of Oxford           %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsp_misc_shmem.lc,v 1.1 1995/08/31 16:34:19 jonh Exp jonh $
+% $Log: bsp_misc_shmem.lc,v $
+% Revision 1.1  1995/08/31  16:34:19  jonh
+% Initial revision
+%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Miscellaneous library functions used in the IRIX IPC BSP library}
+\label{sect:bspirixmisc}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Includes and defines}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#include "bsp_lib.h"
+#include <stdarg.h>
+\end{code}
+  
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Error function: \texttt{bsp\_error}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+An error routine to be called when the program is running in
+parallel mode.
+
+\begin{code}
+char *pprSignal(int signal_no) {
+  switch(signal_no) {
+  case 1:  return "Hangup";
+  case 2:  return "Interrupt";
+  case 3:  return "Quit";
+  case 10: return "Bus Error";
+  case 11: return "Segmentation fault";
+  default: return "other signal";
+  }
+}
+
+void kill_all_processors(int signal_no) {
+  extern shared_memory_handle shmem_arena;
+  extern int *_bsp_children, _bsp_instart;
+  int i;
+
+  if (signal_no > 0) {
+    printf("\nProcess %d caught SIGNAL %d \"%s\"\n",_bsp_pid,signal_no,
+           pprSignal(signal_no));
+  }
+  if (!_bsp_instart) {
+    /* Haven't created the shared memory segment yet */
+  } else if (_bsp_pid==0) {
+    if (_bsp_children) {
+      for(i=1;i<_bsp_nprocs;i++) {
+        kill(_bsp_children[i-1],SIGHUP);
+      }
+    } 
+    shmem_closedown_shared_memory(shmem_arena);
+  } else {
+    /* Kill my parent, which will inturn cause a SIGHUP to all children */
+    kill(getppid(),SIGHUP);
+  }
+  exit(1);
+}
+
+void kill_process(int signalno) {
+  if (_bsp_pid==0) kill_all_processors(-1);
+  /* fprintf(stderr,"Process %d exiting\n",_bsp_pid); */
+  exit(1);
+}
+\end{code}
+
+Ensure that the Abort routine is a critical region. HOWEVER, we can
+not use locks!!! There seems to be a bug we system V shared memory,
+such that if one processor is trying to close down shared memory as
+another is setting the lock, then the shared memory segment is not
+destroyed. 
+\begin{code}
+void bsp_abort(char* format, ...) {
+  va_list args;
+  int i, first=0;
+  extern shared_memory_handle shmem_arena;
+  extern int* _bsp_children; /* Created once forked */
+
+  if (_bsp_children) set_spinlock(debug_lock);
+  va_start(args, format);
+  fprintf(stderr, "\nABORT(pid%3d):",_bsp_pid);
+  vfprintf(stderr, format, args);
+  fprintf(stderr, "\n");
+  va_end(args);
+  fflush(stderr);
+  kill_all_processors(-1);  
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Debugging functions}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_debug_start(char *text) {
+  set_spinlock(debug_lock);
+  fprintf(stderr,"\nSTART DEBUG(pid%3d) :\"%s\"\n",_bsp_pid,text);
+}
+
+void bsp_debug_end(char *text) {
+  fprintf(stderr,"END DEBUG(pid%3d)   :\"%s\"\n\n",_bsp_pid,text);
+  unset_spinlock(debug_lock);
+}
+
+void bsp_debug_block(char* format, ...) {
+va_list args;
+
+   va_start(args, format);
+   fprintf(stderr, " DEBUG(pid%3d): ",_bsp_pid);
+   vfprintf(stderr, format, args);
+   fprintf(stderr, "\n");
+   va_end(args);
+}
+
+void bsp_debug(char* format, ...) {
+  va_list args;
+  set_spinlock(debug_lock);
+  va_start(args, format);
+  fprintf(stderr, "DEBUG(pid%3d): ",_bsp_pid);
+  vfprintf(stderr, format, args);
+  fprintf(stderr, "\n");
+  va_end(args);
+  unset_spinlock(debug_lock);
+}
+
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Determine if an integer is constant throughout all processors}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+This routine is used in lots of sanity checking functions. 
+\begin{code}
+int _bsp_constant(int x) {
+  int result,i;
+
+  _shmem.constantI[_bsp_pid] = x;
+  barrier_sync();
+  result=1;
+  for(i=1;i<_bsp_nprocs;i++)
+    result = result && (_shmem.constantI[i-1]==_shmem.constantI[i]);
+  barrier_sync();
+  return result;
+}
+\end{code}
+
+ 

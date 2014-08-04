@@ -1,0 +1,822 @@
+# Generated automatically from Makefile.in by configure.
+###########################################################################
+##      Copyright (C) 1995,1996,1997 University of Oxford                ##
+##                                                                       ##
+## Permission to use, copy, modify, and distribute this software,        ##
+## and to incorporate it, in whole or in part, into other software,      ##
+## is hereby granted without fee, provided that                          ##
+##   (1) the above copyright notice and this permission notice appear in ##
+##       all copies of the source code, and the above copyright notice   ##
+##       appear in clearly visible form on all supporting documentation  ##
+##       and distribution media;                                         ##
+##   (2) modified versions of this software be accompanied by a complete ##
+##       change history describing author, date, and modifications made; ##
+##       and                                                             ##
+##   (3) any redistribution of the software, in original or modified     ##
+##       form, be without fee and subject to these same conditions.      ##
+###########################################################################
+
+###########################################################################
+##            D O N T  C H A N G E  A N Y T H I N G  !!                  ##
+###########################################################################
+
+SHELL      = /bin/sh
+
+prefix     = /amd/tmp_mnt/garnet/fs25/jonh/BSP
+exec_prefix= ${prefix}
+bindir     = ${exec_prefix}/bin
+includedir = ${prefix}/include
+libdir     = ${exec_prefix}/lib
+top_srcdir = ../../../
+
+BSP_ONLINE_PROCS= 8
+RANLIB          = ranlib
+GCC             = gcc
+G77             = f2c
+GPLUSPLUS       = g++
+INSTALL         = ../.././install-sh -c
+INSTALL_PROGRAM = ${INSTALL}
+INSTALL_DATA    = ${INSTALL} -m 644
+
+mpiincludedir   = 
+
+BUILD_TYPE = realbuild
+
+##########################################################################
+# Architecture independent modules
+##########################################################################
+SRCS_ANY_LC   = bsp_profile.lc  bsp_lib_f77.lc bsp_timer.lc \
+                bsp_register.lc bsp_misc.lc                 \
+                bsp_miller.lc   bsp_contentionfree.lc       \
+                bsp_callstack.lc
+
+SRCS_ANY_LH   = bsp_lib_f77.lh bsp_lib_f77_user.lh bsp_lib_user.lh  \
+	        bsp_lib_f77_user_cray.lh \
+                bsp_lib.lh      bsp_profile.lh    bsp_lib_common.lh \
+                bsp_register.lh bsp_contentionfree.lh               \
+                bsp_callstack.lh bsp_timer.lh
+
+##########################################################################
+# Shared memory specific modules
+##########################################################################
+SRCS_MPASS_LC = bsp_lib_mpass.lc  bsp_misc_mpass.lc
+SRCS_MPASS_LH = bsp_lib_mpass.lh 
+
+##########################################################################
+# Distibuted memory specific modules
+##########################################################################
+SRCS_SHMEM_LC = bsp_lib_shmem.lc bsp_misc_shmem.lc 
+SRCS_SHMEM_LH = bsp_lib_shmem.lh 
+
+##########################################################################
+# DRMA machine specific modules
+##########################################################################
+SRCS_DRMA_LC = bsp_lib_drma.lc bsp_misc_drma.lc 
+SRCS_DRMA_LH = bsp_lib_drma.lh 
+
+
+#############################################################
+##             Flags and conversions                       ##
+#############################################################
+
+SRCS_LC       = 
+SRCS_LH       = 
+SRCS_S        =
+SRCS_O        =
+LIBRARIES     = 
+INCLUDES      = 
+
+SRCS_ANY_O = $(SRCS_ANY_LC:.lc=.o)
+SRCS_ANY_C = $(SRCS_ANY_LC:.lc=.c)
+SRCS_ANY_H = $(SRCS_ANY_LH:.lh=.h)
+SRCS_TEX   = $(SRCS_ANY_LC:.lc=.c.tex)   $(SRCS_ANY_LH:.lh=.h.tex)   \
+             $(SRCS_MPASS_LC:.lc=.c.tex) $(SRCS_MPASS_LH:.lh=.h.tex) \
+             $(SRCS_SHMEM_LC:.lc=.c.tex) $(SRCS_SHMEM_LH:.lh=.h.tex) \
+             $(SRCS_DRMA_LC:.lc=.c.tex)  $(SRCS_DRMA_LH:.lh=.h.tex)
+
+CC  = cc
+AS  = as
+CPP = gcc -E
+
+CFLAGS_DEBUG    = -g -DDEBUG
+CFLAGS_REALDEBUG= -g -DREALDEBUG
+CFLAGS_PROF     = -DPROFILE -DSTATISTICS
+
+CFLAGS_O0       = -DRESOURCE_FRIENDLY -DSTATISTICS -DSANITY_CHECK
+CFLAGS_O1       = -DRESOURCE_FRIENDLY -DSTATISTICS
+CFLAGS_O2       = -DTURBO
+
+
+#Default single build is for profiling
+CFLAGS          = ${CFLAGS_O2} ${CFLAGS_PROF} ${BUILD_DEFINES} 
+LIBNAME         = "_P2"
+
+.SUFFIXES: .lc .lh .c .tex .c.tex .h.tex .s .h
+
+#############################################################
+##             Compilation rules                           ##
+#############################################################
+
+.lh.h:
+	litToPgm $<
+
+.lc.c:
+	litToPgm $<
+
+.c.o:
+	${CC} ${CFLAGS} $(INCLUDES) -c $*.c 
+
+.lc.o:
+	litToPgm $<
+	${CC} ${CFLAGS} $(INCLUDES) -c $*.c 
+
+.s.o:
+	rm -f tmpas.s
+	cp $*.s tmpas.c
+	${CPP} tmpas.c | grep -v '^#'> tmpas.s && ${AS} -o $*.o tmpas.s
+
+.lh.h.tex:
+	litToTex $<
+
+.lc.c.tex:
+	litToTex $<
+
+
+
+#############################################################
+##             Main Targets                                ##
+#############################################################
+all::
+
+develop:
+	@$(MAKE) machine BUILD_TYPE="lib"
+
+build:
+	@$(MAKE) machine BUILD_TYPE="realbuild"
+
+#############################################################
+##             Machine Targets                             ##
+#############################################################
+machine:
+	@case `bsparch -arch` in					   \
+	SGIORIGIN) 							   \
+		$(MAKE) banner TYPE="machine" FOR="SGI Origin 2000";       \
+                $(MAKE) device 	                                           \
+		     BUILD_TYPE="${BUILD_TYPE}"				   \
+                     BUILD_DEFINES="-DCALLGRAPH_PROFILE                    \
+                                    -DUNDERSCORE -D__INLINE_INTRINSICS     \
+                                    -xansi -64                             \
+                                    -O3 -DSGIORIGIN"                       \
+		     AS=as						   \
+                     AR=ar                                                 \
+                     CC=cc;;                                               \
+                                                                           \
+	SGICHALL64) 							   \
+		$(MAKE) banner TYPE="machine" FOR="SGI PowerChallenge";    \
+                $(MAKE) device 	                                           \
+		     BUILD_TYPE="${BUILD_TYPE}"				   \
+                     BUILD_DEFINES="-DCALLGRAPH_PROFILE                    \
+                                    -DUNDERSCORE -D__INLINE_INTRINSICS     \
+                                    -xansi                                 \
+                                    -GCM:pointer_speculation=ON            \
+                                    -GCM:static_load_speculation=ON        \
+                                    -O3 -DSGICHALL64"                      \
+		     AS=as						   \
+                     AR=ar                                                 \
+                     CC=cc;;                                               \
+                                                                           \
+	SP2)    $(MAKE) banner TYPE="machine" FOR="IBM Sp2";               \
+                $(MAKE) device	                                           \
+		     BUILD_TYPE="${BUILD_TYPE}"				   \
+                     SRCS_S="bsp_timer_rs6.s bsp_callstack_rs6.s"          \
+                     BUILD_DEFINES="-DCALLGRAPH_PROFILE                    \
+                                    -O2 -DREDUCTION_INIT_EXCHANGE -DSP2"   \
+		     AS=as						   \
+                     AR=ar                                                 \
+                     CC=mpcc;;                                             \
+                                                                           \
+        CONVEXSPP)							   \
+		$(MAKE) banner TYPE="machine" FOR="Convex SPP";            \
+                $(MAKE) device	                                           \
+		     BUILD_TYPE="${BUILD_TYPE}"				   \
+                     BUILD_DEFINES="-DSHMEM_SYSV_NO_SEMAPHORE_UNION        \
+                                    -DCONVEXSPP"                           \
+		     AS=as						   \
+                     AR=ar                                                 \
+                     CC=cc;;                                               \
+                                                                           \
+	PARSYTEC)                                                          \
+                $(MAKE) banner TYPE="machine" FOR="Parsytec Explorer";     \
+                $(MAKE) device	                                           \
+		     BUILD_TYPE="${BUILD_TYPE}"				   \
+                     BUILD_DEFINES="-DREDUCTION_INIT_EXCHANGE -DPARSYTEC"  \
+		     AS=as						   \
+                     AR=ar                                                 \
+                     CC="px ancc";;                                        \
+                                                                           \
+	PARAMID)                                                           \
+                $(MAKE) banner TYPE="machine" FOR="Transtech Paramid";     \
+                $(MAKE) device	                                           \
+		     BUILD_TYPE="${BUILD_TYPE}"				   \
+                     BUILD_DEFINES="-DREDUCTION_INIT_EXCHANGE -DPARAMID"   \
+		     AS=as860						   \
+                     AR=ar860                                              \
+                     CC="pgcc";;                                           \
+                                                                           \
+	HITACHIMPP)                                                        \
+                $(MAKE) banner TYPE="machine" FOR="Hitachi SR2001";        \
+                $(MAKE) device	                                           \
+		     BUILD_TYPE="${BUILD_TYPE}"				   \
+                     BUILD_DEFINES="+O3 -DUPPERCASE                        \
+                                    -DREDUCTION_INIT_EXCHANGE -DHITACHIMPP"\
+		     AS=as						   \
+                     AR=ar                                                 \
+                     CC="srcc";;                                           \
+                                                                           \
+	CRAYT3D) 							   \
+		$(MAKE) banner TYPE="machine" FOR="Cray T3D";              \
+                $(MAKE) device 	                                           \
+		     BUILD_TYPE="${BUILD_TYPE}"				   \
+                     SRCS_S="bsp_callstack_craympp.s"                      \
+                     BUILD_DEFINES="-DCALLGRAPH_PROFILE                    \
+				    -DUPPERCASE -O3 -DCRAYT3D -DCRAYMPP"   \
+		     AS=cam						   \
+                     AR=ar                                                 \
+                     CC="env TARGET=cray-t3d cc";                          \
+                cp  bsp_lib_f77_user_cray.h ${top_srcdir}/include/fbsp.h;; \
+                                                                           \
+	CRAYT3E) 							   \
+		$(MAKE) banner TYPE="machine" FOR="Cray T3E";              \
+                $(MAKE) device 	                                           \
+		     BUILD_TYPE="${BUILD_TYPE}"				   \
+                     SRCS_S="bsp_callstack_craympp.s"                      \
+                     BUILD_DEFINES="-DCALLGRAPH_PROFILE                    \
+				    -DUPPERCASE -O3 -DCRAYT3E -DCRAYMPP"   \
+		     AS=cam						   \
+                     AR=ar                                                 \
+                     CC="env TARGET=cray-t3e cc";                          \
+                cp bsp_lib_f77_user_cray.h ${top_srcdir}/include/fbsp.h;;  \
+                                                                           \
+	CRAYC90) 							   \
+		$(MAKE) banner TYPE="machine" FOR="Cray C90";              \
+                $(MAKE) device 	                                           \
+		     BUILD_TYPE="${BUILD_TYPE}"				   \
+                     SRCS_S="bsp_callstack_craypvp.s"                      \
+                     BUILD_DEFINES="-DCALLGRAPH_PROFILE -DCRAYPVP          \
+				    -DUPPERCASE -O3"                       \
+		     AS=cal						   \
+                     AR=ar                                                 \
+                     CC=cc;                                                \
+                cp bsp_lib_f77_user_cray.h ${top_srcdir}/include/fbsp.h;;  \
+                                                                           \
+        *)      $(MAKE) workstation                                        \
+                     BUILD_TYPE="${BUILD_TYPE}";;                          \
+        esac
+
+# Some versions of make complain about long lines. Therefore machine has
+# been split into two parts.
+
+workstation:
+	@case `bsparch -arch` in					   \
+	RS6000) $(MAKE) banner TYPE="machine" FOR="IBM RS6000";            \
+                $(MAKE) device	                                           \
+		     BUILD_TYPE="${BUILD_TYPE}"				   \
+                     SRCS_S="bsp_timer_rs6.s"                              \
+                     BUILD_DEFINES="-DRS6000 -O2"                          \
+		     AS=as						   \
+                     AR=ar                                                 \
+                     CC=cc;;                                               \
+                                                                           \
+	OSF1)   $(MAKE) banner TYPE="machine" FOR="Digital Alpha";         \
+                $(MAKE) device	                                           \
+		     BUILD_TYPE="${BUILD_TYPE}"				   \
+                     BUILD_DEFINES="-DCALLGRAPH_PROFILE                    \
+                                    -DSHMEM_SYSV_NO_SEMAPHORE_UNION        \
+                                    -O5 -migrate -DUNDERSCORE -ansi        \
+				    -DOSF1"                                \
+		     AS=as						   \
+                     AR=ar                                                 \
+                     CC=cc;;                                               \
+                                                                           \
+	SGI) 							           \
+		$(MAKE) banner TYPE="machine" FOR="Uniprocessor SGI";      \
+                $(MAKE) device 	                                           \
+		     BUILD_TYPE="${BUILD_TYPE}"				   \
+                     BUILD_DEFINES="-DCALLGRAPH_PROFILE -DSGI              \
+                                    -DUNDERSCORE -xansi -O2"               \
+		     AS=as						   \
+                     AR=/usr/ccs/bin/ar                                               \
+                     CC=cc;;                                               \
+                                                                           \
+	SGIN32) 						           \
+		$(MAKE) banner TYPE="machine" FOR="Uniprocessor SGI -n32"; \
+                $(MAKE) device 	                                           \
+		     BUILD_TYPE="${BUILD_TYPE}"				   \
+                     BUILD_DEFINES="-DCALLGRAPH_PROFILE -DSGI -DSGIN32     \
+                                    -DUNDERSCORE -xansi -O2 -n32"          \
+		     AS=as						   \
+                     AR=/usr/ccs/bin/ar                                               \
+                     CC=cc;;                                               \
+                                                                           \
+	SunOS)  $(MAKE) banner TYPE="machine" FOR="SunOs";                 \
+                if test -n "${GCC}"; then                                  \
+                  $(MAKE) device	                                   \
+		     BUILD_TYPE="${BUILD_TYPE}"				   \
+                     SRCS_S="bsp_callstack_SunOS.s"                        \
+                     BUILD_DEFINES="-DCALLGRAPH_PROFILE                    \
+                                    -DUNDERSCORE -ansi -DSunOS -O2"        \
+                     AS="gcc -c"                                           \
+                     AR=/usr/ccs/bin/ar                                               \
+                     CC=gcc;                                               \
+                else                                                       \
+                   $(MAKE) device	                                   \
+		     BUILD_TYPE="${BUILD_TYPE}"				   \
+                     SRCS_S="bsp_callstack_SunOS.s"                        \
+                     BUILD_DEFINES="-DCALLGRAPH_PROFILE                    \
+                                    -DUNDERSCORE -DSunOS -O2"              \
+		     AS=as						   \
+                     AR=/usr/ccs/bin/ar                                               \
+                     CC=cc;                                                \
+                fi;;                                                       \
+                                                                           \
+	Solaris)                                                           \
+                $(MAKE) banner TYPE="machine" FOR="Sun Solaris";           \
+                if test -n "${GCC}"; then                                  \
+                  $(MAKE) device	                                   \
+		     BUILD_TYPE="${BUILD_TYPE}"				   \
+                     SRCS_S="bsp_callstack_sparc.s"                        \
+                     BUILD_DEFINES="-D__EXTENSIONS__                       \
+                                    -DCALLGRAPH_PROFILE -DUNDERSCORE       \
+				    -DCHECKPOINTING_ARCH                   \
+				    -DSolaris -ansi -O2"                   \
+		     AS="gcc -c"					   \
+                     AR=/usr/ccs/bin/ar                                               \
+                     CC=gcc;                                               \
+                else                                                       \
+                  $(MAKE) device	                                   \
+		     BUILD_TYPE="${BUILD_TYPE}"				   \
+                     SRCS_S="bsp_callstack_sparc.s"                        \
+                     BUILD_DEFINES="-D__EXTENSIONS__                       \
+                                    -DCALLGRAPH_PROFILE -DUNDERSCORE       \
+				    -DCHECKPOINTING_ARCH                   \
+				    -DSolaris -fast -xO4"                  \
+		     AS=as						   \
+                     AR=/usr/ccs/bin/ar                                               \
+                     CC=cc;                                                \
+                fi;;                                                       \
+                                                                           \
+	SolarisX86)                                                        \
+                $(MAKE) banner TYPE="machine" FOR="Intel Solaris";         \
+                if test -n "${GCC}"; then                                  \
+                  $(MAKE) device	                                   \
+		     BUILD_TYPE="${BUILD_TYPE}"				   \
+                     SRCS_S="bsp_callstack_i386.s"                         \
+                     BUILD_DEFINES="-D__EXTENSIONS__                       \
+                                    -DCALLGRAPH_PROFILE -DUNDERSCORE       \
+				    -DCHECKPOINTING_ARCH                   \
+				    -DSolarisX86 -ansi -O2"                \
+		     AS="gcc -c"					   \
+                     AR=/usr/ccs/bin/ar                                               \
+                     CC=gcc;                                               \
+                else                                                       \
+                  $(MAKE) device	                                   \
+		     BUILD_TYPE="${BUILD_TYPE}"				   \
+                     SRCS_S="bsp_callstack_i386.s"                         \
+                     BUILD_DEFINES="-D__EXTENSIONS__                       \
+                                    -DCALLGRAPH_PROFILE -DUNDERSCORE       \
+				    -DCHECKPOINTING_ARCH                   \
+				    -DSolarisX86 -fast -xO4"               \
+		     AS=as						   \
+                     AR=/usr/ccs/bin/ar                                               \
+                     CC=cc;                                                \
+                fi;;                                                       \
+                                                                           \
+	HP)                                                                \
+                $(MAKE) banner TYPE="machine" FOR="Hewlett Packard";       \
+                if test -n "${GCC}"; then                                  \
+                  $(MAKE) device	                                   \
+		     BUILD_TYPE="${BUILD_TYPE}"				   \
+                     BUILD_DEFINES="-DUNDERSCORE                           \
+				    -DHP -ansi -O2"                        \
+		     AS=as						   \
+                     AR=ar                                                 \
+                     CC=gcc;                                               \
+                else                                                       \
+                  $(MAKE) device	                                   \
+		     BUILD_TYPE="${BUILD_TYPE}"				   \
+                     BUILD_DEFINES="-DUNDERSCORE                           \
+				    -DHP +02"                              \
+		     AS=as						   \
+                     AR=ar                                                 \
+                     CC=cc;                                                \
+                fi;;                                                       \
+                                                                           \
+        LINUX)  $(MAKE) banner TYPE="machine" FOR="Linux";                 \
+                $(MAKE) device                                             \
+                     BUILD_TYPE="${BUILD_TYPE}"                            \
+                     SRCS_S="bsp_callstack_i386.s"                         \
+                     BUILD_DEFINES="-DCALLGRAPH_PROFILE                    \
+				    -DUNDERSCORE -ansi -DLINUX             \
+				    -DCHECKPOINTING_ARCH                   \
+				    -D_I386_BITOPS_H -O2                   \
+                                    -D_GNU_SOURCE"                         \
+		     AS="gcc -c"					   \
+                     CC=gcc                                                \
+                     AR=ar;;                                               \
+                                                                           \
+        Windows_NT)  $(MAKE) banner TYPE="machine" FOR="Windows NT PC";    \
+                $(MAKE) device                                             \
+                     BUILD_TYPE="${BUILD_TYPE}"                            \
+                     SRCS_S="bsp_callstack_i386NT.c"                       \
+                     BUILD_DEFINES="-DUNDERSCORE -DWindows_NT -O2"         \
+		     AS=as						   \
+                     CC=cc                                                 \
+                     AR=ar;;                                               \
+                                                                           \
+        *)      echo "I dont know how to BUILD for a `bsparch -arch`";     \
+		exit 1;;						   \
+        esac
+
+
+#############################################################
+##             Device Targets                              ##
+#############################################################
+device:
+	@case `bsparch -device` in					   \
+	SHMEM_SGI)							   \
+		$(MAKE) banner TYPE="device" FOR="SGI shared memory";	   \
+		$(MAKE) ${BUILD_TYPE}					   \
+		     SRCS_LC="${SRCS_SHMEM_LC}"				   \
+		     SRCS_LH="${SRCS_SHMEM_LH}"				   \
+		     SRCS_O="$(SRCS_SHMEM_LC:.lc=.o) $(SRCS_S:.s=.o)"      \
+		     BUILD_DEFINES="-DBSP_SHMEM -DSHMEM_SGI                \
+                                    ${BUILD_DEFINES}"                      \
+                     AS="${AS}"						   \
+                     AR="${AR}"						   \
+                     CC="${CC}";;					   \
+					      			           \
+	SHMEM_SYSV)							   \
+		$(MAKE) banner TYPE="device" FOR="Sys V shared memory";	   \
+		$(MAKE) ${BUILD_TYPE}					   \
+		     SRCS_LC="${SRCS_SHMEM_LC}"				   \
+		     SRCS_LH="${SRCS_SHMEM_LH}"				   \
+		     SRCS_O="$(SRCS_SHMEM_LC:.lc=.o) $(SRCS_S:.s=.o)"      \
+		     BUILD_DEFINES="-DBSP_SHMEM -DSHMEM_SYSV               \
+                                    ${BUILD_DEFINES}"                      \
+                     AS="${AS}"						   \
+                     AR="${AR}"						   \
+                     CC="${CC}";;					   \
+					      			           \
+	SHMEM_NULL)							   \
+		$(MAKE) banner TYPE="device" FOR="one process"; 	   \
+		$(MAKE) ${BUILD_TYPE}					   \
+		     SRCS_LC="${SRCS_SHMEM_LC}"				   \
+		     SRCS_LH="${SRCS_SHMEM_LH}"				   \
+		     SRCS_O="$(SRCS_SHMEM_LC:.lc=.o) $(SRCS_S:.s=.o)"      \
+		     BUILD_DEFINES="-DBSP_SHMEM -DSHMEM_NULL               \
+                                    ${BUILD_DEFINES}"                      \
+                     AS="${AS}"						   \
+                     AR="${AR}"						   \
+                     CC="${CC}";;					   \
+					      			           \
+	MPASS_TCPIP)							   \
+		$(MAKE) banner TYPE="device" FOR="TCP/IP Message Passing"; \
+		$(MAKE) ${BUILD_TYPE}					   \
+		     SRCS_LC="${SRCS_MPASS_LC}"				   \
+		     SRCS_LH="${SRCS_MPASS_LH}"				   \
+		     SRCS_O="$(SRCS_MPASS_LC:.lc=.o) $(SRCS_S:.s=.o)"      \
+		     BUILD_DEFINES="-DBSP_MPASS -DMPASS_TCPIP              \
+				    -DREDUCTION_INIT_EXCHANGE 		   \
+ 				    -DCHECKPOINTING_DEV                    \
+                                    ${BUILD_DEFINES}"                      \
+                     AS="${AS}"						   \
+                     AR="${AR}"						   \
+                     CC="${CC}";;					   \
+					      			           \
+	MPASS_UDPIP)							   \
+		$(MAKE) banner TYPE="device" FOR="UDP/IP Message Passing"; \
+		$(MAKE) ${BUILD_TYPE}					   \
+		     SRCS_LC="${SRCS_MPASS_LC}"				   \
+		     SRCS_LH="${SRCS_MPASS_LH}"				   \
+		     SRCS_O="$(SRCS_MPASS_LC:.lc=.o) $(SRCS_S:.s=.o)"      \
+		     BUILD_DEFINES="-DBSP_MPASS -DMPASS_UDPIP              \
+				    -DREDUCTION_INIT_EXCHANGE 		   \
+ 				    -DCHECKPOINTING_DEV                    \
+                                    ${BUILD_DEFINES}"                      \
+                     AS="${AS}"						   \
+                     AR="${AR}"						   \
+                     CC="${CC}";;					   \
+					      			           \
+	MPASS_3C905B)							   \
+		$(MAKE) banner TYPE="device" FOR="UDP/IP Message Passing with 3Com 3C905B kernel module"; \
+		$(MAKE) ${BUILD_TYPE}					   \
+		     SRCS_LC="${SRCS_MPASS_LC}"				   \
+		     SRCS_LH="${SRCS_MPASS_LH}"				   \
+		     SRCS_O="$(SRCS_MPASS_LC:.lc=.o) $(SRCS_S:.s=.o)"      \
+		     BUILD_DEFINES="-DBSP_MPASS -DMPASS_3C905B             \
+				    -DREDUCTION_INIT_EXCHANGE 		   \
+ 				    -DCHECKPOINTING_DEV                    \
+                                    ${BUILD_DEFINES}"                      \
+                     AS="${AS}"						   \
+                     AR="${AR}"						   \
+                     CC="${CC}";;					   \
+					      			           \
+	MPASS_MPL)							   \
+		$(MAKE) banner TYPE="device" FOR="IBM Message Passing";	   \
+		$(MAKE) ${BUILD_TYPE}					   \
+		     SRCS_LC="${SRCS_MPASS_LC}"				   \
+		     SRCS_LH="${SRCS_MPASS_LH}"				   \
+		     SRCS_O="$(SRCS_MPASS_LC:.lc=.o) $(SRCS_S:.s=.o)"      \
+		     BUILD_DEFINES="-DBSP_MPASS -DMPASS_MPL                \
+                                    ${BUILD_DEFINES}"                      \
+                     AS="${AS}"						   \
+                     AR="${AR}"						   \
+                     CC="${CC}";;					   \
+					      			           \
+	MPASS_PARIX)							   \
+		$(MAKE) banner TYPE="device" FOR="Parsytec Message Passing";\
+		$(MAKE) ${BUILD_TYPE}					   \
+		     SRCS_LC="${SRCS_MPASS_LC}"				   \
+		     SRCS_LH="${SRCS_MPASS_LH}"				   \
+		     SRCS_O="$(SRCS_MPASS_LC:.lc=.o) $(SRCS_S:.s=.o)"      \
+		     BUILD_DEFINES="-DBSP_MPASS -DMPASS_PARIX              \
+                                    ${BUILD_DEFINES}"                      \
+                     AS="${AS}"						   \
+                     AR="${AR}"						   \
+                     CC="${CC}";;					   \
+					      			           \
+	MPASS_PARMACS)							   \
+		$(MAKE) banner TYPE="device" FOR="Parmacs Message Passing";\
+		$(MAKE) ${BUILD_TYPE}					   \
+		     SRCS_LC="${SRCS_MPASS_LC}"				   \
+		     SRCS_LH="${SRCS_MPASS_LH}"				   \
+		     SRCS_O="$(SRCS_MPASS_LC:.lc=.o) $(SRCS_S:.s=.o)"      \
+		     BUILD_DEFINES="-DBSP_MPASS -DMPASS_PARMACS            \
+                                    ${BUILD_DEFINES}"                      \
+                     AS="${AS}"						   \
+                     AR="${AR}"						   \
+                     CC="${CC}";					   \
+		$(MAKE) spmdhost                                           \
+			BUILD_DEFINES="-DMPASS_PARMACS"                    \
+                        INCLUDES="-I/opt/transtech/include/"               \
+                        LIBRARIES="-L$(TPS)/lib/ -lparmacsh"               \
+		        CC=cc;;                                            \
+					      			           \
+	MPASS_EXPRESS)							   \
+		$(MAKE) banner TYPE="device" FOR="Express Message Passing";\
+		$(MAKE) ${BUILD_TYPE}					   \
+		     SRCS_LC="${SRCS_MPASS_LC}"				   \
+		     SRCS_LH="${SRCS_MPASS_LH}"				   \
+		     SRCS_O="$(SRCS_MPASS_LC:.lc=.o) $(SRCS_S:.s=.o)"      \
+		     BUILD_DEFINES="-DBSP_MPASS -DMPASS_EXPRESS -kcubix    \
+                                    ${BUILD_DEFINES}"                      \
+                     AS="${AS}"						   \
+                     AR="${AR}"						   \
+                     CC="${CC}";;					   \
+					      			           \
+	MPASS_MPI)							   \
+		$(MAKE) banner TYPE="device" FOR="MPI Message Passing";	   \
+		$(MAKE) ${BUILD_TYPE}					   \
+		     SRCS_LC="${SRCS_MPASS_LC}"				   \
+		     SRCS_LH="${SRCS_MPASS_LH}"				   \
+		     SRCS_O="$(SRCS_MPASS_LC:.lc=.o) $(SRCS_S:.s=.o)"      \
+		     BUILD_DEFINES="-DBSP_MPASS -DMPASS_MPI                \
+                                    ${BUILD_DEFINES} -I${mpiincludedir}"   \
+                     AS="${AS}"						   \
+                     AR="${AR}"						   \
+                     CC="${CC}";					   \
+                $(MAKE) mpihack;;                                          \
+                                                                           \
+	DRMA_SHMEM)							   \
+		$(MAKE) banner TYPE="device" FOR="Cray shmem";	           \
+		$(MAKE) ${BUILD_TYPE}					   \
+		     SRCS_LC="${SRCS_DRMA_LC}"				   \
+		     SRCS_LH="${SRCS_DRMA_LH}"				   \
+		     SRCS_O="$(SRCS_DRMA_LC:.lc=.o) $(SRCS_S:.s=.o)"       \
+		     BUILD_DEFINES="-DBSP_DRMA -DDRMA_SHMEM                \
+                                    ${BUILD_DEFINES}"                      \
+                     AS="${AS}"						   \
+                     AR="${AR}"						   \
+                     CC="${CC}";;					   \
+					      			           \
+        *)      echo "I dont know the device `bsparch -device`";           \
+		exit 1;;						   \
+        esac
+
+#############################################################
+##             Generic Compilation targets                 ##
+#############################################################
+
+objects: ${SRCS_H} ${SRCS_ANY_O} ${SRCS_O} 
+
+delit: ${SRCS_ANY_C} ${SRCS_ANY_H} ${SRCS_C} ${SRCS_H}
+
+root.dvi: $(SRCS_TEX)
+	latex root.tex
+
+callstack.dvi: $(SRCS_TEX)
+	latex callstack.tex
+
+realbuild:
+	@$(MAKE) clean SRCS_O="${SRCS_O}" SRCS_C="${SRCS_C}"          \
+              SRCS_H="${SRCS_H}"; 				      \
+	$(MAKE)  lib CC="${CC}" AS="${AS}" AR="${AR}"                 \
+              SRCS_LC="${SRCS_LC}"                                    \
+              SRCS_LH="${SRCS_LH}" SRCS_O="${SRCS_O}"                 \
+              CFLAGS="${CFLAGS_O0} ${BUILD_DEFINES}"                  \
+              LIBNAME="_O0";                 			      \
+                                                                      \
+	$(MAKE)  lib CC="${CC}" AS="${AS}" AR="${AR}"                 \
+              SRCS_LC="${SRCS_LC}"                                    \
+              SRCS_LH="${SRCS_LH}" SRCS_O="${SRCS_O}"                 \
+              CFLAGS="${CFLAGS_O0} ${BUILD_DEFINES}"                  \
+              LIBNAME="";                                             \
+                                                                      \
+	$(MAKE)  clean SRCS_O="${SRCS_O}" SRCS_C="${SRCS_C}"          \
+              SRCS_H="${SRCS_H}"; 				      \
+        $(MAKE)  lib CC="${CC}" AS="${AS}" AR="${AR}"                 \
+              SRCS_LC="${SRCS_LC}"                                    \
+              SRCS_LH="${SRCS_LH}" SRCS_O="${SRCS_O}"                 \
+              CFLAGS="${CFLAGS_O1} ${BUILD_DEFINES}"                  \
+              LIBNAME="_O1";                                          \
+                                                                      \
+	$(MAKE)  clean SRCS_O="${SRCS_O}" SRCS_C="${SRCS_C}"          \
+              SRCS_H="${SRCS_H}"; 				      \
+        $(MAKE)  lib CC="${CC}" AS="${AS}" AR="${AR}"                 \
+              SRCS_LC="${SRCS_LC}"                                    \
+              SRCS_LH="${SRCS_LH}" SRCS_O="${SRCS_O}"                 \
+              CFLAGS="${CFLAGS_O2} ${BUILD_DEFINES}"                  \
+              LIBNAME="_O2";                                          \
+                                                                      \
+	$(MAKE)  clean SRCS_O="${SRCS_O}" SRCS_C="${SRCS_C}"          \
+              SRCS_H="${SRCS_H}"; 				      \
+        $(MAKE)  lib CC="${CC}" AS="${AS}" AR="${AR}"                 \
+              SRCS_LC="${SRCS_LC}"                                    \
+              SRCS_LH="${SRCS_LH}" SRCS_O="${SRCS_O}"                 \
+              CFLAGS="${CFLAGS_DEBUG} ${CFLAGS_O0} ${BUILD_DEFINES}"  \
+              LIBNAME="_G0";                                          \
+                                                                      \
+	$(MAKE)  clean SRCS_O="${SRCS_O}" SRCS_C="${SRCS_C}"          \
+              SRCS_H="${SRCS_H}"; 				      \
+        $(MAKE)  lib CC="${CC}" AS="${AS}" AR="${AR}"                 \
+              SRCS_LC="${SRCS_LC}"                                    \
+              SRCS_LH="${SRCS_LH}" SRCS_O="${SRCS_O}"                 \
+              CFLAGS="${CFLAGS_DEBUG} ${CFLAGS_O1} ${BUILD_DEFINES}"  \
+              LIBNAME="_G1";                                          \
+                                                                      \
+	$(MAKE)  clean SRCS_O="${SRCS_O}" SRCS_C="${SRCS_C}"          \
+              SRCS_H="${SRCS_H}"; 				      \
+        $(MAKE)  lib CC="${CC}" AS="${AS}" AR="${AR}"                 \
+              SRCS_LC="${SRCS_LC}"                                    \
+              SRCS_LH="${SRCS_LH}" SRCS_O="${SRCS_O}"                 \
+              CFLAGS="${CFLAGS_DEBUG} ${CFLAGS_O2} ${BUILD_DEFINES}"  \
+              LIBNAME="_G2";                                          \
+								      \
+	$(MAKE)  clean SRCS_O="${SRCS_O}" SRCS_C="${SRCS_C}"          \
+              SRCS_H="${SRCS_H}"; 				      \
+        $(MAKE)  lib CC="${CC}" AS="${AS}" AR="${AR}"                 \
+              SRCS_LC="${SRCS_LC}"                                    \
+              SRCS_LH="${SRCS_LH}" SRCS_O="${SRCS_O}"                 \
+              CFLAGS="${CFLAGS_REALDEBUG} ${CFLAGS_O0} ${BUILD_DEFINES}"\
+              LIBNAME="_g0";                                          \
+                                                                      \
+	$(MAKE)  clean SRCS_O="${SRCS_O}" SRCS_C="${SRCS_C}"          \
+              SRCS_H="${SRCS_H}"; 				      \
+        $(MAKE)  lib CC="${CC}" AS="${AS}" AR="${AR}"                 \
+              SRCS_LC="${SRCS_LC}"                                    \
+              SRCS_LH="${SRCS_LH}" SRCS_O="${SRCS_O}"                 \
+              CFLAGS="${CFLAGS_REALDEBUG} ${CFLAGS_O1} ${BUILD_DEFINES}"\
+              LIBNAME="_g1";                                          \
+                                                                      \
+	$(MAKE)  clean SRCS_O="${SRCS_O}" SRCS_C="${SRCS_C}"          \
+              SRCS_H="${SRCS_H}"; 				      \
+        $(MAKE)  lib CC="${CC}" AS="${AS}" AR="${AR}"                 \
+              SRCS_LC="${SRCS_LC}"                                    \
+              SRCS_LH="${SRCS_LH}" SRCS_O="${SRCS_O}"                 \
+              CFLAGS="${CFLAGS_REALDEBUG} ${CFLAGS_O2} ${BUILD_DEFINES}"\
+              LIBNAME="_g2";                                          \
+								      \
+	$(MAKE)  clean SRCS_O="${SRCS_O}" SRCS_C="${SRCS_C}"          \
+              SRCS_H="${SRCS_H}"; 				      \
+        $(MAKE)  lib CC="${CC}" AS="${AS}" AR="${AR}"                 \
+              SRCS_LC="${SRCS_LC}"                                    \
+              SRCS_LH="${SRCS_LH}" SRCS_O="${SRCS_O}"                 \
+              CFLAGS="${CFLAGS_PROF} ${CFLAGS_O0} ${BUILD_DEFINES}"   \
+              LIBNAME="_P0";                                          \
+                                                                      \
+	$(MAKE)  clean SRCS_O="${SRCS_O}" SRCS_C="${SRCS_C}"          \
+              SRCS_H="${SRCS_H}"; 				      \
+        $(MAKE)  lib CC="${CC}" AS="${AS}" AR="${AR}"                 \
+              SRCS_LC="${SRCS_LC}"                                    \
+              SRCS_LH="${SRCS_LH}" SRCS_O="${SRCS_O}"                 \
+              CFLAGS="${CFLAGS_PROF} ${CFLAGS_O1} ${BUILD_DEFINES}"   \
+              LIBNAME="_P1";                                          \
+                                                                      \
+	$(MAKE)  clean SRCS_O="${SRCS_O}" SRCS_C="${SRCS_C}"          \
+              SRCS_H="${SRCS_H}"; 				      \
+        $(MAKE)  lib CC="${CC}" AS="${AS}" AR="${AR}"                 \
+              SRCS_LC="${SRCS_LC}"                                    \
+              SRCS_LH="${SRCS_LH}" SRCS_O="${SRCS_O}"                 \
+              CFLAGS="${CFLAGS_PROF} ${CFLAGS_O2} ${BUILD_DEFINES}"   \
+              LIBNAME="_P2";                                          \
+								      \
+        cp bsp_lib_user.h     ${top_srcdir}/include/bsp.h;            \
+        cp bsp_lib_f77_user.h ${top_srcdir}/include/fbsp.h
+
+
+lib::
+	@$(MAKE) banner TYPE="library prefix "     			     \
+              FOR="\"${LIBNAME}\"; flags are $(CFLAGS)";                     \
+	if [ ! -d ${top_srcdir}/lib/`bsparch -arch` ] ;                      \
+        then  mkdir -p ${top_srcdir}/lib/`bsparch -arch`; fi;                \
+        if [ ! -d ${top_srcdir}/lib/`bsparch -arch`/`bsparch -device` ];     \
+        then mkdir -p ${top_srcdir}/lib/`bsparch -arch`/`bsparch -device`;fi;\
+	rm -f                                                                \
+  ${top_srcdir}/lib/`bsparch -arch`/`bsparch -device`/libbspcore${LIBNAME}.a;\
+        if test "${G77}" = "f2c"; then                                       \
+	   $(MAKE) objects SRCS_LC="${SRCS_LC}" SRCS_LH="${SRCS_LH}"         \
+                           SRCS_O="${SRCS_O}"                                \
+                           CFLAGS="-DF2CUNDERSCORE ${CFLAGS}  -DPACKAGE=\"bsplib\" -DVERSION=\"1.4\" -DBSP_ONLINE_PROCS=8 -DCPP_STRINGIFICATION=1 -DSHMEM_SYSV_NO_SEMAPHORE_UNION=1 -DLIBC_HAS_CPU_TIMER=1 -DLIBC_SLEEP_RESOLUTION=5600 -DSIZEOF_UNSIGNED_CHAR=1 -DSIZEOF_UNSIGNED_SHORT_INT=2 -DSIZEOF_UNSIGNED_INT=4 -DSIZEOF_UNSIGNED_LONG_INT=4 -DSIZEOF_UNSIGNED_LONG_LONG_INT=8 -DSIZEOF_SHORT=2 -DSIZEOF_INT=4 -DSIZEOF_LONG_INT=4 -DSIZEOF_LONG_LONG_INT=8 "         \
+                           CC="${CC}" AS="${AS}";                            \
+        else								     \
+	   $(MAKE) objects SRCS_LC="${SRCS_LC}" SRCS_LH="${SRCS_LH}"         \
+                           SRCS_O="${SRCS_O}" CFLAGS="${CFLAGS}  -DPACKAGE=\"bsplib\" -DVERSION=\"1.4\" -DBSP_ONLINE_PROCS=8 -DCPP_STRINGIFICATION=1 -DSHMEM_SYSV_NO_SEMAPHORE_UNION=1 -DLIBC_HAS_CPU_TIMER=1 -DLIBC_SLEEP_RESOLUTION=5600 -DSIZEOF_UNSIGNED_CHAR=1 -DSIZEOF_UNSIGNED_SHORT_INT=2 -DSIZEOF_UNSIGNED_INT=4 -DSIZEOF_UNSIGNED_LONG_INT=4 -DSIZEOF_UNSIGNED_LONG_LONG_INT=8 -DSIZEOF_SHORT=2 -DSIZEOF_INT=4 -DSIZEOF_LONG_INT=4 -DSIZEOF_LONG_LONG_INT=8 "      \
+                           CC="${CC}" AS="${AS}";                            \
+        fi;								     \
+	${AR} crv                                                            \
+  ${top_srcdir}/lib/`bsparch -arch`/`bsparch -device`/libbspcore${LIBNAME}.a \
+         $(SRCS_ANY_O) $(SRCS_O);                                            \
+        ${RANLIB}                                                            \
+  ${top_srcdir}/lib/`bsparch -arch`/`bsparch -device`/libbspcore${LIBNAME}.a
+
+
+mpihack: getarg.o
+	${AR} crv 							   \
+          ${top_srcdir}/lib/`bsparch -arch`/`bsparch -device`/libmpihack.a \
+	  getarg.o;                                                        \
+        ${RANLIB} 							   \
+          ${top_srcdir}/lib/`bsparch -arch`/`bsparch -device`/libmpihack.a
+                   
+
+spmdhost:
+	@$(MAKE) banner TYPE="hostprogram" FOR="bsprun startup"; \
+        rm -f bsp_spmdhost.o;                                    \
+	$(MAKE) objects                                          \
+                SRCS_LC="bsp_spmdhost.lc"                        \
+                SRCS_O="bsp_spmdhost.o"                          \
+                INCLUDES="${INCLUDES}"                           \
+                BUILD_DEFINES="${BUILD_DEFINES}"                 \
+                CC="${CC}";                                      \
+        ${CC}   -o bsp_spmdhost bsp_spmdhost.o ${LIBRARIES};     \
+	if [ ! -d ${top_srcdir}/bin/`bsparch -arch` ] ;          \
+        then  mkdir -p ${top_srcdir}/bin/`bsparch -arch`; fi;    \
+	${INSTALL_PROGRAM} bsp_spmdhost                          \
+        $(top_srcdir)/bin/`bsparch -arch`/bsp_spmdhost;
+
+
+clean::
+	rm -f *.o $(SRCS_O) $(SRCS_ANY_O) $(BINARY_TARGET)       \
+	      $(SRCS_ANY_LC:.lc=.o)  $(SRCS_ANY_LH:.lh=.h)       \
+              $(SRCS_ANY_LC:.lc=.c) 				 \
+              $(SRCS_SHMEM_LC:.lc=.o) $(SRCS_SHMEM_LH:.lh=.h)    \
+              $(SRCS_SHMEM_LC:.lc=.c) 				 \
+	      $(SRCS_MPASS_LC:.lc=.o) $(SRCS_MPASS_LH:.lh=.h)    \
+              $(SRCS_MPASS_LC:.lc=.c) 				 \
+	      $(SRCS_DRMA_LC:.lc=.o) $(SRCS_DRMA_LH:.lh=.h)      \
+              $(SRCS_DRMA_LC:.lc=.c) 				 \
+              $(SRCS_S:.s=.o) $(SRCS_TEX) mon.out
+
+banner:
+	@echo "#########################################################"; \
+        echo  "#####   ${TYPE} = ${FOR}";                                  \
+        echo  "#########################################################"
+
+
+
+#############################################################
+##             Single build with no clean                  ##
+#############################################################
+
+
+#############################################################
+##             Dependencies                                ##
+#############################################################
+
+bsp_contentionfree.o: bsp_lib.h bsp_contentionfree.h 
+bsp_lib_drma.o:  bsp_lib.h bsp_lib_common.h bsp_contentionfree.h bsp_profile.h 
+bsp_lib_mpass.o: bsp_lib.h bsp_lib_common.h bsp_contentionfree.h bsp_profile.h 
+bsp_lib_shmem.o: bsp_lib.h bsp_lib_common.h bsp_contentionfree.h bsp_profile.h 
+bsp_lib_f77.o:        bsp_lib.h bsp_lib_f77.h
+bsp_miller.o:         bsp_lib.h
+bsp_misc.o:           bsp_lib.h
+bsp_misc_drma.o:      bsp_lib.h
+bsp_misc_mpass.o:     bsp_lib.h
+bsp_misc_shmem.o:     bsp_lib.h
+bsp_profile.o:        bsp_lib.h bsp_profile.h bsp_callstack.h
+bsp_register.o:       bsp_lib.h bsp_register.h bsp_profile.h 
+bsp_lib.h:            bsp_lib_user.h bsp_register.h \
+                      bsp_lib_shmem.h bsp_lib_mpass.h bsp_lib_drma.h 
+bsp_lib_common.h:     bsp_lib_f77.h bsp_lib_f77_user.h bsp_lib_f77_user_cray.h
+bsp_callstack.o:      bsp_callstack.h
+bsp_timer.o:          bsp_timer.h
+

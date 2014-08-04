@@ -1,0 +1,198 @@
+
+
+
+bsp_begin(3)            BSPlib FUNCTIONS             bsp_begin(3)
+
+
+
+NAME
+     bsp_begin - spawn a number of BSP processes.
+
+
+
+C SYNOPSIS
+     #include "bsp.h"
+
+     void bsp_begin(int _m_a_x_p_r_o_c_s);
+
+FORTRAN SYNOPSIS
+     SUBROUTINE bspbegin(_m_a_x_p_r_o_c_s)
+     INTEGER , intent(IN):: _m_a_x_p_r_o_c_s
+
+
+DESCRIPTION
+     At most _m_a_x_p_r_o_c_s processes are created in a  bsplib(3)  pro-
+     gram  by  the  operations  bsp_begin  and  bsp_end(3).  They
+     bracket a piece of code to be run in an  SPMD  manner  on  a
+     number  of  processors.  There can only be one instance of a
+     bsp_begin/bsp_end pair within a program, although there  are
+     two different ways to start a bsplib(3) program:
+
+     1)   If bsp_begin and bsp_end(3)  are  the  first  and  last
+          statements in a program, then the entire bsplib(3) com-
+          putation is SPMD.
+
+
+     2)   An alternative  mode  (see  bsp_init(3))  is  available
+          where  a single process starts execution and determines
+          the number of parallel processes required for the  cal-
+          culation.  It  can  then  spawn  the required number of
+          processes using bsp_begin.  Execution  of  the  spawned
+          processes  then  continue  in  an  SPMD  manner,  until
+          bsp_end(3) is encountered by all the processes. At that
+          point,  all but process zero is terminated, and process
+          zero is left to continue the execution of the  rest  of
+          the program sequentially.
+
+
+EXAMPLE
+     1)   Consider a C program that starts as many  processes  as
+          possible, each printing the string ``Hello World''.
+          #include "bsp.h"
+
+          void main() {
+            bsp_begin(bsp_nprocs());
+              printf("Hello World from process %d of %d",
+                     bsp_pid(),bsp_nprocs());
+            bsp_end();
+          }
+          The example illustrates  the  minimum  requirements  of
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    1
+
+
+
+
+
+
+bsp_begin(3)            BSPlib FUNCTIONS             bsp_begin(3)
+
+
+
+          bsplib(3)  with  respect  to  I/O.  When  a  number  of
+          processes print a message on either standard output  or
+          standard  error,  the  messages  are multiplexed to the
+          users terminal  in  a  non-deterministic  manner.   All
+          other  types  of I/O (e.g., user input and file access)
+          are only guaranteed to work correctly if  performed  by
+          _p_r_o_c_e_s_s  _z_e_r_o . Therefore this example prints _p strings
+          in an arbitrary order.
+
+
+     2)   Consider a  Fortran  77  program  that  prints  ``Hello
+          World'' in parallel.
+
+                PROGRAM Main
+                INCLUDE 'fbsp.h'
+
+                CALL bspbegin(bspnprocs())
+                WRITE (*,*) 'Hello World from ',bsppid(),' of ',bspnprocs()
+                CALL bspend()
+
+
+SEE ALSO
+     bsplib(3), bsp_begin(3), bsp_end(3)
+
+     ``_B_S_P_l_i_b: _T_h_e _B_S_P _P_r_o_g_r_a_m_m_i_n_g _L_i_b_r_a_r_y'' Jonathan M. D. Hill,
+     Bill  McColl,  Dan  C.  Stefanescu,  Mark W. Goudreau, Kevin
+     Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and
+     Rob  Bisseling.  Parallel  Computing,  to  appear  1998. See
+     _h_t_t_p://_w_w_w._b_s_p-_w_o_r_l_d_w_i_d_e._o_r_g for more details.
+
+
+NOTES
+     i    There can only  be  a  single  bsp_begin  bsp_end  pair
+          within  a  bsplib(3) program.  This excludes the possi-
+          bility  of  starting,  stopping,  and  then  restarting
+          parallel  tasks within a program, or any form of nested
+          parallelism.
+
+
+     ii   The process with _b_s_p__p_i_d()==_0 is a continuation of  the
+          thread of control that initiated bsp_begin(3). This has
+          the effect that all the values of the local and  global
+          variables prior to bsp_begin are available to that pro-
+          cess.
+
+
+     iii  After bsp_begin, the environment from process  zero  is
+          not  inherited  by  any  of  the other processes, i.e.,
+          those with _b_s_p__p_i_d() greater than zero. If any of  them
+          require  part  of  zero's  state, then the data must be
+          transferred from process zero.
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    2
+
+
+
+
+
+
+bsp_begin(3)            BSPlib FUNCTIONS             bsp_begin(3)
+
+
+
+     iv   bsp_begin has to be the first  statement  of  the  pro-
+          cedure which contains the statement. Similarly, bsp_end
+          has to be the last statement in the same procedure.
+
+
+     v    bsp_begin(bsp_nprocs()) can  be  used  to  request  the
+          number of processes as there are processors on a paral-
+          lel machine.
+
+
+
+
+BUGS
+     Problems  and  bug  reports  should  be  mailed  to  _b_s_p_l_i_b-
+     _b_u_g_s@_c_o_m_l_a_b._o_x._a_c._u_k
+
+
+AUTHORS
+     The Oxford BSP Toolset implementation of BSPlib was  written
+     by Jonathan.Hill@comlab.ox.ac.uk
+     http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    3
+
+
+

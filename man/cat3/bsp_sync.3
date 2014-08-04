@@ -1,0 +1,132 @@
+
+
+
+bsp_sync(3)             BSPlib FUNCTIONS              bsp_sync(3)
+
+
+
+NAME
+     bsp_sync - end of a superstep.
+
+
+C SYNOPSIS
+     #include "bsp.h"
+
+     void bsp_sync()
+
+FORTRAN SYNOPSIS
+     SUBROUTINE  bspsync()
+
+
+DESCRIPTION
+     A bsplib(3) calculation consists of  a  sequence  of  super-
+     steps.  During a superstep each process can perform a number
+     of computations on data held locally at the start of  super-
+     step  and  may  communicate  data  to  other processes using
+     either bsp_put(3), bsp_get(3),  bsp_hpput(3),  bsp_hpget(3),
+     or  bsp_send(3).   Any communications within a superstep are
+     guaranteed to occur by the end of the superstep,  where  the
+     bsp_nprocs(3) processes synchronise at a barrier. The end of
+     one superstep and the start of the next is identified  by  a
+     call  to  the library procedure bsp_sync. Communication ini-
+     tiated during a superstep is _n_o_t _g_u_a_r_a_n_t_e_e_d to  occur  until
+     bsp_sync  is  executed; this is even the case for the unbuf-
+     fered variants of communication (i.e., bsp_hpput(3))
+
+EXAMPLE
+     1)   bsp_begin(3) and bsp_init(3)),  the  following  program
+          _a_t_t_e_m_p_t_s (it is not guaranteed) to serialise the print-
+          ing by ensuring each process prints its output in turn.
+          This is done by performing _p iterations, each separated
+          by a barrier synchronisation, where  process  _i  prints
+          ``Hello BSP Worldwide'' during iteration _i.
+
+          void main(void) {
+            int i;
+            bsp_begin(bsp_nprocs());
+              for(i=0; i<bsp_nprocs(); i++) {
+                if (bsp_pid()==i)
+                  printf("Hello BSP Worldwide from process %d of %d0,
+                         i,bsp_nprocs());
+                fflush(stdout);
+                bsp_sync();
+              }
+            bsp_end();
+          }
+
+
+     2)   Consider a  Fortran  77  program  that  prints  ``Hello
+          World'' in parallel.
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    1
+
+
+
+
+
+
+bsp_sync(3)             BSPlib FUNCTIONS              bsp_sync(3)
+
+
+
+                PROGRAM MAIN
+                  INCLUDE 'fbsp.h'
+                  INTEGER i
+                  CALL bspbegin(bspnprocs())
+                    DO i=0,bspnprocs()-1
+                      IF (bsppid() .eq. i) THEN
+                        WRITE (*,*) 'Hello BSP Worldwide from process',
+               +                    i,' of ',bspnprocs()
+                      END IF
+                      CALL bspsync()
+                    END DO
+                  CALL bspend()
+                END
+
+
+SEE ALSO
+     bsplib(3)
+
+     ``_B_S_P_l_i_b: _T_h_e _B_S_P _P_r_o_g_r_a_m_m_i_n_g _L_i_b_r_a_r_y'' Jonathan M. D. Hill,
+     Bill  McColl,  Dan  C.  Stefanescu,  Mark W. Goudreau, Kevin
+     Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and
+     Rob  Bisseling.  Parallel  Computing,  to  appear  1998. See
+     _h_t_t_p://_w_w_w._b_s_p-_w_o_r_l_d_w_i_d_e._o_r_g for more details.
+
+
+NOTES
+     bsplib(3) has no form of subset synchronisation.
+
+
+BUGS
+     Problems  and  bug  reports  should  be  mailed  to  _b_s_p_l_i_b-
+     _b_u_g_s@_c_o_m_l_a_b._o_x._a_c._u_k
+
+
+AUTHORS
+     The Oxford BSP Toolset implementation of BSPlib was  written
+     by Jonathan.Hill@comlab.ox.ac.uk
+     http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    2
+
+
+

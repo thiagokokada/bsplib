@@ -1,0 +1,226 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997,1998 University of Oxford           %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#include "bsp_lib.h"
+#include "bsp_lib_user.h"
+#include <limits.h>
+
+#ifdef F2CUNDERSCORE
+#define DOUBLEUNDERSCORE
+#endif
+
+#ifdef UNDERSCORE
+#define BSP_START       bsp_start_
+#define BSP_FINISH      bsp_finish_
+#define BSP_SSTEP       bsp_sstep_  
+#define BSP_SSTEP_END   bsp_sstep_end_
+#define BSP_FETCH       bsp_fetch_
+#define BSP_STORE       bsp_store_ 
+#define BSP_TIME        bsp_time_
+#define BSP_DTIME       bsp_dtime_
+#define BSP_REDUCE      bsp_reduce_
+#define BSP_BROADCAST   bsp_broadcast_
+
+#else
+#ifdef DOUBLEUNDERSCORE
+#define BSP_START       bsp_start__
+#define BSP_FINISH      bsp_finish__
+#define BSP_SSTEP       bsp_sstep__  
+#define BSP_SSTEP_END   bsp_sstep_end__
+#define BSP_FETCH       bsp_fetch__
+#define BSP_STORE       bsp_store__ 
+#define BSP_TIME        bsp_time__
+#define BSP_DTIME       bsp_dtime__
+#define BSP_REDUCE      bsp_reduce__
+#define BSP_BROADCAST   bsp_broadcast__
+
+#else
+
+#ifdef UPPERCASE
+/* Use the macro name */
+#else
+#define BSP_START       bsp_start
+#define BSP_FINISH      bsp_finish
+#define BSP_SSTEP       bsp_sstep  
+#define BSP_SSTEP_END   bsp_sstep_end
+#define BSP_FETCH       bsp_fetch
+#define BSP_STORE       bsp_store 
+#define BSP_TIME        bsp_time_aleady_defined
+#define BSP_DTIME       bsp_dtime_aleady_defined
+#define BSP_REDUCE      bsp_reduce
+#define BSP_BROADCAST   bsp_broadcast
+#endif
+#endif
+#endif
+char  _bsp_miller_reference; 
+void (*_bsp_miller_op_hack)(void*,void*,void*,int);
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Compatibility mode with Richard Millers Oxford BSP library}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+/* C interface */
+void bspstart(int argc,char **argv,int maxprocs, int *nprocs, int *mypid) {
+  bsp_begin(maxprocs==0?bsp_nprocs():maxprocs);
+  bsp_pushregister(&_bsp_miller_reference,INT_MAX/2);
+  bsp_sync();
+  *nprocs = bsp_nprocs();
+  *mypid  = bsp_pid();
+}
+
+/* F77 interface */
+void BSP_START(int *maxprocs, int *nprocs, int *mypid) {
+  bsp_begin(*maxprocs==0?bsp_nprocs():*maxprocs);
+  bsp_pushregister(&_bsp_miller_reference,INT_MAX/2);
+  bsp_sync();
+  *nprocs=bsp_nprocs();
+  *mypid =bsp_pid();
+}
+\end{code}
+
+\begin{code}
+void bspfinish() {
+  bsp_end();
+}
+
+void BSP_FINISH() {
+  bsp_end();
+}
+\end{code}
+
+\begin{code}
+#undef bspsstep
+void bspsstep(int sstepid) {
+
+}
+
+void BSP_SSTEP(int *sstepid) {
+
+}
+\end{code}
+
+\begin{code}
+#undef bspsstep_end
+void bspsstep_end(int sstepid) {
+  bsp_sync();
+}
+
+void BSP_SSTEP_END(int *sstepid) {
+  bsp_sync();
+}
+\end{code}
+
+\begin{code}
+/* C interface */
+#undef bspstore
+void bspstore(int pid, void *src, void *dst, int nbytes) {
+  bsp_put(pid,src,&_bsp_miller_reference,
+          (char*)dst - &_bsp_miller_reference,
+          nbytes);
+}
+
+/* F77 interface */
+void BSP_STORE(int *pid, void *src, void *dst, int *nbytes) {
+#ifdef DEBUG
+  bsp_debug("bsp_store(%d,0x%x,0x%x,0x%x,%d)",*pid,src,dst,*nbytes);
+#endif
+  bsp_put(*pid,src,&_bsp_miller_reference,
+          (char*)dst - &_bsp_miller_reference,
+          *nbytes); 
+}
+\end{code}
+
+\begin{code}
+#undef bspfetch
+void bspfetch(int pid, void *src, void *dst, int nbytes) {
+  bsp_get(pid,&_bsp_miller_reference,
+          (char*)src-&_bsp_miller_reference,
+          dst,nbytes);
+}
+
+void BSP_FETCH(int *pid, void *src, void *dst, int *nbytes) {
+  bsp_get(*pid,&_bsp_miller_reference,
+          (char*)src-&_bsp_miller_reference,
+          dst,*nbytes);
+}
+\end{code}
+
+\begin{code}
+double BSP_TIME()  {return(bsp_time());}
+
+double BSP_DTIME()  {return(bsp_dtime());}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Reduce function}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Richards implementation is wrong. The nbytes argument to the operation
+should be a pointer to an integer. For compatibilty, an incorrect
+version is given below:
+
+\begin{code}
+void millerophack(void *res,void *left, void *right, int *nbytes) {
+  (*_bsp_miller_op_hack)(res,left,right,*nbytes);
+}
+
+void bspreduce(void (*op)(void*,void*,void*,int),
+                void *src, void *dst, int nbytes) {
+
+  _bsp_miller_op_hack = op;
+  bsp_pushregister(dst,nbytes);
+  bsp_sync();
+
+  bsp_fold(millerophack,src,dst,nbytes);
+  bsp_popregister(dst); 
+}
+
+void BSP_REDUCE(void (*op)(void*,void*,void*,int*),
+              void *src, void *dst, int *nbytes) {
+  bsp_pushregister(dst,*nbytes);
+  bsp_sync();
+
+  bsp_fold(op,src,dst,*nbytes);
+  bsp_popregister(dst); 
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Broadcast function}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+void bspbroadcast(int pid, void *src, void *dst, int nbytes) {
+  bsp_pushregister(dst,nbytes);
+  bsp_sync();
+  bsp_bcast(pid,src,dst,nbytes);
+  bsp_popregister(dst);
+}
+\end{code}
+
+\begin{code}
+void BSP_BROADCAST(int *pid, void *src, void *dst, int *nbytes) {
+  bsp_pushregister(dst,*nbytes);
+  bsp_sync();
+  bsp_bcast(*pid,src,dst,*nbytes);
+  bsp_popregister(dst);
+   
+}
+\end{code}
+

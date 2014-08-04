@@ -1,0 +1,1801 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1997, 1998 Stephen Donaldson                       %%
+%%                      &  The University of Oxford                      %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it into other software, is hereby granted          %%
+%% without fee, provided that                                            %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+ 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{UDP/IP communications library}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+This file contains the BSP/UDP library routines and the global variables
+used by these functions.
+\begin{code}
+#include <sys/file.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <signal.h>
+
+#include <sys/time.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#if defined(RS6000) || defined(SP2)
+#include <sys/select.h>
+#endif
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <netdb.h>
+\end{code}
+
+
+Local prototypes of functions with scope of this compile unit:
+\begin{code}
+static int all_receive_queues_empty();
+static void prod_source(int spid,int just_ack);
+static void wait_free_slot_with_high_probability(int iscontrol,int size);
+static void sendpendingacks(int dpid,int iscontrol);
+void socketio(int sig);
+
+#ifdef SANITY_CHECK
+static unsigned long traverse_high_in_seq(int from);
+static unsigned long traverse_highest_seen(int from);
+#endif
+\end{code}
+
+\begin{code}
+#include "../library_now/bspnowdefs.h"
+#include "bspudpdefs.h"
+#include "bspudpl.h"
+#include "bspudptrace.h"
+#include "bspqueueops.h"
+#ifdef MPASS_3C905B
+#include "../library_kernel/bspkernell.h"
+#endif
+\end{code}
+
+Local data structures used for protocol management and session control
+between the processors.
+\begin{code}
+bsphost_t *bsptcp_host_list;    /* first candidate host */
+
+int bspudp_nprocs;              /* number of hosts requested/participating */
+int bspudp_active_nprocs;       /* How many involved in a communication */
+int bspudp_pid=-1;              /* pid of the current BSP process */
+int bspudp_ucpipe[2];           /* control pipes between child and parent */
+int bspudp_dcpipe[2];           /* control pipes between chile and parent */
+int bspudp_spmdout[2];          /* pipe for sending stdout to master process */
+int bspudp_spmderr[2];          /* pipe for sending stderr to master process */
+int bspudp_dsock;               /* data socket */
+#ifdef MPASS_3C905B
+bspeth_macaddr_t bspudp_smac;   /* MAC address of current BSP process */
+#endif
+#ifndef MPASS_3C905B
+fd_set bspudp_readfd;           /* select to wait for data */
+fd_set bspudp_writefd;          /* select to wait for data */
+fd_set bspudp_exceptfd;         /* select to wait for exception */
+#endif
+int   bspudp_send_bufsize;      /* socket send buffer size */
+int   bspudp_recv_bufsize;      /* socket receive buffer size */
+int   bspudp_verbose=0;         /* debugging output */
+int   bspudp_skipwaitsend=1;    /* ignore wait send */
+int   bspudp_slot_size_usecs=1200; /* 10Mbit Ethernet frame size in usecs */
+int   bspudp_roundtrip_usecs=1000; /* Round trip delay time in usecs */
+int   bspudp_sendlatency_usecs=1200;/* rate of emitting packets */
+int   bspudp_max_frame=1526;       /* maximum packet size */
+int   bspudp_min_packets=10;       /* number of send or receive packets */
+bspudp_anch_t  *bspudp_anchor; 
+bspudp_sess_t *bspudp_sess=NULL; 
+
+#ifdef BSPTCP_TRACE
+FILE *bspudp_trace_file;
+int   bspudp_trace=0;
+char bspudp_trace_prt[41];
+char *bspudp_trace_fdata(int len, char *data)
+   {
+   int i;
+   
+   if (len > 20) len = 20;
+   for (i = 0; i < len; i++)
+      sprintf(bspudp_trace_prt+2*i,"%02x",data[i]);
+
+   return bspudp_trace_prt;
+   }
+#endif
+
+int rand_a, rand_b, rand_x, rand_last; /* Random number generator */
+\end{code}
+
+Define macros used to control error report and execution aborting and
+include the functions used to guard system calls for errors: The
+definition of the included guarding functions expand the macros and
+hence are customsed by the macros for the particular BSP/UDP
+component.
+
+\begin{code}
+#define BSPTCP_COMPONENT "BSP/UDP Library" /* component identifier */
+#define ABORT_MSG_OK bspudp_ucpipe[1]      /* ABORT_MSG & ABORT_EXIT are ok */
+#define ABORT_EXIT(exitcode)               /* request to abort and exit */ \
+         { \
+         bsptcp_msghdr_t msghdr; \
+         int exitwith; \
+         \
+         exitwith = exitcode; \
+         msghdr.msgtype = BSPTCP_MSG_ABORT; \
+         msghdr.msglen = sizeof(int); \
+         msghdr.msgspid = bspudp_pid; \
+         msghdr.msgdpid = 0; \
+         write(bspudp_ucpipe[1],&msghdr,sizeof(msghdr)); \
+         write(bspudp_ucpipe[1],&exitwith,sizeof(int)); \
+         read(bspudp_dcpipe[0],&msghdr,sizeof(msghdr)); /* wait ack */ \
+         abort(); \
+         exit(exitcode); \
+         }
+
+#define ABORT_MSG(text)                  \
+  do {                                   \
+    struct timeval time_now;             \
+    fprintf(stderr,"%s",text);           \
+    fflush(stderr);                      \
+    gettimeofday(&time_now,NULL);        \
+    bspnow_usecsleep(1000000,&time_now); \
+  } while(0)
+
+#include "../library_now/bspnowerrs.h"         /* include guard functions */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Lexer and Parser}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#include "../library_now/y.tab.c"      /* host name table parser */
+#include "../library_now/bspnowlex.c"  /* host name table lexical analyser */
+\end{code}
+
+
+\begin{code}
+#ifdef TEST_PACKET_LOSS 
+int dsendto(int s, const void *msg, int  len,  unsigned  int
+       flags, const struct sockaddr *to, int tolen)
+   {
+   static int first = 1;
+   double rnum;
+
+   if (first)
+      {
+      srand(getpid());
+      first = 0;
+      }
+   
+   rnum = (double) rand() /((double) RAND_MAX);
+   if (rnum < 0.1) return len; /* loose 10% of packets */
+
+   return sendto(s,msg,len,flags,to,tolen);
+   }
+#undef sendto
+#define sendto dsendto
+#endif
+\end{code}
+
+\begin{code}
+#ifdef MPASS_3C905B
+#define malloc_shared(size) bspkern_malloc(size)
+#else
+#define malloc_shared(size) malloc(size)
+#endif
+\end{code}
+
+\begin{code}
+#ifdef MPASS_3C905B
+static int strtomacaddr(bspeth_macaddr_t *dst, char* src)
+   {
+   int i;
+   unsigned int x1, x2, x3, x4, x5, x6;
+
+   i=sscanf(src,"%x:%x:%x:%x:%x:%x",&x1,&x2,&x3,&x4,&x5,&x6);
+   dst->macaddr[0]=x1;
+   dst->macaddr[1]=x2;
+   dst->macaddr[2]=x3;
+   dst->macaddr[3]=x4;
+   dst->macaddr[4]=x5;
+   dst->macaddr[5]=x6;
+   return (i==6);
+   }
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%
+\section{Asynchronous socket I/O processing}
+%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+#include "bspsocketio.h"
+\end{code}
+
+Interface functions between the BSP Worldwide library and the UDP/IP
+Sockets interface:
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Setting the buffer size}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+Handshake between the higher level protocol and this UDP library that
+determines what is the maximum message size. 
+\begin{code}
+int bspudp_set_buffer_size(int *size, int *nbuffers, 
+			   int slotsize,int roundtrip,int sendlatency) 
+   {
+      
+   bspudp_max_frame         = *size;
+   bspudp_min_packets       = *nbuffers;
+   bspudp_slot_size_usecs   = slotsize;
+   bspudp_sendlatency_usecs = sendlatency;
+   bspudp_roundtrip_usecs   = roundtrip;
+   bspudp_recv_bufsize      = bspudp_max_frame*bspudp_min_packets;
+   bspudp_send_bufsize      = bspudp_recv_bufsize;
+
+#ifdef DEBUG
+   printf("BSP/UDP Library: SNDBUF = %d, RCVBUF = %d.\n",
+      bspudp_send_bufsize,bspudp_recv_bufsize);
+   printf("bspudp_max_frame = %d,\nbspudp_min_packets = %d,\n"
+          "bspudp_recv_bufsize = %d,\nbspudp_send_bufsize = %d,\n"
+          "bspudp_slot_size_usecs= %d\n",
+           bspudp_max_frame,bspudp_min_packets,bspudp_recv_bufsize,
+           bspudp_send_bufsize,bspudp_slot_size_usecs);   
+   fflush(stdout);
+#endif
+
+   return (bspudp_max_frame -
+           MAC_PREAMBLE_CHECKSUM_SIZE - 
+           MAC_HEADER_SIZE - 
+           UDPIP_OR_3COM(IP_HEADER_SIZE,0) -
+           UDPIP_OR_3COM(UDP_HEADER_SIZE,0) -
+           sizeof(bspudp_msghdr_t));
+   }
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Setting environment variables before process startup}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bspudp_env(int request_procs, char *spmd_prog)
+   {
+   int i;
+  
+   char *env_val;
+   char env_set[BSPTCP_STR_LEN];
+
+   /* the stats function bspudp_dump_stats requires 2p buffers on
+      process zero. */
+   GUARDNZ(bspudp_min_packets>2*request_procs,
+	   "bspudp_env( <2p message buffers. See bspcc -help)");
+
+   sprintf(env_set,"bspudp_env( <%d message buffers. See bspcc -help)",
+           BSPUDP_SEND_HIGHWATER);
+   GUARDNZ(bspudp_min_packets>BSPUDP_SEND_HIGHWATER,env_set);
+   /* get the BSP pid of the current process */
+   if (bspudp_pid<0) 
+     {
+     env_val = getenv("BSPTCP_PID");
+     if (env_val) sscanf(env_val,"%d",&bspudp_pid);
+     if (bspudp_pid<0) bspudp_pid = 0;
+     }
+   sprintf(env_set,"%d",bspudp_pid);
+   GUARDZ(setenv("BSPTCP_PID",env_set,1),"setenv()");
+\end{code}
+
+The following environment variables are only required for the BSP pid
+0 process and only the BSP pid 0 process forks the master process.
+
+\begin{code}
+   if (!bspudp_pid)
+      {
+      /* set the BSP daemon port number */
+      sprintf(env_set,"%d",BSPTCP_LPORT);
+      GUARDZ(setenv("BSPTCP_PORTNUMBER",env_set,0),"setenv()");
+
+      /* set the BSP daemon hosts file ame */
+      sprintf(env_set,"%s/.bsptcphosts",getenv("HOME"));
+      GUARDZ(setenv("BSPTCP_HOSTNAMES",env_set,0),"setenv()");
+ 
+      /* name of the SPMD program */
+      GUARDZ(setenv("BSPTCP_SPMD_PROGRAM",spmd_prog,1),"setenv()");
+
+      /* set the number of BSP processors requested */
+      sprintf(env_set,"%d",request_procs);
+      GUARDZ(setenv("BSPTCP_NPROCS",env_set,1),"setenv()");
+
+      /* set if terminal IO should have pid banners */
+      env_val = getenv("BSP_SPLITOUTPUT");
+      if (env_val) sprintf(env_set,"%d",atoi(env_val));
+      else sprintf(env_set,"%d",0);
+      GUARDZ(setenv("BSP_SPLITOUTPUT",env_set,1),"setenv()");
+
+      /* create a pipe pair for master to communicate with BSP pid 0 */
+      GUARDZ(pipe(bspudp_ucpipe),"pipe(ucpipe)");
+      GUARDZ(pipe(bspudp_dcpipe),"pipe(dcpipe)");
+
+      /* create a pipe pair for stdout and stderr data to go via master */
+      GUARDZ(pipe(bspudp_spmdout),"pipe(spmd_stdout)");
+      GUARDZ(pipe(bspudp_spmderr),"pipe(spmd_stderr)");
+      
+      /* set fd of pipe so that master can communicate with BSP pid 0 */
+      sprintf(env_set,"%d",bspudp_ucpipe[0]);
+      GUARDZ(setenv("BSPTCP_CPIPE_READ",env_set,1),"setenv()");
+      sprintf(env_set,"%d",bspudp_dcpipe[1]);
+      GUARDZ(setenv("BSPTCP_CPIPE_WRITE",env_set,1),"setenv()");
+
+      /* set env vars for master to receive stdout and stderr data */
+      sprintf(env_set,"%d",bspudp_spmdout[0]);
+      GUARDZ(setenv("BSPTCP_SPMD_STDOUT",env_set,1),"setenv(SPMD_STDOUT)");
+      sprintf(env_set,"%d",bspudp_spmderr[0]);
+      GUARDZ(setenv("BSPTCP_SPMD_STDERR",env_set,1),"setenv(SPMD_STDERR)");
+      }
+   } /* bspudp_env */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Spawn processes on remote nodes}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bspudp_init(int *setup_procs)
+   {
+   int i;
+
+   char *env_val;
+   char env_set[BSPTCP_STR_LEN];
+   char *master_env[2];
+
+   bsphost_t *host_entry;
+   bsptcp_msghdr_t msghdr;         /* message header */ 
+   bspudp_buff_t *buffhdr;         /* buffer header pointer */
+
+#ifndef MPASS_3C905B
+   struct sockaddr_in dsockaddr;   /* data socket address */
+#endif
+   int fd_count;                   /* number of ready fds */
+   struct timeval polltime;        /* select timeout vallue */
+   struct linger linger;           /* linger on close if data present */
+   int fd_flags;                   /* descriptor flags */
+   int optval,optlen;              /* socket option value */
+
+   int dnamelen;                   /* length of data socket address */
+
+   char hostname[BSPTCP_STR_LEN];  /* hostname from gethostname() */
+   struct hostent *host;           /* netdb format host info */
+   int fork_pid;                   /* return from fork() call */
+
+   struct sigaction sigsockio;     /* action for socket fd ready */
+
+   /* get the BSP pid of the current process - only guaranteed to be set for
+      BSP pid 0 process (by bspudp_env()). */
+   bspudp_pid = 0;
+   env_val = getenv("BSPTCP_PID");
+   if (env_val)
+      sscanf(env_val,"%d",&bspudp_pid);
+
+   if (!bspudp_pid)
+      {
+      /* fork and initiate the master process */
+      if ((fork_pid = fork()) > 0) 
+         {
+         /* set the pid of the BSP pid zero process */
+         sprintf(env_set,"%d",fork_pid);
+         GUARDZ(setenv("BSPTCP_BSPPID0PID",env_set,1),"setenv()");
+
+         /* close unwanted pipe ends */
+         close(bspudp_ucpipe[1]);
+         close(bspudp_dcpipe[0]);
+         close(bspudp_spmdout[1]);
+         close(bspudp_spmderr[1]);
+
+         master_env[0] = BSPTCP_MASTER_PATH;
+         master_env[1] = NULL;
+#ifdef DEBUG
+         printf("BSP/UDP Library: about to start master.\n"); fflush(stdout);
+#endif
+         execvp(master_env[0],master_env);
+         perror("BSP/UDP Library: master not started");
+         ABORT_EXIT(1);
+         }
+      GUARDNN(fork_pid,"fork()");
+
+      /* BSP pid 0: close unwanted pipe ends */
+      close(bspudp_ucpipe[0]);
+      close(bspudp_dcpipe[1]);
+      close(bspudp_spmdout[0]);
+      close(bspudp_spmderr[0]);
+\end{code}
+
+BSP pid 0: get the number of processors actually in use from master
+and any environment variables that were specified in the hostname
+file.
+\begin{code}
+      do {
+         char envstr[BSPTCP_BUFF_LEN];
+
+         GUARDNN(read(bspudp_dcpipe[0],&msghdr,sizeof(msghdr)),
+            "read(dcpipe[0])");
+         if (msghdr.msgtype == BSPTCP_MSG_ENVSET)
+            {
+            GUARDNN(read(bspudp_dcpipe[0],envstr,msghdr.msglen),
+               "read(dcpip[0])");
+            envstr[msghdr.msglen] = 0;
+            setenv(envstr,envstr+strlen(envstr)+1,1);
+            }
+         }
+      while (msghdr.msgtype == BSPTCP_MSG_ENVSET);
+      GUARDNN(read(bspudp_dcpipe[0],&bspudp_nprocs,sizeof(bspudp_nprocs)),
+             "read(dcpipe[0])");
+      sprintf(env_set,"%d",bspudp_nprocs);
+      GUARDZ(setenv("BSPTCP_NPROCS",env_set,1),"setenv()");
+
+      /* cut over stdout and stderr to master process */
+      GUARDNN(dup2(bspudp_spmdout[1],1),"dup2(spmd_stdout)");
+      GUARDNN(dup2(bspudp_spmderr[1],2),"dup2(spmd_stderr)");
+      close(bspudp_spmdout[1]);
+      close(bspudp_spmderr[1]);
+      }
+   else
+      { /* Nonzero BSP pids: get values set up by the slave process */
+	
+      GUARDEQ(sscanf(GUARDNZP(getenv("BSPTCP_NPROCS"),
+          "getenv(NPROCS)"),"%d",&bspudp_nprocs),1,"sscanf()");
+      GUARDEQ(sscanf(GUARDNZP(getenv("BSPTCP_CPIPE_READ"),
+          "getenv(CPIPE_READ)"),"%d",&bspudp_dcpipe[0]),1,"sscanf()");
+      GUARDEQ(sscanf(GUARDNZP(getenv("BSPTCP_CPIPE_WRITE"),
+          "getenv(CPIPE_WRITE)"),"%d",&bspudp_ucpipe[1]),1,"sscanf()");
+      }
+
+   /* find the local machines host name (for incomming connects) */
+   if (env_val = getenv("BSPTCP_ADAPTER"))
+      strcpy(hostname,env_val);
+   else
+      GUARDZ(gethostname(hostname,sizeof(hostname)),"gethostname()");
+   host = GUARDNZP(gethostbyname(hostname),"host name lookup");
+
+#ifdef MPASS_3C905B
+   env_val = GUARDNZP(getenv("BSPTCP_MACADDR"),
+	              "bspkern_connect(no macaddr in host file)");
+   GUARDNZ(strtomacaddr(&bspudp_smac,env_val),
+	   "macaddr(ff:ff:ff:ff:ff:ff) has incorrect format");
+#endif
+\end{code}
+
+%%%%%%%%%%%%
+\subsection{Connect to BSP kernel module}
+%%%%%%%%%%%%
+
+\begin{code}
+#ifdef MPASS_3C905B
+   bspudp_dsock=GUARDNN(bspkern_connect(bspudp_pid,
+					bspudp_smac,
+					bspudp_nprocs,
+		      	   		KERNEL_BUFFER_SPACE,
+		       	   		bspudp_max_frame,
+	                   		bspudp_min_packets),
+	   	        "connecting to NIC");
+#ifdef DEBUG
+   fprintf(stderr,"BSP/UDP Library: connected to kernel module\n");
+   fflush(stderr);
+#endif 
+#endif
+\end{code}
+
+Each of the processor sets up a data socket and protocol structures
+for each of the bspudp_nprocs-1 processors.
+
+\begin{code}
+   bspudp_anchor = GUARDNZP(malloc_shared(sizeof(bspudp_anch_t)),
+			    "malloc_shared(bspudp_anchor)");
+#ifdef DEBUG
+   fprintf(stderr,"BSP/UDP Library: anchor at 0x%x\n",bspudp_anchor);
+   fflush(stderr);
+#endif
+   memset(bspudp_anchor,0,sizeof(bspudp_anch_t));
+   bspudp_anchor->glock_q=1;
+		       
+   memset(&bspudp_anchor->stats,0,sizeof(bspudp_stat_t));
+   if (bspudp_sess==NULL)
+      bspudp_sess   =GUARDNZP(malloc_shared(sizeof(bspudp_sess_t)*
+			      bspudp_nprocs),
+         	              "malloc_shared(bspudp_sess)");
+#ifdef DEBUG
+   fprintf(stderr,"BSP/UDP Library: session at 0x%x\n",bspudp_sess);
+   fflush(stderr);
+#endif
+   memset(bspudp_sess,0,sizeof(bspudp_sess_t)*bspudp_nprocs);
+
+   for (i = 0; i < bspudp_nprocs; i++)
+      {
+      bspudp_sess[i].pid           = i;
+      bspudp_sess[i].state         = BSPUDP_STATE_ACTIVE;
+      bspudp_sess[i].seq_in        = 1;
+      bspudp_sess[i].seq_out       = 1;
+      bspudp_sess[i].send.flags    = QUEUE_ORDERED;
+      bspudp_sess[i].send.pid      = i;
+      bspudp_sess[i].send.headtype = -1;
+      bspudp_sess[i].recv.flags    = QUEUE_ORDDEQ+QUEUE_ORDERED;
+      bspudp_sess[i].recv.pid      = i;
+      bspudp_sess[i].recv.headtype = -1;
+      }
+\end{code}
+
+
+%%%%%%%%%%%%
+\subsection{Create UDP/IP sockets and set options}
+%%%%%%%%%%%%
+
+\begin{code}
+#ifndef MPASS_3C905B
+   bspudp_dsock = GUARDNN(socket(AF_INET,SOCK_DGRAM,0),"socket()");
+   memset(&dsockaddr,0,sizeof(struct sockaddr));
+   dsockaddr.sin_family = AF_INET;
+   dsockaddr.sin_port = 0;
+   memcpy(&dsockaddr.sin_addr.s_addr,host->h_addr_list[0],
+          sizeof(dsockaddr.sin_addr.s_addr));
+   GUARDZ(bind(bspudp_dsock,(struct sockaddr *)&dsockaddr,
+      sizeof(dsockaddr)),"bind()");
+   dnamelen = sizeof(dsockaddr);
+   GUARDZ(getsockname(bspudp_dsock,(struct sockaddr *)&dsockaddr,&dnamelen),
+         "getsockname()");
+
+  /*
+   * The data socket should linger on close if data present for sending:
+   */
+
+   linger.l_onoff = 1;
+   linger.l_linger = BSPTCP_LINGER_INT;
+   GUARDZ(setsockopt(bspudp_dsock,SOL_SOCKET,SO_LINGER,(char *)&linger,
+      sizeof(linger)),"setsockopt(SO_LINGER)");
+
+   /*
+    * If possible, the data must be considered interactive and be 
+    * subjected to minimum delays:
+    */
+
+#ifdef IP_TOS
+#ifdef IP_IPTOS_LOWDELAY
+   optval = IP_IPTOS_LOWDELAY;
+   GUARDZ(setsockopt(bspudp_dsock,SOL_UDP,IP_TOS,(char *)&optval,
+      sizeof(optval)),"setsockopt(IP_TOS)");
+   optlen = sizeof(optval);
+   GUARDZ(getsockopt(bspudp_dsock,SOL_UDP,IP_TOS,(char *)&optval,&optlen),
+         "getsockopt(IP_TOS)");
+   if (!optlen || optval != IP_IPTOS_LOWDELAY)
+      {
+      fprintf(stderr,"BSP/UDP Library: IP_TOS=IP_IPTOS_LOWDELAY not set.\n");
+      fprintf(stderr,"BSP/UDP Library: optlen = %d, opval = %d\n",
+         optlen,optval);
+      fflush(stderr); 
+      }
+#endif /* IPTOS_LOWDELAY */
+#endif /* IP_TOS */
+
+#ifdef BSPTCP_SNDBUF
+   optval = bspudp_send_bufsize*bspudp_nprocs;
+   GUARDZ(setsockopt(bsp_udp_dsock,SOL_SOCKET,SO_SNDBUF,(char *)&optval,
+      sizeof(optval)),"setsockopt(SO_SNDBUF)");
+   optlen=sizeof(optval);
+   GUARDZ(getsockopt(bspudp_dsock[msghdr.msgspid],
+      SOL_SOCKET,SO_SNDBUF,(char *)&optval,&optlen),
+         "getsockopt(SO_SNDBUF)");       
+   if (!optlen || (optval != bspudp_send_bufsize)) 
+     {
+     fprintf(stderr,"BSP/UDP Library: SO_SNDBUF not set correctly. "
+         "Expected %d, got %d\n",bspudp_send_bufsize,optval);
+     }
+#endif
+
+#ifdef BSPTCP_RCVBUF
+   optval = bspudp_recv_bufsize*bspudp_nprocs;
+   GUARDZ(setsockopt(bspudp_dsock,
+      SOL_SOCKET,SO_RCVBUF,(char *)&optval,sizeof(optval)),
+      "setsockopt(SO_RCVBUF)");
+   optlen=sizeof(optval);
+   GUARDZ(getsockopt(bspudp_dsock[msghdr.msgspid],
+      SOL_SOCKET,SO_RCVBUF,(char *)&optval,&optlen),
+      "getsockopt(SO_RCVBUF)");       
+   if (!optlen || (optval != bspudp_recv_bufsize)) 
+     {
+     fprintf(stderr,"BSP/UDP Library: SO_RCVBUF not set correctly. "
+             "Expected %d, got %d\n",bspudp_recv_bufsize,optval);
+     }
+#endif
+#endif /* !MPASS_3C905B */
+\end{code}
+
+%%%%%%%%%%%%
+\subsection{Inform all other processes of this processes binding}
+%%%%%%%%%%%%
+\begin{code}
+#ifdef MPASS_3C905B
+   memcpy(env_set,&bspudp_smac,sizeof(bspeth_macaddr_t));
+   memcpy(env_set+sizeof(bspeth_macaddr_t),hostname,1+strlen(hostname));
+   dnamelen = sizeof(bspeth_macaddr_t)+1+strlen(hostname);
+#ifdef DEBUG
+   fprintf(stderr,"BSP/UDP Library: bcast mac address \n");
+   fflush(stderr);
+#endif
+#endif
+   for (i = 0; i < bspudp_nprocs; i++)
+      if (i != bspudp_pid)
+         {
+         msghdr.msgtype = BSPTCP_MSG_CDATA;
+         msghdr.msglen  = dnamelen;
+         msghdr.msgspid = bspudp_pid;
+         msghdr.msgdpid = i;
+         GUARDNN(write(bspudp_ucpipe[1],&msghdr,sizeof(msghdr)),
+            "write(ucpipe)");
+         GUARDNN(write(bspudp_ucpipe[1],
+	         UDPIP_OR_3COM(&dsockaddr,&env_set),
+	         dnamelen),
+            "write(ucpipe)");
+         }
+
+   /*
+    * Get the sockets bound to by all the other processors:
+    */
+#ifdef MPASS_3C905B
+   bspudp_sess[bspudp_pid].macaddr = bspudp_smac;
+   strcpy(bspudp_sess[bspudp_pid].hostname,hostname);
+#endif
+   for (i = 0; i < bspudp_nprocs-1; i++)
+      {
+      GUARDEQ(read(bspudp_dcpipe[0],&msghdr,sizeof(msghdr)),
+         sizeof(msghdr),"read(dcpipe)");
+      GUARDEQ(read(bspudp_dcpipe[0],
+		   UDPIP_OR_3COM(&bspudp_sess[msghdr.msgspid].peer,env_set),
+		   msghdr.msglen),
+	      msghdr.msglen,"read(dcpipe)");
+#ifdef MPASS_3C905B
+#ifdef DEBUG
+      fprintf(stderr,"BSP/UDP Library: recv %d bytes mac address from %d\n",
+	      msghdr.msglen,msghdr.msgspid);
+      fflush(stderr);
+#endif
+      memcpy(&bspudp_sess[msghdr.msgspid].macaddr,env_set,
+	     sizeof(bspeth_macaddr_t));
+      memcpy(&bspudp_sess[msghdr.msgspid].hostname,
+	     env_set+sizeof(bspeth_macaddr_t),
+             msghdr.msglen-sizeof(bspeth_macaddr_t));
+#else
+      bspudp_sess[msghdr.msgspid].peer_len = msghdr.msglen;
+#endif
+      }
+
+   bspudp_active_nprocs=bspudp_nprocs;
+   *setup_procs = bspudp_nprocs;   /* number of BSP processors initialised */
+#ifdef BSPTCP_TRACE
+   bspudp_trace_file=fopen("/tmp/bsptrace","w");
+   GUARDNZP(bspudp_trace_file,"fopen(unable to open trace file)");
+#endif
+\end{code}
+
+%%%%%%%%%%%%
+\subsection{Allocate trace buffer}
+%%%%%%%%%%%%
+\begin{code}
+#if defined(MPASS_3C905B) && defined(BSPUDP_MSC_TRACE)
+   msc_open();
+   bspudp_anchor->trace_offset= 0;
+   bspudp_anchor->trace_len   = 8192;
+   bspudp_anchor->vtrace_buff 
+      = GUARDNZP(malloc_shared(bspudp_anchor->trace_len),
+		 "malloc_shared(failed for trace buffer)");
+#endif
+\end{code}
+
+
+%%%%%%%%%%%%
+\subsection{ Allocate send desciptors}
+%%%%%%%%%%%%
+\begin{code}
+#if defined(MPASS_3C905B)
+      bspudp_anchor->send_dpd_size = MAX_SEND_DPDS;
+      bspudp_anchor->send_dpds
+         = GUARDNZP(malloc_shared(bspudp_anchor->send_dpd_size*
+				  sizeof(bspeth_dpd_t)),
+		    "malloc_shared(failed for send DPDs)");   
+#endif  
+\end{code}
+
+%%%%%%%%%%%%
+\subsection{ Allocate the buffer pool
+%%%%%%%%%%%%
+\begin{code}
+   if (bspudp_anchor->freeq.head==NULL)
+      {
+      bspudp_anchor->freeq.flags = 0;
+      bspudp_anchor->freeq.head = NULL;
+      bspudp_anchor->freeq.tail = NULL;
+      bspudp_anchor->freeq.high_in_seq = 0;
+      bspudp_anchor->freeq.highest_seen = 0;
+      bspudp_anchor->freeq.pid = -1;
+      
+#ifndef MPASS_3C905B
+      for (i = 0; i < bspudp_min_packets; i++)
+         {
+         buffhdr        = GUARDNZP(malloc(sizeof(bspudp_buff_t)),
+				    "malloc(buffer header)");
+	 buffhdr->buffer= GUARDNZP(malloc(bspudp_max_frame-
+					  sizeof(bspudp_msghdr_t)),
+				   "malloc(buffer data)"); 
+         enqueue_freeq(buffhdr);
+         } 
+#else
+      /* Allocate as many packets as possible */
+      while (buffhdr = bspkern_buffer() )
+         {
+	 enqueue_freeq(buffhdr);
+         }
+#endif
+
+      for(i=0; i<MAX_CONTROL_PACKETS;i++)
+         {
+         dequeue_freeq(buffhdr);
+         bspudp_anchor->control_buff[i]=buffhdr->buffer;
+         }
+      bspudp_anchor->control_next=0;
+      }
+  /*
+   * Prepare environment for receiving and sending socket data asynchronously:
+   */
+
+   /* the global lock (bspudp_glock_q) is intialised to locked */
+   bspudp_anchor->llock_q = 0;
+
+#ifndef MPASS_3C905B
+   memset(&sigsockio,0,sizeof(sigsockio));
+   sigsockio.sa_handler = socketio;
+#ifdef SA_RESTART
+   sigsockio.sa_flags = SA_RESTART;
+#endif
+   GUARDZ(sigaction(SIGIO,&sigsockio,NULL),"sigaction(SIGIO)");
+   GUARDNN(fd_flags = fcntl(bspudp_dsock,F_GETFL,0),"fcntl(F_GETFL)");
+   fd_flags |= O_NONBLOCK+FASYNC; 
+   GUARDNN(fcntl(bspudp_dsock,F_SETFL,fd_flags),"fcntl(dsock,NONBLOCK+ASYNC)");
+   GUARDNN(fcntl(bspudp_dsock,F_SETOWN,getpid()),"fcntl(dsock,SETOWN)");
+
+#endif
+   bspudp_anchor->pendingack_max=0;
+   bspudp_anchor->pendingack_min=bspudp_nprocs;
+   bspudp_anchor->glock_q = 0;
+   
+   if (getenv("BSPTCP_HOSTNAMES")) {
+     GUARDNZP(yyin = fopen(getenv("BSPTCP_HOSTNAMES"),"r"),
+	      "fopen(.bsptcphostlist)");
+     yyout = stderr;
+#ifdef YY_NEW_FILE
+     YY_NEW_FILE;
+#endif
+     GUARDZ(yyparse(),"yyparse(syntax error in .bsptcphostlist)");
+   } 
+   
+#ifdef DEBUG
+      fprintf(stderr,"BSP/UDP Library: parsed .bsptcphostlist\n");
+      fflush(stderr);
+#endif
+
+   host = GUARDNZP(gethostbyname(hostname),"host name lookup");
+   for (host_entry = bsptcp_host_list; host_entry; 
+        host_entry = host_entry->link)
+      if (!strcmp(host->h_name,host_entry->name)) host_entry->bspactive=1;
+
+ 
+   for(i=0;i<bspudp_nprocs;i++) {
+     if (i!=bspudp_pid) {
+#ifndef MPASS_3C905B
+       host = GUARDNZP(gethostbyaddr(
+                          (char*)&bspudp_sess[i].peer.sin_addr.s_addr,
+			  sizeof(bspudp_sess[i].peer.sin_addr.s_addr),
+			  AF_INET),
+		       "gethostbyaddr()");
+#endif
+       for (host_entry = bsptcp_host_list; host_entry; 
+	    host_entry = host_entry->link)
+	 if (!strcmp(UDPIP_OR_3COM(host->h_name,bspudp_sess[i].hostname),
+                     host_entry->name)) host_entry->bspactive=1;
+     }
+   }
+
+#ifdef MPASS_3C905B
+   lock_queue();
+   bspudp_min_packets = queue_size(bspudp_anchor->freeq);
+   GUARDNN(bspkern_initfinish(),"bspkern_initfinish()");
+   bspudp_min_packets = queue_size(bspudp_anchor->freeq);
+   unlock_queue();
+#ifdef DEBUG
+   fprintf(stderr,"BSP/UDP Library: allocated %d buffers\n",
+	   bspudp_min_packets);
+   fflush(stderr);
+#endif
+#endif
+#ifdef DEBUG
+   printf("BSP UDP/IP Sleeping for breakpoint (%d of %d procs)\n",
+	  bspudp_pid,bspudp_nprocs);
+   fflush(stdout);
+   /* sleep(20); */
+   printf("BSP UDP/IP Started %d of %d processors\n",bspudp_pid,bspudp_nprocs);
+   fflush(stdout);
+#endif
+   /* Initialise random number generator */
+   bspudp_srand(bspudp_pid*1234567891);
+   socketio(0);
+
+   } /* bspudp_init */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Non-blocking send}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+The function returns a boolean that determines if the
+initiation of the send was successful. If false is returned, then the
+caller \emph{must} perform a receive to drain the queues. If this is
+not performed, then the protocol will deadlock.
+\begin{code}
+int bspudp_nonblock_send(char* message,int size,int to,int type,
+			 int iscontrol,int forceack)
+   {
+   bspudp_buff_t *buff;
+   bspudp_buff_t *this;
+   int i,nbytes,free_buffers;
+
+   bspudp_skipwaitsend=0;
+   GUARDNZ(to<bspudp_nprocs,"bspudp_nonblock_send to non-existent process");
+   GUARDEQ(bspudp_sess[to].state,BSPUDP_STATE_ACTIVE,
+      "bspudp_nonblock_send(session not active");
+
+   dequeue_freeq(buff);
+   if (!buff || 
+       (queue_size(bspudp_anchor->freeq) < BSPUDP_SEND_LOWWATER))
+      {
+      if (buff) enqueue_freeq(buff);
+      flushpendingacks();
+      return 0;
+      }
+\end{code}
+
+\begin{figure}
+
+\resizebox{0.5\textwidth}{!}{!\includegraphics{freebuffs.eps}
+\caption{Worst case time for a roundtrip packet}
+\end{figure}
+
+In the worst case, an acknowledgment will take the following time to
+return to a processor (the extra $2s$ is because a NIC may be processing another packet before sending the packet in question):
+
+\begin{equation}
+\mathit{time\ delay} = 2s(1+a) + r
+\end{equation}
+
+In the worst case, a single small packet can be ejected every $l \mu
+s$ (where $l$ is the send latency or gap between succesive send
+calls), and similarly, a single packet can be received in the same
+time. Therefore the number of free buffers that are required to enable
+packets to enter/leave a process during the time delay waiting for an
+acknowlegement is:
+
+\begin{equation}
+\mathit{packets} = \frac{4s(1+a) + 2r}{l}
+\end{equation}
+
+\begin{code}
+   free_buffers = 4*bspudp_slot_size_usecs*(1+bspudp_active_nprocs) +
+                  2*bspudp_roundtrip_usecs;
+   if (bspudp_sendlatency_usecs) 
+      free_buffers = free_buffers/bspudp_sendlatency_usecs;
+
+   free_buffers += BSPUDP_SEND_LOWWATER;
+\end{code}
+
+\begin{code}  
+   if (queue_size(bspudp_anchor->freeq)<free_buffers)
+      {
+#ifdef MPASS_3C905B
+      buff->buffer->msgprot = bspkern_markdata_withack()?
+                                 BSPUDP_PROT_SDATA:BSPUDP_PROT_ADATA;
+#else
+      buff->buffer->msgprot = BSPUDP_PROT_ADATA;
+#endif       
+      }        
+   else
+      {
+      buff->buffer->msgprot = forceack?BSPUDP_PROT_ADATA:BSPUDP_PROT_SDATA;
+      }
+   buff->buffer->msgtype = type;
+   buff->buffer->msglen  = size;
+   buff->buffer->msgspid = bspudp_pid;
+   buff->buffer->msgdpid = to;
+   buff->buffer->msgseq  = bspudp_sess[to].seq_out++;
+   buff->buffer->msgack  = recvq_high_in_seq(to);
+   buff->buffer->msghigh = recvq_highest_seen(to);
+
+   bspudp_sess[to].last_ack = buff->buffer->msgack;  
+#ifdef BSPTCP_TRACE
+   buff->buffer->msgid   = bspudp_trace++;
+#endif
+
+   /* if recovery can be triggered then check for holes and resend */
+   if (bspudp_sess[to].acked >= bspudp_sess[to].waitseq)
+      if (bspudp_sess[to].high > bspudp_sess[to].acked)
+         {
+         lock_queue();
+         for (this = bspudp_sess[to].send.head; this; this = this->link)
+            if (this->buffer->msgseq > bspudp_sess[to].acked)
+               {
+               if (this->buffer->msgseq<bspudp_sess[to].high &&
+                   UDPIP_OR_3COM(1,bspkern_pktsent(this->buffer)))
+                  {
+                  wait_free_slot_with_high_probability(iscontrol,size);
+                  this->buffer->msgack  = buff->buffer->msgack;
+                  this->buffer->msghigh = buff->buffer->msghigh;
+                  this->buffer->msgprot = BSPUDP_PROT_RDATA;
+
+                  nbytes = sendto(bspudp_dsock,(char*)this->buffer,
+                      sizeof(bspudp_msghdr_t)+this->buffer->msglen-
+		      sizeof(bspudp_payload_t),0,
+                      (struct sockaddr *)&bspudp_sess[to].peer,
+                      bspudp_sess[to].peer_len);
+		  bspudp_sess[to].snd_retransmits++;
+                  if (nbytes < 0 && errno != EAGAIN 
+                     && errno != EINTR && errno != ECONNREFUSED)
+                  GUARDNN(errno,"send(nonblock-resend)");
+                  if (nbytes < 0 && errno == ECONNREFUSED)
+                     bspudp_sess[to].state = BSPUDP_STATE_INACTIVE;
+                  }
+               else
+                  break;
+               }
+         bspudp_sess[to].waitseq = buff->buffer->msgseq;
+         unlock_queue();
+         }
+       
+   memcpy(buff->buffer->data,message,size);
+#ifdef MPASS_3C905B
+   if (!iscontrol) wait_free_slot_with_high_probability(iscontrol,size);
+#else
+   wait_free_slot_with_high_probability(iscontrol,size);
+#endif
+   nbytes = sendto(bspudp_dsock,(char*)buff->buffer,
+                   sizeof(bspudp_msghdr_t)+size-sizeof(bspudp_payload_t),0,
+                   (struct sockaddr *)&bspudp_sess[to].peer,
+                   bspudp_sess[to].peer_len);
+   enqueue(&bspudp_sess[to].send,buff);
+
+   if (nbytes < 0 && 
+       errno != EAGAIN && errno != EINTR && errno != ECONNREFUSED)
+     GUARDNN(errno,"send(nonblock)");
+   if (nbytes < 0 && errno == ECONNREFUSED)
+      bspudp_sess[to].state = BSPUDP_STATE_INACTIVE;
+
+   bspudp_sess[to].ack_pending=0;
+   flushpendingacks();
+#ifdef BSPTCP_TRACE
+   fprintf(bspudp_trace_file,"On %d send(%d,%d,%d) id=%d %s\n",
+           bspudp_pid,to,type,size,bspudp_trace-1,
+           bspudp_trace_fdata(size,message));
+   fflush(bspudp_trace_file);
+#endif
+   return 1;
+   } /* bspudp_nonblock_send */
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Blocking receive}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bspudp_block_recv(char* msg,int size,int *from,int *type,
+                       int* nbytes,int iscontrol)
+   {
+   bspudp_buff_t *buff;
+   int tp;
+
+   if (*from<0)
+      bspudp_probe(from,type,1,0,iscontrol);
+   else
+      {
+      tp = queue_type(bspudp_sess[*from].recv);
+      if ((tp <0) || (*type!=tp))
+         bspudp_probe(from,type,1,0,iscontrol);
+      }
+   GUARDNZP(buff = dequeue(&bspudp_sess[*from].recv),
+      "dequeue(should be failsafe)");
+
+   GUARDEQ(buff->buffer->msgtype,*type,"bspudp_block_recv(dequeue)");
+   if (buff->buffer->msglen > size)
+      *nbytes = size;
+   else
+      *nbytes = buff->buffer->msglen;
+
+   memcpy(msg,buff->buffer->data,*nbytes);
+
+   enqueue_freeq(buff);
+
+#ifdef BSPTCP_TRACE
+   fprintf(bspudp_trace_file,"On %d recv(%d,%d,%d) id=%d %s\n",
+           bspudp_pid,*from,*type,*nbytes,buff->buffer->msgid,
+           bspudp_trace_fdata(*nbytes,msg));
+   fflush(bspudp_trace_file);
+#endif
+   } /* bspudp_block_recv */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Wait for any posted sends to drain from the sending process}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bspudp_wait_sends(void)
+   {
+   int i;
+   int rc;
+   int ack;
+   int high;
+   int send_pkts;
+   bspudp_msghdr_t *msghdr;
+   bspudp_buff_t *this;
+   int unacked;
+   int retries;
+   int len;
+   int num_procs;
+   int min_pkts;
+
+   int fd_count;
+   struct timeval polltime;
+
+   /* Only clear send queue if there are few buffers */
+   if (queue_size(bspudp_anchor->freeq) >= BSPUDP_SEND_HIGHWATER)
+      return;
+
+   if (bspudp_active_nprocs)
+      num_procs = bspudp_active_nprocs;
+   else
+      num_procs = bspudp_nprocs;
+
+   min_pkts = bspudp_min_packets/(2*bspudp_nprocs);
+   for (i = 0; i < bspudp_nprocs; i++)
+      {
+      if (i != bspudp_pid)
+         {
+         if (queue_type(bspudp_sess[i].recv)<0 && 
+             queue_size(bspudp_sess[i].recv)>min_pkts)
+            prod_source(i,0);
+         else
+            if (queue_size(bspudp_sess[i].send)>min_pkts)
+               prod_source(i,1);
+         }
+       }
+
+#ifndef MPASS_3C905B
+   FD_ZERO(&bspudp_readfd);
+   FD_ZERO(&bspudp_exceptfd);
+   FD_SET(bspudp_dsock,&bspudp_readfd);
+   FD_SET(bspudp_dsock,&bspudp_exceptfd);
+#endif
+   polltime.tv_usec = 2*bspudp_slot_size_usecs*(1+num_procs) + 
+	              bspudp_roundtrip_usecs;
+   polltime.tv_sec = polltime.tv_usec/1000000;
+   polltime.tv_usec = polltime.tv_usec%1000000;
+   fd_count = select(bspudp_dsock+1,&bspudp_readfd,NULL,
+                     &bspudp_exceptfd,&polltime); 
+   } /* bspudp_wait_sends */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Predicate to check if a message has come into a process}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+int bspudp_probe(int *pid, int* type, int block, int usec_wait,int iscontrol)
+   {
+   int i;
+   int rc;
+   int tp;
+   int fd_count=0;
+   struct timeval polltime;
+   struct timeval marktime;
+   struct timeval waittime;
+   int slept_usecs;
+   int timeout_factor, timeouts=0;
+   int num_procs;
+   bspudp_sess_t *pid_sess;
+
+   if (bspudp_active_nprocs)
+      num_procs = bspudp_active_nprocs;
+   else
+      num_procs = bspudp_nprocs;
+
+   if (*pid>=0)
+      {
+      pid_sess = &bspudp_sess[*pid];
+      if (block) pid_sess->stem_flow=0;
+      }
+   do { 
+      if (*pid >= 0)
+         {
+         tp = queue_type(pid_sess->recv);
+         if ((tp >= 0) && (*type==tp))
+            {
+            if (timeouts>0) pid_sess->block_recvs++;
+            return 1;
+            }
+         }
+      else
+         for (i = 0; i < bspudp_nprocs; i++) 
+            if (i != bspudp_pid)
+               {
+               tp = queue_type(bspudp_sess[i].recv);
+               if ((tp >= 0) && (*type==tp))
+                  {
+                  *pid = i;
+                  if (timeouts>0) bspudp_sess[i].block_recvs++;
+                  return 1;
+                  }
+               }
+      
+      if (block)
+         {
+	 if (!fd_count) gettimeofday(&marktime,NULL); 
+         if (*pid >= 0)
+            {
+            timeout_factor = 1 << pid_sess->stem_flow;
+	    flushpendingacks();
+	    }
+         else
+            {
+            timeout_factor = 0;
+            for (i = 0; i < bspudp_nprocs; i++)
+               if (i != bspudp_pid && 
+                   bspudp_sess[i].stem_flow > timeout_factor)
+                  timeout_factor = bspudp_sess[i].stem_flow;
+            timeout_factor = 1 << timeout_factor;
+            }
+
+         if (timeout_factor<=0 || timeout_factor > BSPUDP_RECVQ_MAXFACTOR)
+            timeout_factor = BSPUDP_RECVQ_MAXFACTOR;
+        
+         gettimeofday(&waittime,NULL);
+         slept_usecs = 
+            (  (long int)waittime.tv_sec- 
+               (long int)marktime.tv_sec)*1000000+
+            (  (long int)waittime.tv_usec-
+               (long int)marktime.tv_usec);
+
+         polltime.tv_usec = timeout_factor*
+	   (BSPUDP_RECVQ_TIMEOUT*bspudp_slot_size_usecs*num_procs + 
+	    bspudp_roundtrip_usecs); 
+
+         fd_count = 0;
+         if (slept_usecs < polltime.tv_usec)
+            {
+            polltime.tv_usec = polltime.tv_usec-slept_usecs;
+            polltime.tv_sec  = polltime.tv_usec / 1000000; 
+            polltime.tv_usec = polltime.tv_usec % 1000000; 
+	    bspudp_anchor->sigio_called=0;
+#ifndef MPASS_3C905B
+            FD_ZERO(&bspudp_readfd);
+            FD_ZERO(&bspudp_exceptfd);
+            FD_SET(bspudp_dsock,&bspudp_readfd);
+            FD_SET(bspudp_dsock,&bspudp_exceptfd);
+#endif
+            fd_count = select(bspudp_dsock+1,
+               &bspudp_readfd,NULL,&bspudp_exceptfd,&polltime);
+	    timeouts++;
+            if (fd_count < 0 && errno == EINTR)  continue;
+            if (fd_count < 0 && errno == EAGAIN) continue;
+            GUARDNN(fd_count,"select()"); 
+	    if (fd_count>0 && !bspudp_anchor->sigio_called)
+               {
+               bspudp_anchor->stats.sigio_fails++;
+               socketio(0); /* SIGIO not being posted */
+               }
+            }
+         if (!fd_count)  
+            {
+            bspudp_anchor->stats.prtimeouts++;
+            prod_source(*pid,0); 
+            }
+         }	
+      }
+   while (block);
+   return 0;
+   } /* bspudp_probe */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Abort: one process stops all}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bspudp_messg_stopall(void)
+   {
+   bsptcp_msghdr_t msghdr;
+   int sig;
+ 
+   sig = 15; 
+   msghdr.msgtype = BSPTCP_MSG_SIGNAL;
+   msghdr.msglen = sizeof(sig);
+   msghdr.msgspid = bspudp_pid;
+   msghdr.msgdpid = 0;
+   GUARDNN(write(bspudp_ucpipe[1],&msghdr,sizeof(msghdr)),"write(ucpipe[1])");
+   GUARDNN(write(bspudp_ucpipe[1],&sig,sizeof(sig)),"write(ucpipe[1])");
+   read(bspudp_dcpipe[0],&msghdr,sizeof(msghdr));
+   exit(1);
+   } /* bspudp_messg_stopall */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Tidy exit from the message passing system}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bspudp_messg_exit(int status)
+   {
+   int i,j;
+   int src;
+   int rcvstatus;
+   int rcvlen;
+   int type;
+   int from;
+   bsptcp_msghdr_t msghdr;
+   struct timeval time_now;
+
+#ifdef DEBUG
+   fprintf(stderr,"BSP/UDP Library: bspudp_messg_exit(%d)\n",status);
+#endif
+
+   if (bspudp_pid)
+      {
+      while (!bspudp_nonblock_send((char*)&status,sizeof(status),0,
+                                     BSPUDP_MSG_EXIT,1,1))
+	    bspudp_wait_sends();
+      from = 0;
+      type = BSPUDP_MSG_EXITOK;
+      bspudp_block_recv((char*)&rcvstatus,
+                        sizeof(rcvstatus),&from,&type,&rcvlen,0);
+      while (!bspudp_nonblock_send((char*)&status,sizeof(status),0,
+                                     BSPUDP_MSG_EXITGOING,1,1))
+	    bspudp_wait_sends();
+      for (i=0; i<100 ; i++)
+         {
+         /* Wait for EXITGOING to be acked */
+         if (!bspudp_sess[0].send.head) break;
+         gettimeofday(&time_now,NULL);
+         bspnow_usecsleep(5000,&time_now);
+         }
+      }
+   else
+      {
+      for (i = 0; i < bspudp_nprocs; i++)
+         if (i != bspudp_pid && bspudp_sess[i].state == BSPUDP_STATE_ACTIVE)
+            {
+            from = i;
+            type = BSPUDP_MSG_EXIT;
+            bspudp_block_recv((char*)&rcvstatus,
+                              sizeof(rcvstatus),&from,&type,&rcvlen,0);
+            while (!bspudp_nonblock_send((char*)&status,sizeof(status),i,
+                                         BSPUDP_MSG_EXITOK,1,1))
+	       bspudp_wait_sends();
+            }
+      for (i = 0; i < bspudp_nprocs; i++)
+         if (i != bspudp_pid && bspudp_sess[i].state == BSPUDP_STATE_ACTIVE)
+            {
+            for (j = 0; j<100; j++)
+               {
+               prod_source(i,0);
+               if (!bspudp_sess[i].send.head) break;
+               gettimeofday(&time_now,NULL);
+               bspnow_usecsleep(5000,&time_now);
+               }
+            }
+      }
+
+   /* close data socket */
+   if (bspudp_dsock)
+      {
+      close(bspudp_dsock); 
+      bspudp_dsock = 0;
+      }
+
+   /* inform master and/or slave about exit */ 
+   msghdr.msgtype = BSPTCP_MSG_EXIT;
+   msghdr.msgspid = bspudp_pid;
+   msghdr.msgdpid = 0;
+   msghdr.msglen = sizeof(int);
+   GUARDNN(write(bspudp_ucpipe[1],&msghdr,sizeof(msghdr)),"write(ucpipe[1])");
+   GUARDNN(write(bspudp_ucpipe[1],&status,sizeof(int)),"write(ucpipe[1])");
+   read(bspudp_dcpipe[0],&msghdr,sizeof(msghdr));
+   close(bspudp_dcpipe[0]);
+   close(bspudp_ucpipe[1]);
+   } /* bspudp_messg_exit */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%
+\section{Implicit Acknowledgements of messages}
+%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+void bspudp_record_seq(void)
+   {
+   int i;
+
+   for (i = 0; i < bspudp_nprocs; i++)
+      if (i != bspudp_pid)
+         bspudp_sess[i].purge = bspudp_sess[i].seq_out;
+   } /* bspudp_record_seq */
+
+void bspudp_purge_seq(void)
+   {
+   int i;
+   bspudp_buff_t *this;
+   bspudp_buff_t *link;
+
+   lock_queue();
+   for (i = 0; i < bspudp_nprocs; i++)
+      if (i != bspudp_pid)
+	 {
+         bspudp_sess[i].last_npack = bspudp_sess[i].purge;
+         for (this = bspudp_sess[i].send.head; this; this = link)
+            {
+            link = this->link;
+            if (this->buffer->msgseq < bspudp_sess[i].purge)
+               {
+#ifdef MPASS_3C905B
+	       bspkern_pktremove(USER_TO_PHYS(bspudp_msghdr_t,this->buffer));
+#endif
+               bspudp_sess[i].send.head = link;
+	       bspudp_sess[i].send.dequeue_count++;
+               enqueue_freeq(this);
+               bspudp_sess[i].implicits++;
+               }
+            else
+               break;
+            }
+         }
+
+   unlock_queue();
+   } /* bspudp_purge_seq */
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Slotting protocol}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+A process performs a non-blocking send to a remote process, using a
+time slotting algorithm to ensure there is no contention on the
+Ethernet. See the Hill, Donaldson, Skillicorn paper ``\emph{Quality
+versus peak communication performance: from NOWS to the Cray
+T3E.}''. 
+
+\begin{code}
+static void wait_free_slot_with_high_probability(int iscontrol,int size) {
+   static struct timeval polltime, start_cycle={0,0}, time_now;
+   static int old_slotsize=1400, old_active_nprocs=1;
+   int slotsize,delta, wait_time;
+
+   if (bspudp_slot_size_usecs) {
+     delta=0;
+
+     if (bspudp_active_nprocs==1)
+       slotsize=bspudp_sendlatency_usecs;
+
+     else if (iscontrol)
+       slotsize=bspudp_slot_size_usecs*
+	        (size+sizeof(bspudp_msghdr_t)+
+		 UDPIP_OR_3COM(MAC_HEADER_SIZE+IP_HEADER_SIZE,14))/
+	        bspudp_max_frame;
+
+     else
+       slotsize=bspudp_slot_size_usecs;
+
+     gettimeofday(&time_now,NULL);
+     if (!start_cycle.tv_sec) {
+       start_cycle=time_now;   
+     } else {
+        delta=( ((long int)start_cycle.tv_sec)  - 
+                ((long int)time_now.tv_sec))*1000000 + 
+                ((long int)start_cycle.tv_usec) - 
+                ((long int)time_now.tv_usec);
+     }
+     if ((delta+(old_active_nprocs*old_slotsize))<0) {
+       /* If the send has skipped a couple of cycles, then reset the
+	  cycle to be now */
+       start_cycle       = time_now;
+       old_slotsize      = slotsize;
+       old_active_nprocs = bspudp_active_nprocs;
+
+     } else {
+       /* Move to the next cycle */
+       start_cycle.tv_usec+=old_active_nprocs*old_slotsize;
+       if (start_cycle.tv_usec>1000000) {
+          start_cycle.tv_sec++;
+	  start_cycle.tv_usec -= 1000000;
+       }
+
+       old_slotsize      = slotsize;
+       old_active_nprocs = bspudp_active_nprocs;
+       
+       wait_time = 0;
+       if ((bspudp_active_nprocs>1) &&
+           ((delta+((bspudp_active_nprocs-1)*slotsize))>0))
+	   wait_time = ((bspudp_rand())%bspudp_active_nprocs)*slotsize;
+     
+       if (!iscontrol && (wait_time<bspudp_sendlatency_usecs))
+          wait_time = bspudp_sendlatency_usecs;
+       delta += wait_time;
+
+       if (delta>0) bspnow_usecsleep(delta,&time_now);
+     }
+   }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%
+\section{Timeout waiting for message --- prod sender with acknowledgement}
+%%%%%%%%%%%%%%%%%%%%%
+
+If called with \texttt{just\_ack==1} then process \texttt{spid} is
+sent an acknowledgement, and an ack will be expected in return (this
+helps to free elements on the send queue). If \texttt{just\_ack==0},
+then the prod will cause process \texttt{spid} to resend any dropped
+data (which will fill in holes on the receive queue).
+
+
+\begin{code}
+static void prod_source(int spid,int just_ack)
+   {
+   int i;
+   int rc;
+   int compare_next;
+   bspudp_msghdr_t *msghdr;
+
+   if (spid < 0)
+      {
+      for (i = 0; i < bspudp_nprocs; i++)
+         if (i != bspudp_pid)
+            prod_source(i,just_ack);
+      }
+   else
+      {
+      /* Make sure that the signal handler and this process don't 
+         take the same control packet. Use a compare and swap.. */
+      do {
+         compare_next = bspudp_anchor->control_next;
+         bspudp_anchor->control_next=(bspudp_anchor->control_next+1)%
+      			             MAX_CONTROL_PACKETS;
+      } while ((compare_next+1)%MAX_CONTROL_PACKETS != 
+               bspudp_anchor->control_next);
+         
+      msghdr = bspudp_anchor->control_buff[compare_next];
+#ifdef MPASS_3C905B
+      if (bspkern_pktsent(msghdr))
+         {
+#endif 
+         msghdr->msgprot = BSPUDP_PROT_ACK;
+         msghdr->msgtype = 0;
+         msghdr->msglen  = 0;
+         msghdr->msgspid = bspudp_pid;
+         msghdr->msgdpid = spid;
+         msghdr->msgseq  = just_ack?BSPUDP_PROT_ACK:0;
+         msghdr->msgack  = recvq_high_in_seq(spid);
+         msghdr->msghigh = recvq_highest_seen(spid);
+
+         bspudp_sess[spid].last_ack = msghdr->msgack;
+         wait_free_slot_with_high_probability(0,0);
+         rc = sendto(bspudp_dsock,(char*)msghdr,sizeof(bspudp_msghdr_t)-
+		     sizeof(bspudp_payload_t),0,
+                  (struct sockaddr *)&bspudp_sess[spid].peer,
+                  bspudp_sess[spid].peer_len);
+
+         if (just_ack)
+            bspudp_sess[spid].nopiggy++;
+         else
+            bspudp_sess[spid].prodded++;
+#ifndef MPASS_3C905B
+         if (rc < 0 && errno != EAGAIN && errno != EINTR 
+            && errno != ECONNREFUSED)
+            GUARDEQ(errno,EAGAIN,"send-to(prod_source)"); 
+         if (rc < 0 && errno == ECONNREFUSED)
+            bspudp_sess[spid].state = BSPUDP_STATE_INACTIVE;
+#endif
+#ifdef MPASS_3C905B
+         } 
+#endif
+      }
+   } /* prod_source */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Random number generator}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+#define RAND_MULT 1103515245
+#define RAND_ADD 12345
+#define RAND_MASK (0x7FFFFFFF)
+
+void bspudp_srand(int seed) {
+   rand_a = 1;
+   rand_b = 0;
+   rand_x = (rand_a   *seed   + rand_b  ) & RAND_MASK;
+   rand_a = (RAND_MULT*rand_a           ) & RAND_MASK;
+   rand_b = (RAND_MULT*rand_b + RAND_ADD) & RAND_MASK;
+}
+
+int bspudp_rand() {
+   rand_last = rand_x;
+   rand_x    = (rand_a*rand_x + rand_b) & RAND_MASK;
+   return rand_last;
+}
+
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Dump stats}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+void bspudp_dump_stats(FILE *fptr,int unique_msgtype) 
+   {
+   bspudp_sess_t  proc_sess_send, proc_sess_recv;
+   bspudp_stat_t proc_stats;
+
+   int i,snd,recv,recv_bytes;
+   long sent,  sent_dropped, resent, acks, acks_prods, 
+        implicits, recvd,recv_dup, recv_block;
+   long p_sent=0, p_sent_dropped=0, p_resent=0, p_acks=0, 
+        p_acks_prods=0, p_implicits=0, p_recv=0, 
+        p_recv_dup=0, p_recv_block=0;
+
+   long t_sent=0, t_sent_dropped=0, t_resent=0, t_acks=0, 
+        t_acks_prods=0, t_implicits=0, t_recv=0, 
+        t_recv_dup=0, t_recv_block=0;
+
+   /* report on session statistics */
+
+   if (!bspudp_pid)
+      fprintf(fptr,"4) UDP/IP communications layer statistics\n"
+	           "-----------------------------------------\n\n"
+                   "   %d send and receive buffers\n",bspudp_min_packets);
+
+   for (snd = 0; snd < bspudp_nprocs; snd++)
+      {
+      if (bspudp_pid>0 && snd==bspudp_pid)
+	 while (
+            !bspudp_nonblock_send((char*)&bspudp_anchor->stats,
+				  sizeof(bspudp_stat_t),0,unique_msgtype,1,0))
+	    bspudp_wait_sends();  
+      else if (!bspudp_pid)
+	 {
+         if (!snd) proc_stats = bspudp_anchor->stats;
+         else
+	    {
+            bspudp_block_recv((char*)&proc_stats,sizeof(bspudp_stat_t),
+			      &snd,&unique_msgtype,&recv_bytes,1);
+	    GUARDEQ(recv_bytes,sizeof(bspudp_stat_t),
+		    "bspudp_dump_stats(bspudp_stat_t)");
+	    }
+         fprintf(fptr,"\n   UDP/IP statistics for process %d\n",snd);
+	 fprintf(fptr,"      Buffer expands: %lu\n",proc_stats.expands);
+	 fprintf(fptr,"      Timeouts:       wait-sends=%lu probe=%lu\n",
+		 proc_stats.wstimeouts,proc_stats.prtimeouts);
+	 fprintf(fptr,"      Socket io:      no signal=%lu "
+		      "user driven=%lu locked=%lu empty=%lu\n",
+		 proc_stats.sigio_fails, proc_stats.user_socketio,
+		 proc_stats.pending_count, proc_stats.empty_sio_count);
+         }
+      for (recv = 0; recv < bspudp_nprocs; recv++)
+         if (snd!=recv)
+	    {
+	    if (bspudp_pid>0)
+	       {
+	       if (snd==bspudp_pid)
+                  while (!bspudp_nonblock_send((char*)&bspudp_sess[recv],
+				               sizeof(bspudp_sess_t),
+                                               0,unique_msgtype,1,0))
+		     bspudp_wait_sends();  
+	       if (recv==bspudp_pid)
+		  while (!bspudp_nonblock_send((char*)&bspudp_sess[snd],
+				               sizeof(bspudp_sess_t),
+                                               0,unique_msgtype,1,0))
+		     bspudp_wait_sends();  
+	       }
+	    else 
+	       {
+	       if (!snd) 
+	          proc_sess_send=bspudp_sess[recv];
+	       else 
+	          {
+	          bspudp_block_recv((char*)&proc_sess_send,
+			  	    sizeof(bspudp_sess_t),
+				    &snd,&unique_msgtype,&recv_bytes,1);
+	          GUARDEQ(recv_bytes,sizeof(bspudp_sess_t),
+		          "bspudp_dump_stats(bspudp_sess_t, send)");
+	          }
+               if (!recv)
+	          proc_sess_recv=bspudp_sess[snd];
+	       else 
+	          {
+	          bspudp_block_recv((char*)&proc_sess_recv,
+			            sizeof(bspudp_sess_t),
+				    &recv,&unique_msgtype,&recv_bytes,1);
+	          GUARDEQ(recv_bytes,sizeof(bspudp_sess_t),
+		          "bspudp_dump_stats(bspudp_sess_t, recv)");
+	          }
+
+	       resent       =proc_sess_send.ws_retransmits +
+		             proc_sess_send.sio_retransmits+
+		             proc_sess_send.snd_retransmits;
+
+	       sent         = proc_sess_send.seq_out+resent-1;
+
+	       sent_dropped = sent-proc_sess_recv.seq_in+ 
+		              proc_sess_recv.duplicates-1;
+
+	       fprintf(fptr,"      Channel %d->%d:\n",snd,recv);
+	       fprintf(fptr,"         Sent:    %8lu (%5.1f%% dropped)\n",
+		       sent,
+		       (sent<=0 || sent_dropped<=0)?(0.0):
+		          100.0*((double) sent_dropped)/((double)sent));
+	       
+	       fprintf(fptr,"         Resent:  %8lu (%5.1f%% where "
+		            "ws=%4.1f%% sio=%4.1f%% snd=%4.1f%% of total)\n",
+		       resent,
+		       (sent<=0)?(0.0):100.0*((double)resent)/((double) sent),
+		       (sent<=0)?(0.0):
+		          100.0*((double)proc_sess_send.ws_retransmits)/
+		          ((double) sent),
+		       (sent<=0)?(0.0):
+		          100.0*((double)proc_sess_send.sio_retransmits)/
+		                ((double) sent),
+		       (sent<=0)?(0.0):
+		       100.0*((double)proc_sess_send.snd_retransmits)/
+		             ((double) sent));
+
+	       acks       = proc_sess_send.nopiggy+proc_sess_send.prodded;
+	       acks_prods = proc_sess_send.prodded;
+	       implicits  = proc_sess_send.implicits;
+	       fprintf(fptr,"         Acks:    %8lu (%5.1f%% prods) "
+		            "(%lu removed by implicit)\n",
+		       acks,
+		       (acks<=0)?(0.0):
+		       100.0*((double)acks_prods)/((double) acks),
+		       implicits);
+	       
+	       recvd      = proc_sess_recv.seq_in-1+proc_sess_recv.duplicates;
+	       recv_dup   = proc_sess_recv.duplicates;
+	       recv_block = proc_sess_recv.block_recvs;
+	       fprintf(fptr,"         Receive: %8lu "
+		            "(%5.1f%% duplicate,%5.1f%% blocking)\n",
+		       recvd,
+		       (recvd<=0)?0.0:
+		       100.0*((double)recv_dup)/((double)recvd),
+		       (recvd<=0)?0.0:
+		       100.0*((double)recv_block)/((double)recvd));
+	       fflush(fptr);
+	       p_sent         += sent;
+	       p_sent_dropped += sent_dropped;
+	       p_resent       += resent;
+	       p_acks         += acks;
+	       p_acks_prods   += acks_prods;
+	       p_implicits    += implicits;
+	       p_recv         += recvd;
+	       p_recv_dup     += recv_dup;
+	       p_recv_block   += recv_block;
+	       }
+	    }
+         if (!bspudp_pid)
+	    {
+	    fprintf(fptr,"\n"
+                         "      Process %d Sent:    %8lu (%5.1f%% dropped)\n"
+		         "      Process %d Resent:  %8lu\n"
+		         "      Process %d Acks:    %8lu (%5.1f%% prods) "
+		         "(%lu removed by implicit)\n"
+		         "      Process %d Received:%8lu "
+		         "(%5.1f%% duplicate,%5.1f%% blocking)\n",
+		    snd,p_sent,
+		    (p_sent<=0 || p_sent_dropped<=0)?0.0:
+		       100.0*((double)p_sent_dropped)/((double)p_sent),
+		    snd,p_resent,
+		    snd,p_acks,
+		    (p_acks<=0.0)?0.0:
+		       100.0*((double)p_acks_prods)/((double)p_acks),
+		    p_implicits,
+		    snd,p_recv,
+		    (p_recv<=0.0)?0.0:
+		       100.0*((double)p_recv_dup)/((double)p_recv),
+		    (p_recv<=0.0)?0.0:
+		       100.0*((double)p_recv_block)/((double)p_recv));
+	    fflush(fptr);
+	    t_sent         += p_sent;
+	    t_sent_dropped += p_sent_dropped;
+	    t_resent       += p_resent;
+	    t_acks         += p_acks;
+	    t_acks_prods   += p_acks_prods;
+	    t_implicits    += p_implicits;
+	    t_recv         += p_recv;
+	    t_recv_dup     += p_recv_dup;
+	    t_recv_block   += p_recv_block;
+	    p_sent=0; p_sent_dropped=0; p_resent=0; 
+            p_acks=0; p_acks_prods=0;   p_implicits=0;
+	    p_recv=0; p_recv_dup=0;     p_recv_block=0;        
+            }
+      }
+   if (!bspudp_pid)
+      fprintf(fptr,"\n\n   Total Sent:    %8lu (%5.1f%% dropped)\n"
+		   "   Total Resent:  %8lu\n"
+		   "   Total Acks:    %8lu (%5.1f%% prods) "
+		   "(%lu removed by implicit)\n"
+		   "   Total Receive: %8lu "
+		   "(%5.1f%% duplicate,%5.1f%% blocking)\n",
+	      t_sent,
+	      (t_sent_dropped<=0)?0.0:
+                 100.0*((double)t_sent_dropped)/((double)t_sent),
+	      t_resent,
+	      t_acks,
+	      (t_acks<=0.0)?0.0:
+                 100.0*((double)t_acks_prods)/((double)t_acks),
+	      t_implicits,
+	      t_recv,
+	      (t_recv<=0.0)?0.0:
+                 100.0*((double)t_recv_dup)/((double)t_recv),
+	      (t_recv<=0.0)?0.0:
+                 100.0*((double)t_recv_block)/((double)t_recv));
+
+   bspudp_wait_sends();   
+   } /* dump_udp_stats */
+\end{code}
+
+\begin{code}
+#ifdef SANITY_CHECK
+static unsigned long traverse_high_in_seq(int from)
+   {
+   unsigned long seq;
+   bspudp_buff_t *this;
+
+   lock_queue();
+   seq = bspudp_sess[from].seq_in-1;
+   if (bspudp_sess[from].recv.head)
+      {
+      for (this = bspudp_sess[from].recv.head; this; this = this->link)
+         if (seq == this->buffer->msgseq-1) seq++;
+         else
+            break;
+      }
+
+   unlock_queue();
+   return seq;
+   } /* high_in_seq */
+
+static unsigned long traverse_highest_seen(int from)
+   {
+   unsigned long seq;
+   bspudp_buff_t *this;
+
+   lock_queue();
+   seq = traverse_high_in_seq(from);
+   for (this = bspudp_sess[from].recv.head; 
+           this && this->buffer->msgseq <= seq; this = this->link);
+   if (this) 
+      seq = this->buffer->msgseq;
+   
+   unlock_queue();
+   return seq;
+   } /* highest_seen */
+#endif
+\end{code}

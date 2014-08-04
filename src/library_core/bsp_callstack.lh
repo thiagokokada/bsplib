@@ -1,0 +1,61 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Written by: Vasil P Vasilev <Vasil.P.Vasilev@comlab.ox.ac.uk>
+
+%% $Id$
+%% $Log$
+
+\emph{The following is a listing of the code including comments which
+describe the functions that enable a module to obtain its call stack.}
+
+\section*{Call stack functions interface}
+
+\begin{description}
+\item[\texttt{TRUNCATE\_CALLSTACK\_DEPTH}] The maximum depth of the call
+  stack shown during profiling.
+
+\item[\texttt{TRUNCATE\_CALLSTACK\_FUNNAME}] The maximum size of each
+  function name.
+
+\item[\texttt{SYMBOL\_TABLE\_INC\_SIZE}] Step with which the size of
+the symbol table kept is increased.
+\end{description}
+
+\begin{code}
+#define TRUNCATE_CALLSTACK_DEPTH    50
+#define TRUNCATE_CALLSTACK_FUNNAME  50
+#define SYMBOL_TABLE_INC_SIZE       100
+\end{code}
+
+\texttt{bsp\_init\_callstack} is called once in the program to get the
+symbol information and should be called before any
+\texttt{bsp\_get\_callstack} calls.  There is no need to call the
+function if the symbol information is stored in the memory of the
+executable program as it is on CRAYMPP or CRAYPVP machines, and on SGI
+and SGICHALL64 except when
+\texttt{CS\_SGI\_NO\_NAMES} is defined.
+
+\texttt{bsp\_get\_callstack} returns the current callstack - the names
+of the functions called before the current one in reverse order - in
+the array of strings passed. The element after the last valid name is
+an empty string. The name of \texttt{bsp\_get\_callstack} is not in
+the callstack. 
+
+\begin{code}
+extern void bsp_get_callstack(char (*)[]);
+extern void bsp_init_callstack();
+\end{code}

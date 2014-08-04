@@ -1,0 +1,719 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+#include "../library_now/bspnowdefs.h"
+#include "../library_now/bsploadfuns.h"
+#include "../library_now/bsptcpsio.h" 
+\end{code}
+
+\begin{code}
+#define BSPTCP_COMPONENT "BSP/LOAD daemon" /* component identifier */
+#define ABORT_MSG_OK 1                     /* ABORT_MSG & ABORT_EXIT are ok */
+#define ABORT_EXIT(exitcode)               /* request to abort and exit */ \
+         { \
+         abort(); \
+         exit(exitcode); \
+         }
+#define ABORT_MSG(text) {fprintf(stderr,"%s",text); fflush(stderr); }
+
+#include "../library_now/bspnowerrs.h"
+\end{code}
+
+\begin{code}
+unsigned short bsp_loadport = BSPTCP_LOADPORT;    /* listen port number      */
+char           bsp_enq_hostname[BSPTCP_STR_LEN];  /* Which daemon to enquire */
+char           bsp_reload_hostname[BSPTCP_STR_LEN];
+int            bsp_remote_csock;
+int            bsp_time_out,bsp_time_out_recv; 
+char           bsp_time_out_hostname[BSPTCP_STR_LEN],
+               bsp_time_out_hostname_recv[BSPTCP_STR_LEN];
+int            bsp_formated_output=1;
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Open a connection to a load server}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+int open_connection_load_daemon(const char *remote_host) {
+   struct hostent *host;            /* netdb format host info */
+   struct linger linger;            /* sockets linger on close if data */
+   int optval;
+   struct sockaddr_in csockaddr;    /* for addressing BSP daemons */
+   int new_csock;
+
+   host = gethostbyname(remote_host);
+   if (!host) return -1;
+
+   new_csock = socket(AF_INET,SOCK_STREAM,0);
+   if (new_csock<0) return -1; 
+
+   linger.l_onoff = 1;
+   linger.l_linger = BSPTCP_LINGER_INT;
+   if (setsockopt(new_csock,SOL_SOCKET,SO_LINGER,
+	          (char *)&linger,sizeof(linger))) {
+     close(new_csock);
+     return -1;
+   }
+   optval = 1;
+   if (setsockopt(new_csock,IPPROTO_TCP,TCP_NODELAY,
+                  (char *)&optval,sizeof(optval))) {
+     close(new_csock);
+     return -1;
+   }
+   
+   /* setup addressing structure of host and attempt connect */ 
+   memset(&csockaddr,0,sizeof(struct sockaddr_in));
+   csockaddr.sin_family = AF_INET;   
+   csockaddr.sin_port   = htons(bsp_loadport);
+   memcpy(&csockaddr.sin_addr.s_addr,host->h_addr_list[0],
+          sizeof(csockaddr.sin_addr.s_addr));
+   if (connect(new_csock,(struct sockaddr *)&csockaddr,
+                sizeof(struct sockaddr_in))) {
+     close(new_csock);
+     return -1;
+   }
+   return new_csock;
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Receive a load query}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+char *lookup_remote_load_recv(int sock,bsptcp_msghdr_t msghdr) {
+   static char *str=NULL;
+   static int str_len=0;
+   char *temp;
+   int recv_bytes;
+
+   if (str==NULL) {
+      str=MALLOC(1+BSPTCP_STR_LEN);
+      if (str==NULL) {
+	fprintf(stderr,"Failed to allocate %d bytes",BSPTCP_STR_LEN);
+	exit(1);
+      }
+      str_len=BSPTCP_STR_LEN;
+   }
+   if ((msghdr.msgtype != BSPTCP_MSG_LD_DATA) &&
+       (msghdr.msgtype != BSPTCP_MSG_LD_UPD)) {
+      fprintf(stderr,"BSP/NOW Load: wrong type of message(%d) received\n",
+	      msghdr.msgtype);
+      fflush(stderr);
+      return NULL;
+   }
+   if (msghdr.msglen>str_len) {
+     str_len = msghdr.msglen;
+     free(str);
+     str=MALLOC(1+str_len); /* Don't use realloc */
+   }
+   recv_bytes=recvall(sock,(char*)&bsp_time_out_recv,sizeof(int),MSG_WAITALL);
+   if (recv_bytes!=sizeof(int)) {
+     fprintf(stderr,"BSP/NOW Load: lookup_remote_load no timeout %d\n",
+	     recv_bytes);
+     fflush(stderr);
+     return NULL;
+   }
+
+   recv_bytes=recvall(sock,bsp_time_out_hostname_recv,
+		      BSPTCP_STR_LEN,MSG_WAITALL);
+   
+   if (recv_bytes!=BSPTCP_STR_LEN) {
+     fprintf(stderr,"BSP/NOW Load: lookup_remote_load hostname %d\n",
+	     recv_bytes);
+     fflush(stderr);
+     return NULL;
+   }
+
+   
+   recv_bytes=recvall(sock,str,msghdr.msglen,MSG_WAITALL);
+   if (recv_bytes!=msghdr.msglen) {
+      fprintf(stderr,"BSP/NOW Load: lookup_remote_load msg %d!=%d\n",
+	     recv_bytes,msghdr.msglen);
+     fflush(stderr);
+     return NULL;
+   }
+   str[msghdr.msglen]='\0';
+   return str; 
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Calculate the load average}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+double load_average() {
+  char *tmpfile;
+  char crp, command[BSPTCP_STR_LEN], line[BSPTCP_STR_LEN], *lineptr;
+  FILE *fptr;
+  float runq1, runq5, runq15;
+  int i;
+
+  tmpfile = tempnam(NULL,"loadavg");
+  sprintf(command,"uptime > %s",tmpfile);
+  if (system(command)) return (BSPTCP_INFTY_LOAD-1.0);
+  
+  fptr = fopen(tmpfile,"r");
+  if (fptr==NULL) return (BSPTCP_INFTY_LOAD-2.0);
+
+  i=0;
+  while ((i<BSPTCP_STR_LEN) && 
+	 ((crp=fgetc(fptr))!=EOF)) line[i++]=crp;
+  lineptr=line;
+  while ((*lineptr)!='l') lineptr++; /* Hack to move uptime load */
+  sscanf(lineptr,"load average: %f, %f, %f",&runq1,&runq5,&runq15);
+  fclose(fptr);
+  unlink(tmpfile);
+  return ((runq5<0.0)?(BSPTCP_INFTY_LOAD):(runq5));
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Timestamp of oldest load average}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+int time_oldest_load_average() {
+  long oldest;
+  bsphost_t *walk=bsptcp_host_list;
+  struct timeval timenow;
+
+  gettimeofday(&timenow,NULL);
+  oldest=timenow.tv_sec;
+  while (walk!=NULL) {
+    if ((walk->time_stamp!=0) && (walk->time_stamp<oldest))
+      oldest=walk->time_stamp;
+    walk=walk->link;
+  }
+  return (timenow.tv_sec-oldest);
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Pick random host}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+char *random_host_name() {
+  bsphost_t *ptr, *walk;
+  static int host_list_size=-1;
+  static int type=0;
+  int i,j;
+  long int longest_time=LONG_MAX;
+ 
+  if (host_list_size<0) {
+    host_list_size=0;
+    walk = bsptcp_host_list;
+    while (walk!=NULL) {
+      walk=walk->link;
+      host_list_size++;
+    }
+  }
+  do {
+    if ((type++)&1) {
+      walk=bsptcp_host_list;
+      while (walk!=NULL) {
+        if (walk->time_stamp<longest_time) {
+	  ptr=walk;
+	  longest_time=walk->time_stamp;
+	}
+	walk=walk->link;
+      }
+    } else {
+      j = RANDOM(host_list_size);
+      ptr=bsptcp_host_list;
+      for(i=0;i<j;i++) ptr=ptr->link;
+    }
+  } while ((host_list_size>1) &&
+	   (strcmp(ptr->name,bsp_my_hostname)==0));
+  GUARDNZ(strlen(ptr->name)<BSPTCP_STR_LEN,"random_host_name length");
+  return ptr->name;  
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Sort host list}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Insertion sort..
+\begin{code}
+#ifdef LOAD_BUCKETS
+double bsphost_t_cost_lt(bsphost_t *x, bsphost_t *y) {
+  int fx, fy;
+
+  fx = (int) (10.0*x->load_avg/((double) x->ncpus));
+  fy = (int) (10.0*y->load_avg/((double) y->ncpus));
+  if (fx!=fy) 
+     return (fx < fy);
+  else
+     return (x->mflops > y->mflops);
+}
+#else
+double bsphost_t_cost_lt(bsphost_t *x, bsphost_t *y) {
+  double xc, yc;
+
+  xc = (((double) x->ncpus) - x->load_avg) * x->mflops;
+  yc = (((double) y->ncpus) - y->load_avg) * y->mflops;
+  return(xc>yc);
+}
+#endif
+
+void sort_host_list() {
+  bsphost_t *walk,*new_list, *temp, *drag, *current;
+  int i;
+  
+  walk = bsptcp_host_list;
+  i=0;
+  while (walk) {
+    i++;
+    walk=walk->link;
+  }
+#ifdef DEBUG
+  printf("BSP/NOW Load: starting insertion sort on %d elements\n",i);
+  fflush(stdout);
+#endif
+  new_list=NULL;
+  walk = bsptcp_host_list;
+  while (walk) {
+    temp      = walk;
+    walk      = walk->link;
+    temp->link= NULL;
+    if (new_list==NULL) {
+      new_list = temp;
+    } else if (bsphost_t_cost_lt(temp,new_list)) {
+        temp->link=new_list;
+        new_list=temp;
+    } else {
+      current= new_list;
+      drag   = new_list;
+      while (current) {
+        if (bsphost_t_cost_lt(temp,current)) {
+	  temp->link=current;
+	  drag->link=temp;
+	  current=NULL;
+	} else if (current->link==NULL) {
+	  current->link=temp;
+	  current=NULL;
+	} else {
+	  drag=current;
+	  current=current->link;
+	}
+      }
+    }
+  }  
+  bsptcp_host_list=new_list;
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Updates the load average in the list of hosts}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void update_load_average(const char *hostname, 
+			 double load, 
+			 long int timenow,
+			 double mflops) {
+  bsphost_t *ptr=bsptcp_host_list;
+ 
+  while (ptr) {
+    if (strcmp(ptr->name,hostname)==0) {
+      ptr->load_avg   = load;
+      ptr->time_stamp = timenow;
+      if (ptr->mflops<mflops)
+	ptr->mflops=mflops;
+    }
+    ptr=ptr->link;
+  }
+  sort_host_list();
+}
+
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Merges a remote daemons load averages with the local list}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void update_load_averages(const char *load_msg) {
+  char *start_msg, *end_msg, *temp_msg;
+  bsphost_t *ptr=bsptcp_host_list;
+  struct timeval reference_time;
+  char  machine[BSPTCP_STR_LEN];
+  float load,mflops;
+  int   age,ncpus;
+  
+  if (load_msg!=NULL) {
+    temp_msg = MALLOC(1+strlen(load_msg));
+    if (temp_msg==NULL) {
+      fprintf(stderr,"BSP/NOW load: unable to allocate memory");
+      exit(1);
+    }
+    strcpy(temp_msg,load_msg);
+    start_msg=temp_msg;
+    end_msg  =temp_msg;
+    gettimeofday(&reference_time,NULL);
+
+    while (*start_msg != '\0') {
+      while(*end_msg!='\n') end_msg++;
+      *end_msg='\0';
+      sscanf(start_msg,"%s %f %d %f %d",
+	     machine,&load,&age,&mflops,&ncpus);
+      ptr=bsptcp_host_list;
+      while (ptr && age>=0) {
+        if ((strcmp(ptr->name,machine)==0) && 
+            ((reference_time.tv_sec-age)>ptr->time_stamp))  {
+           ptr->load_avg   = load;
+           ptr->time_stamp = reference_time.tv_sec-age;
+	   if (ptr->mflops<mflops)
+	     ptr->mflops=mflops;
+        }
+        ptr=ptr->link;
+      }
+      start_msg=++end_msg;
+    }
+    free(temp_msg);
+    sort_host_list();
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Print the load averages}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void pr_load_averages(const char *load_msg) {
+  char *temp_msg, *start_msg, *end_msg;
+  char  machine[BSPTCP_STR_LEN];
+  float load,mflops;
+  double max_cost;
+  int   age, ncpus;
+
+  if (load_msg!=NULL) {
+    temp_msg = MALLOC(1+strlen(load_msg));
+    if (temp_msg==NULL) {
+      fprintf(stderr,"BSP/NOW load: unable to allocate memory");
+      exit(1);
+    }
+    strcpy(temp_msg,load_msg);
+    start_msg=temp_msg;
+    end_msg  =temp_msg;
+    while (*start_msg != '\0') {
+      while(*end_msg!='\n') end_msg++;
+      *end_msg='\0';
+      sscanf(start_msg,"%s %f %d %f %d",
+	     machine,&load,&age,&mflops,&ncpus);
+      printf("%s\n",machine);
+      start_msg=++end_msg;
+    }
+    free(temp_msg);
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Pretty print the load averages}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void ppr_load_averages(const char *load_msg,
+		       int howlong, const char* nexthost) {
+  char *start_msg, *end_msg, *temp_msg;
+  char  machine[BSPTCP_STR_LEN];
+  float load,mflops;
+  int   age, ncpus,nice,nice_time;
+
+  nice=0;
+  nice_time=0;
+  if (load_msg!=NULL) {
+    temp_msg = MALLOC(1+strlen(load_msg));
+    if (temp_msg==NULL) {
+      fprintf(stderr,"BSP/NOW load: unable to allocate memory");
+      exit(1);
+    }
+    strcpy(temp_msg,load_msg);
+    start_msg=temp_msg;
+    end_msg  =temp_msg;
+    printf("\n\t***Next update in ");
+    if (howlong<60) printf("%d secs",howlong);
+    else printf("%d min %d secs",howlong/60,howlong%60);
+    printf(" from %s***\n\n",nexthost);
+    printf("     Machine     | CPUs |Nice|Lockout|   Flop rate   |"
+           " Load |        Age\n");
+    printf("-----------------+------+------------+---------------+"
+           "------+--------------\n"); 
+    while (*start_msg != '\0') {
+      while(*end_msg!='\n') end_msg++;
+      *end_msg='\0';
+      sscanf(start_msg,"%s %f %d %f %d",
+	     machine,&load,&age,&mflops,&ncpus);
+      printf("%16.16s | %4d | %2d |",machine,ncpus,nice);
+      if (nice_time<=0)      printf("       ");
+      else if (nice_time<60) printf("%2d min ",nice_time);
+      else printf("%2dh %2dm",nice_time/60,nice_time%60);
+
+      printf("|%6.1f Mflop/s |%5.2f |",mflops,load);
+      if (age<0) 
+	 printf(" infinity\n");
+      else if (age<60)   
+         printf("        %2d sec\n",age);
+      else if (age<3600) 
+	 printf(" %2d min %2d sec\n",age/60,age%60);
+      else 
+        printf(" %d hr %2d min\n",age/3600,(age%3600)/60);
+      start_msg=++end_msg;
+    }
+    free(temp_msg);
+  }    
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Updates the load average in the list of hosts}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+char *load_average_info() {
+  static char *str=NULL;
+  static int str_len=0;
+  char info[BSPTCP_STR_LEN], *temp;
+  bsphost_t *ptr=bsptcp_host_list;
+  struct timeval reference_time;
+
+  gettimeofday(&reference_time,NULL);
+  if (str==NULL) {
+    str=MALLOC(1+BSPTCP_STR_LEN);
+    str_len=BSPTCP_STR_LEN;
+  }
+  
+  str[0]='\0';
+  while (ptr) {
+    sprintf(info,"%s %6f %d %.2f %d\n",
+	    ptr->name,ptr->load_avg,
+	    (ptr->time_stamp==0)?(-1):
+	                         (reference_time.tv_sec-ptr->time_stamp),
+	    ptr->mflops,ptr->ncpus);
+    GUARDNZ(strlen(info)<BSPTCP_STR_LEN,"sprintf in load_average_info");
+    if ((strlen(str)+strlen(info))>str_len) {
+      str_len += strlen(info);
+      temp=MALLOC(1+str_len); /* Don't use realloc */
+      if (temp==NULL) {
+        fprintf(stderr,"BSP/NOW Load: unable to allocate %d bytes\n",str_len);
+        exit(1);
+      }
+      strcpy(temp,str);
+      free(str);
+      str=temp;
+    }
+    strcat(str,info);    
+    ptr=ptr->link;  
+  }
+  return str;  
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Calculate Mflop rating}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+The loops \texttt{i} and \texttt{j} below would normally be executed
+in the opposite order to reduce the number of cache misses. However, I
+do it the wrong way round so that the megaflop rating isn't too
+high. This becnhmark needs to be changed to something a little more
+realistic.
+
+\begin{code}
+#define MATRIX_SIZE 200
+
+double getMflopRating() {
+  int i,j,k,o,oversample,attempts;
+  double delta;
+  float **matA, **matB, **matC, **tempmat, *vec, fool_optimiser;
+  clock_t start_time, end_time;
+
+  matA = calloc(MATRIX_SIZE,sizeof(float*));
+  if (matA==NULL) return 0.0;
+
+  matB = calloc(MATRIX_SIZE,sizeof(float*));
+  if (matB==NULL) {
+    free(matA);
+    return 0.0;
+  }
+
+  matC = calloc(MATRIX_SIZE,sizeof(float*));
+  if (matC==NULL) {
+    free(matA);free(matB);
+    return 0.0;
+  }
+
+  matA[0] = calloc(MATRIX_SIZE*MATRIX_SIZE,sizeof(float));
+  if (matA[0]==NULL) {
+    free(matA);free(matB);free(matC);
+    return 0.0;
+  }
+
+  matB[0] = calloc(MATRIX_SIZE*MATRIX_SIZE,sizeof(float));
+  if (matB[0]==NULL) {
+    free(matA[0]);free(matA);free(matB);free(matC);
+    return 0.0;
+  }
+
+  matC[0] = calloc(MATRIX_SIZE*MATRIX_SIZE,sizeof(float));
+  if (matC[0]==NULL) {
+    free(matA[0]);free(matB[0]);free(matA);free(matB);free(matC);
+    return 0.0;
+  }
+
+  for(i=1;i<MATRIX_SIZE;i++) {
+    matA[i]=matA[0]+(MATRIX_SIZE*i);
+    matB[i]=matB[0]+(MATRIX_SIZE*i);
+    matC[i]=matC[0]+(MATRIX_SIZE*i);
+  }
+  for(i=0;i<MATRIX_SIZE;i++) {
+    for(j=0;j<MATRIX_SIZE;j++) {
+      matA[i][j] = (float) (j+1);
+      matB[i][j] = (float) (i+1);
+      matC[i][j] = 0.0;
+    }
+  }
+  fool_optimiser=0.0;
+  oversample=1;
+  attempts=0;
+  do {
+    oversample*=2;
+    start_time=clock();
+    for(o=0;o<oversample;o++) {
+      for(i=0;i<MATRIX_SIZE;i++) {
+        for(j=0;j<MATRIX_SIZE;j++) {
+          /* Cause writes back to memory, don't use a temporary */
+          matC[j][i]=0.0;
+          for(k=0;k<MATRIX_SIZE;k++) {
+            matC[j][i] += matA[i][k] * matB[j][k];
+          }
+        }
+      }
+      fool_optimiser+=matC[0][0];
+    }
+    end_time=clock();
+    delta = ((double) (end_time-start_time)) / 
+            ((double) CLOCKS_PER_SEC);
+#ifdef DEBUG
+    printf("BSP/NOW Load: %d mat mult (%dx%d) in %f secs\n",
+	   oversample,MATRIX_SIZE,MATRIX_SIZE,delta);
+    fflush(stdout);
+#endif
+    /* Make error in timer negilgable by running for two seconds */
+  } while( (delta<2.0) && ((attempts++)<10));
+#ifdef DEBUGMATRIX
+  for(i=0;i<MATRIX_SIZE;i++) {
+    for(j=0;j<MATRIX_SIZE;j++) {
+      printf("A[%d][%d]=%f B[%d][%d]=%f C[%d][%d]=%f\n",
+             i,j,matA[i][j],i,j,matB[i][j],i,j,matC[i][j]);
+    }
+  }
+#endif
+  if (fool_optimiser<=0.0) {
+    fprintf(stderr,"BSP/NOW Load: optimiser being too clever\n");
+    exit(1);
+  }
+  free(matA[0]); free(matB[0]);free(matC[0]);
+  free(matA);    free(matB);   free(matC);
+
+  /* 2 flops * over_sample * scale factor of 5 * dot_product_size */
+  return ( (((double)  (2*oversample*MATRIX_SIZE) / delta)*
+           (MATRIX_SIZE*MATRIX_SIZE))/1000000.0);
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Write a copy of the hostlist to a file}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bspnow_write_hostlist(char *fname) {
+  bsphost_t *walk;
+  envvar_t  *env;
+  char *name;
+  FILE *fptr;
+
+  walk = bsptcp_host_list;
+  if (walk) {
+    fptr=fopen(fname,"w");
+    if (fptr) {
+      sort_host_list();
+      while (walk) {
+	fprintf(fptr,"host(%s) ",walk->name);
+	env=walk->envvars;
+	while(env) {
+	  if (name=strstr(env->name,"BSPTCP_")) {
+	    name+=7;
+	    if (strcmp(name,"HOSTNAMES")!=0)
+	      fprintf(fptr," %s(%s)",name,env->value);
+	  }
+	  env=env->link;	
+	}
+	fprintf(fptr,";\n");
+	walk=walk->link;    
+      }
+      fclose(fptr);
+    }
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Determine if local process should migrate to another machine}
+%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+int bspnow_isin_topp_globalload(int p,double loadthisjob) {
+  bsptcp_msghdr_t msghdr;          /* message header struct */
+  int loadsock;                    /* Socket to load daemon */
+  char hostname[BSPTCP_STR_LEN];
+  bsphost_t *walk;
+  struct hostent *host;
+  int i,rank,retval;
+
+  /* If we are unable to contact the load daemon, we assume the worst,
+     and force a migrate */
+  retval=0;
+
+  gethostname(hostname,BSPTCP_STR_LEN);
+  host = gethostbyname(hostname);
+  if (host) strcpy(hostname,host->h_name);
+  loadsock = open_connection_load_daemon(hostname);
+  if (loadsock>=0) {
+    msghdr.msgtype=BSPTCP_MSG_LD_ENQ;
+    msghdr.msglen =0;
+    if (sendall(loadsock,(char*)&msghdr,sizeof(msghdr),0)==sizeof(msghdr))
+      if (recvall(loadsock,(char*)&msghdr,sizeof(msghdr),MSG_WAITALL)==
+	  sizeof(msghdr)) {
+	update_load_averages(lookup_remote_load_recv(loadsock,msghdr));
+	walk = bsptcp_host_list;
+	while (walk) {
+	  if (!walk->bspactive) walk->load_avg +=loadthisjob;
+	  walk = walk->link;
+	}
+	sort_host_list();
+	walk = bsptcp_host_list;
+	for((i=0,rank=INT_MAX);
+	    (i<p) && walk;
+	    (i++,walk=walk->link)) 
+	  if (strcmp(hostname,walk->name)==0) rank=i;
+
+	retval = rank<=(p+BSPTCP_MIGRATE_ZONE);
+      }
+    close(loadsock);
+  } 
+  return retval;
+}
+\end{code}

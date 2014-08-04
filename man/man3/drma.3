@@ -1,0 +1,113 @@
+.TH "drma" 3 "1.4 25/9/98" "Oxford BSP Toolset" "BSPlib FUNCTIONS"
+.SH NAME
+Bulk synchronous remote memory access.
+
+.SH DESCRIPTION
+
+One way of performing data communication in the BSP model is to use
+Direct Remote Memory Access (DRMA) communication facilities. Some
+parallel programming libraries require that the data structures used
+in DRMA operations have to be held at statically allocated memory
+locations. BSPlib does not have this restriction, which enables
+communication in certain heterogeneous environments, and allows
+communication into any type of contiguous data structure including
+stack or heap allocated data. This is achieved by only allowing a
+process to manipulate certain 
+.I registered
+areas of a remote memory which have been previously made available by
+the corresponding processes. In this registration procedure, processes
+use the operation 
+.B bsp_push_reg(3)
+to announce the address of the start of a local area which is
+available for global remote use.
+  
+The operation 
+.B bsp_put(3)
+deposits locally held data into a registered remote memory area on a
+target process, without the active participation of the target
+process.  The operation
+.B bsp_get(3)
+reaches into the registered local memory of another process to copy
+data values held there into a data structure in its own local memory.
+  
+Allowing a process to arbitrarily manipulate the memory of another
+process, without the involvement of that process, is potentially
+dangerous. The mechanisms we propose here exhibit different degrees
+of 
+.I safety
+depending upon the buffering requirements of the communication
+operations. The right choice of buffering depends upon the class of
+applications and the desired goals, and has to be made by the user.
+  
+There are four forms of buffering with respect to the DRMA operations:
+
+.IP "Buffered on destination:"
+.RS
+Writing data into registered areas will happen 
+.I at
+the end of the superstep, once all
+.I remote reads have been performed. 
+.RE    
+
+.IP "Unbuffered on destination:"
+.RS
+Data communication into registered areas can take effect at any time
+during the superstep. Therefore, for safety, no process should change
+the destination data structures used during the course of the
+superstep.
+.RE
+   
+.IP "Buffered on source:"
+.RS
+If the source data structure is in the memory of the process that
+issues a communication action (i.e., a put), then a copy of the data
+is made at the time the communication action is issued; the source
+data structure can therefore be changed by the user immediately after
+communications are issued. Alternatively, if the source data structure
+is on a remote process (i.e., a get), then the data is read on the
+remote process at the end of the superstep, 
+.I before 
+any remote writes are performed.
+.RE
+
+.IP "Unbuffered on source
+.RS
+The data transfer resulting from a call to a communication operation
+may occur at any time between the time of issue and the end of the
+superstep.  Therefore, for safety, no process should change the source
+data structures used during the course of the superstep.
+.RE
+  
+The various buffering choices are crucial in determining the
+.I safety
+of the communication operation, i.e., the conditions which guarantee
+correct data delivery as well as its effects on the processes involved
+in the operation.  However, it should be noted that even the most
+cautious choice of buffering mode does not completely remove
+non-determinism. For example, if more than one process transfers data
+into overlapping memory locations, then the result at the overlapping
+region will be nondeterministically chosen; it is implementation
+dependent which one of the many ``colliding'' communications should be
+written into the remote memory area.
+
+.SH "SEE ALSO"
+bsp_push_reg(3), bsp_pop_reg(3), bsp_put(3), bsp_hpput(3),
+bsp_get(3), bsp_hpget(3)
+
+.I ``BSPlib: The BSP Programming Library''
+Jonathan M. D. Hill, Bill McColl, Dan C. Stefanescu, Mark W. Goudreau,
+Kevin Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and Rob
+Bisseling. Parallel Computing, to appear 1998. See
+.I http://www.bsp-worldwide.org
+for more details.
+
+.SH BUGS
+Problems and bug reports should be mailed to 
+.I bsplib-bugs@comlab.ox.ac.uk
+
+.SH AUTHORS
+The Oxford BSP Toolset implementation of BSPlib was written by
+Jonathan.Hill@comlab.ox.ac.uk
+.br
+.B http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+

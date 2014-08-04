@@ -1,0 +1,46 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1997, 1998 Stephen Donaldson                       %%
+%%                      &  The University of Oxford                      %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it into other software, is hereby granted          %%
+%% without fee, provided that                                            %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+#ifndef BSP_KERNELL_H
+#define BSP_KERNELL_H
+
+int bspkern_connect(int pid,bspeth_macaddr_t smac,
+		    int nprocs,size_t space, 
+		    int bufsize, int nobuffers);
+char *bspkern_malloc(size_t size);
+bspudp_buff_t *bspkern_buffer(void);
+int bspkern_sendto(int pid, char *buff, int len,int lineno,char *file);
+int bspkern_recv(bspudp_msghdr_t *buff);
+int bspkern_select(struct timeval *timeout);
+int bspkern_initfinish(void);
+int bspkern_pktsent(bspudp_msghdr_t *msg);
+int bspkern_markdata_withack(void);
+
+#define recvfrom(sock,buff,len,flags,addr,addr_len) \
+   (bspkern_recv((bspudp_msghdr_t*) (buff)))
+
+#define sendto(sock,buff,len,flags,addr,addr_len)\
+   bspkern_sendto(((bspudp_msghdr_t*) (buff))->msgdpid,(buff),(len),\
+                  __LINE__,__FILE__)
+
+#define select(n,readfds,writefds,exceptfds,timeout) \
+   bspkern_select(timeout)
+#endif
+\end{code}
+   

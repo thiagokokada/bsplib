@@ -1,0 +1,679 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1997 Stephen Donaldson                             %%
+%%                      &  The University of Oxford                      %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bspportd.lc,v 1.1 1997/07/11 10:27:16 jonh Exp $
+% $Log: bspportd.lc,v $
+% Revision 1.1  1997/07/11 10:27:16  jonh
+% Initial revision
+%
+ 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Port Daemon}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+This is the BSP TCP/IP port request daemon. Program \verb!bspportd.lc!
+is used in cases where the systems administrator doesn't want the BSP
+TCP/IP processor request daemon to execute as root. In such cases a
+BSP TCP/IP processor request daemon must run on behalf of each
+individual user. To prevent the user having to restart the processor
+daemon each time a program a BSP program is to be executed, the
+processor daemon registers it's port with this, the port, daemon.  On
+subsequent executions on behalf of the same user, the same port number
+can be used to establish contact with the users already executing
+processor daemon.
+  
+Connects can be received from two different sources: When a user
+processor daemon starts, it first registers with this daemon,
+indicating the userid and password and the dynamically assigned
+portnumber on which the daemon is listening. The other (and
+subsequent) calls are made from the BSP pid 0 processor trying to
+include the processor running the user processor daemon into a BSP
+computation.
+   
+When a BSP user process completes, the user processor daemon is left
+running on that computer, waiting for another request from the same
+user. The \verb!bspshutd.lc! program works the same way whether user
+processor daemons are used or not: When user processor daemons are not
+used the the shutdown daemon contacts the only processor daemon
+running on the machine and requests it to shutdown. If user processor
+daemons are being used, then the shutdown program requests the port
+daemon to to shutdown the user processor daemons. (The shutdown
+program \verb!bspshutd.lc! doesn't distinguish between the two cases
+as the same message format and port number are used in both cases.)
+  
+\paragraph{Security:} The security in using user processor daemons is 
+much the same as using a single daemon: When the user daemon
+registers, it supplies the local userid and password. When a
+subsequent request for the port number arrives, the userid and
+password must be supplied again.  This userid and password is compared
+to the original userid and password before the port number is
+released. (The user daemon process is the same code and expects the
+userid and password again, before allowing the computation to
+proceed.)
+
+\begin{code}
+#include <unistd.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <signal.h>
+
+#include <sys/wait.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#if defined(RS6000) || defined(SP2)
+#include <sys/select.h>
+#endif
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <pwd.h>
+
+#include "bspnowdefs.h"
+#include "bsptcpsio.h"          /* guarded socket functions */   
+\end{code}
+  
+ 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Additional structures for recording registered user daemons}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+typedef struct user_bsptcpd user_bsptcpd_t;
+struct user_bsptcpd
+   {
+   user_bsptcpd_t *prev;      /* previous entry on chain */
+   user_bsptcpd_t *next;      /* previous entry on chain */
+   
+   /* user security details */
+   char *userid;             /* supplied when port registered */ 
+   char *passwd;             /* supplied when port registered */
+
+   /* port details */
+   unsigned short port;      /* dynamically assigned port number */
+  
+   /* statistics */
+   int lookups;              /* number of times port number looked */
+   };
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Global variables}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+user_bsptcpd_t *head = NULL;      /* first registered user port */
+user_bsptcpd_t *tail = NULL;      /* last registered user port */
+char hostname[BSPTCP_STR_LEN];    /* local host name */
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Prototypes}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void exitchain(int);              /* exit requesting all daemons to shutdown */
+void shutdaemon(int,user_bsptcpd_t*); /* de-register and shutdown one daemon */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{The main program}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void main(int argc, char *argv[])
+   {
+   int i;
+
+   int pid;                          /* for fork/waitpid/getpid/etc */
+   char filename[30];                /* genearated temporary filenames */
+   char errmsg[BSPTCP_STR_LEN];      /* formatted error messages */
+ 
+   int lsock;                        /* listen socket fd */
+   struct sockaddr_in lsaddr;        /* listen socket address/name */
+   int lport = BSPTCP_LPORT;         /* listen port number */
+   int lbacklog = BSPTCP_BACKLOG;    /* listen backlog */
+   struct sockaddr_in psaddr;        /* port set/lookup socket address/name */
+   int psaddrlen;                    /* port set/lookup socket addr length */
+   int psock;                        /* port set/lookup socket fd */
+   struct linger linger;             /* sockets linger on close */
+   int optval;                       /* value for setting socket option */
+   fd_set readfd;                    /* fd to watch for accept */
+   int fd_count;                     /* ready fds from select() */
+
+   bsptcp_msghdr_t msghdr;           /* socket message header */ 
+   char msgbuf[BSPTCP_BUFF_LEN];     /* socket message buffer payload */
+
+   char userid[30];                  /* userid requesting processor */
+   char passwd[30];                  /* and the corresponding passwd */
+
+   struct sigaction sigchild;        /* action for SIGCHLD signal */
+
+   user_bsptcpd_t *this;             /* current registered user port */
+
+   if (gethostname(bsp_my_hostname,BSPTCP_STR_LEN))
+      strcpy(bsp_my_hostname,"localhost");
+   
+  /*
+   * Process command line arguments:
+   */
+
+   for (i = 1; i < argc; i += 2)
+      if (argv[i][0] == '-' && i+1 < argc)
+         switch (argv[i][1])
+            {
+            case 'p': 
+               if (1 != sscanf(argv[i+1],"%d",&lport))
+                  {
+                  fprintf(stderr,"BSP/NOW Port Daemon: port number error.\n");
+                  exit(1);
+                  }
+               break;
+            case 'b': 
+               if (1 != sscanf(argv[i+1],"%d",&lbacklog))
+                  {
+                  fprintf(stderr,
+                     "BSP/NOW Port Daemon: listen backlog invalid.\n");
+                  exit(1);
+                  }
+               break;
+            default: 
+               fprintf(stderr,"BSP/NOW Port Daemon: command line option ");
+               fprintf(stderr,"error. Invalid option \"%s\".\n",argv[i]);
+               exit(1);
+            }
+      else
+         {
+         fprintf(stderr,
+            "BSP/NOW Port Daemon: invalid/incomplete command line options.\n");
+         exit(1);
+         }
+\end{code}
+
+Setup socket to listen on for incoming processor requests.
+\begin{code}
+   /* create a socket fd */
+   lsock = socket(AF_INET,SOCK_STREAM,0);
+   if (lsock < 0)
+      {
+      sprintf(msgbuf,"BSP/NOW Port Daemon(%s): socket() call failed",
+	      bsp_my_hostname);
+      perror(msgbuf);
+      exit(1);
+      }
+
+   /* initialise the socket addressing structure */
+   memset(&lsaddr,0,sizeof(struct sockaddr_in));
+   lsaddr.sin_family = AF_INET;
+   lsaddr.sin_port = htons(lport);
+   lsaddr.sin_addr.s_addr = INADDR_ANY;
+
+   /* bind the socket to local address */
+   if (bind(lsock,(struct sockaddr *)&lsaddr,sizeof(struct sockaddr_in)) < 0)
+      {
+      sprintf(msgbuf,"BSP/NOW Port Daemon(%s): bind() call failed",
+	      bsp_my_hostname);
+      perror(msgbuf);
+      close(lsock);
+      exit(1);
+      }
+
+   /* indicate listen for incomming connections */
+   if (listen(lsock,lbacklog) < 0)
+      {
+      sprintf(msgbuf,"BSP/NOW Port Daemon(%s): listen() call failed",
+	      bsp_my_hostname);
+      perror(msgbuf);
+      close(lsock);
+      exit(1);
+      }
+\end{code}
+
+The daemon runs in the background. Fork off copy, report pid of
+daemon, and exit.
+\begin{code}
+   if ((pid = fork()) > 0) 
+      {
+      printf("BSP/NOW Port Daemon(%s): forked with pid %d.\n",
+	     bsp_my_hostname,pid);
+      exit(0);
+      }
+   else
+      if (pid)
+         {
+         fprintf(stderr,"BSP/NOW Port Daemon: fork() failed with errno=%d.\n",
+		 errno);
+         exit(1);
+         }
+\end{code}
+
+The program is now running in the background.  Re-direct stdout and stderr.
+\begin{code}
+   pid = getpid();
+   close(1);
+   sprintf(filename,"/tmp/bspportd.stdout.%d",pid);
+   if (open(filename,O_WRONLY|O_CREAT|O_TRUNC,0666) != 1)
+      {
+      fprintf(stderr,"BSP/NOW Port Daemon: could not reopen stdout \n");
+      fprintf(stderr,"as \"%s\".\n",filename);
+      exit(1);
+      }
+   printf("BSP/NOW Port Daemon log started with pid %d\n",pid); 
+   fflush(stdout);
+   close(2);
+   sprintf(filename,"/tmp/bspportd.stderr.%d",pid);
+   if (open(filename,O_WRONLY|O_CREAT|O_TRUNC,0666) != 2)
+      {
+      printf("BSP/NOW Port Daemon: could not reopen stdout \n");
+      printf("as \"%s\".\n",filename);
+      exit(1);
+      }
+   fprintf(stderr,"BSP/NOW Port Daemon log started with pid %d\n",pid); 
+   fflush(stderr);
+\end{code}
+
+Process the incomming requests. These requests are either
+introductions of new user processor daemons, lookup requests for the
+user process daemon port numbers, or shutdown requests. Shutdown
+requests are broadcast to the local user process daemons.
+\begin{code}
+   /* take/wait on pending request */
+   while (1)
+      {
+      do {
+         /* setup for wait for incomming requests */
+         FD_ZERO(&readfd);
+         FD_SET(lsock,&readfd);
+
+         if (((fd_count = select(lsock+1,&readfd,NULL,NULL,NULL)) < 0) &&
+            errno != EINTR)
+            {
+            perror("BSP/NOW Port Daemon: error in select() call");
+            close(lsock);
+            exitchain(BSPTCP_MSG_EXIT);
+	    exit(1);
+            }
+         if (fd_count < 0) fd_count = 0; /* system call interrupted */
+         } while (!fd_count);
+
+      memset(&psaddr,0,sizeof(struct sockaddr_in));
+      psaddrlen = sizeof(struct sockaddr_in);
+      if (((psock = accept(lsock,(struct sockaddr *)&psaddr,&psaddrlen))<0) &&
+         errno != EINTR)
+         {
+         perror("BSP/NOW Port Daemon: accept() call failed");
+         close(lsock);
+         exitchain(BSPTCP_MSG_EXIT);
+	 exit(1);
+         }
+      if (psock < 0) continue; /* interrupted system call */
+
+      printf("BSP/NOW Port Daemon: Incomming connect from %s:%d\n",
+         inet_ntoa(psaddr.sin_addr),ntohs(psaddr.sin_port));  
+      fflush(stdout);
+
+      /* sockets must linger on close in presence of data */
+      linger.l_onoff = 1;
+      linger.l_linger = BSPTCP_LINGER_INT;
+      if (setsockopt(psock,SOL_SOCKET,SO_LINGER,(char*)&linger,sizeof(linger)))
+         perror("BSP/NOW Port Daemon: error in setsockopt() call");
+      optval = 1;
+      if (setsockopt(psock,IPPROTO_TCP,TCP_NODELAY,(char *)&optval,
+            sizeof(optval)))
+         perror("BSP/NOW Port Daemon: error in setsockopt() call");
+\end{code}
+
+First message on socket indicates whether this connection is
+for a new port registration, a port lookup or a daemon shutdown 
+request.
+\begin{code}
+      if (recvall(psock,(char *)&msghdr,sizeof(msghdr),MSG_WAITALL) 
+         != sizeof(msghdr))
+         {
+         printf("BSP/NOW Port Daemon: Error reading message header.\n");
+         fflush(stdout);
+         close(psock);
+         continue;
+         }
+
+      /* Request to shutdown all the user registered daemons */
+      switch (msghdr.msgtype) 
+         {
+         case BSPTCP_MSG_EXIT:
+            printf("BSP/NOW Port Daemon: Shutdown connection"
+                   " request received.\n");
+            close(psock);
+            close(lsock);
+            exitchain(BSPTCP_MSG_EXIT);
+	    exit(0);
+            break;
+
+         case BSPTCP_MSG_SIGNAL:
+            exitchain(BSPTCP_MSG_SIGNAL);
+            break;
+ 
+         case BSPTCP_MSG_ACK:
+         case BSPTCP_MSG_MASTERPID:
+         
+            printf("BSP/NOW Port Daemon: Port lookup request\n"); 
+            /* get the userid of initiating requestor */ 
+            if (recvall(psock,(char *)&msghdr,sizeof(msghdr),MSG_WAITALL) 
+                   != sizeof(msghdr) || msghdr.msglen >= sizeof(userid))
+               {
+               printf("BSP/NOW Port Daemon: error reading userid.\n");
+               fflush(stdout);
+               close(psock);
+               continue;
+               }
+
+            if (recvall(psock,userid,msghdr.msglen,MSG_WAITALL)!=msghdr.msglen)
+               {
+               fprintf(stderr,"BSP/NOW Port Daemon: error reading userid.\n");
+               fflush(stderr);
+               close(psock);
+               continue;
+               }
+            userid[msghdr.msglen] = 0;
+
+            if (recvall(psock,(char *)&msghdr,sizeof(msghdr),MSG_WAITALL) 
+                  != sizeof(msghdr) || msghdr.msglen >= sizeof(passwd))
+               {
+               fprintf(stderr,
+                       "BSP/NOW Port Daemon: error reading password.\n");
+               fflush(stderr);
+               close(psock);
+               continue;
+               }
+            if (recvall(psock,passwd,msghdr.msglen,MSG_WAITALL)!=msghdr.msglen)
+               {
+               fprintf(stderr,
+                       "BSP/NOW Port Daemon: error reading password.\n");
+               fflush(stderr);
+               close(psock);
+               continue;
+               }
+            passwd[msghdr.msglen] = 0;
+         
+            /* find user's entry on port registration chain */ 
+            for (this = head; 
+                 this && strcmp(userid,this->userid); this = this->next);
+
+            /*check user's name and password same as at time of registration*/
+            if (!this 
+               || strcmp(passwd,this->passwd) || strcmp(userid,this->userid))
+               {
+               sprintf(msgbuf,
+                  "BSP/NOW Port Daemon: No user daemon registered or user id"
+                  " and password invalid for "
+                  "%s@%s",userid,bsp_my_hostname);
+               msghdr.msgtype = BSPTCP_MSG_STDERR;
+               msghdr.msgspid = 0;
+               msghdr.msgdpid = 0;
+               msghdr.msglen = strlen(msgbuf);
+               if (sendall(psock,(char *)&msghdr,sizeof(msghdr),0) < 0)
+                  printf("BSP/NOW Port Daemon: Error sending message "
+                         "for %s@%s\n",userid,bsp_my_hostname);
+               if (sendall(psock,(char *)&msgbuf,msghdr.msglen,0) < 0)
+                  printf("BSP/NOW Port Daemon: Error sending message "
+                         "for %s@%s\n",userid,bsp_my_hostname);
+               printf("%s\n",msgbuf);
+               fflush(stdout);
+               close(psock);
+               continue;
+               }
+
+            /* Registered daemon found and userid and password correct -
+               send port number */
+            msghdr.msgtype = BSPTCP_MSG_CDATA;
+            msghdr.msgspid = 0;
+            msghdr.msgdpid = 0;
+            msghdr.msglen = sizeof(this->port);
+            if (sendall(psock,(char *)&msghdr,sizeof(msghdr),0) < 0)
+               printf("BSP/NOW Port Daemon: Error sending port for %s@%s\n",
+                  userid,bsp_my_hostname);
+            if (sendall(psock,(char *)&this->port,msghdr.msglen,0) < 0)
+               printf("BSP/NOW Port Daemon: Error sending port for %s@%s\n",
+                  userid,bsp_my_hostname);
+            printf("BSP/NOW Port Daemon: Lookup complete for %s@%s:%d\n",
+               userid,bsp_my_hostname,this->port);
+            fflush(stdout);
+            close(psock);
+            this->lookups++;
+            continue;
+            break;
+
+         case BSPTCP_MSG_CDATA:
+            printf("BSP/NOW Port Daemon: Port registration request\n"); 
+            /* get the userid to register */ 
+            if (recvall(psock,(char *)&msghdr,sizeof(msghdr),MSG_WAITALL) 
+                   != sizeof(msghdr) || msghdr.msglen >= sizeof(userid))
+               {
+               printf("BSP/NOW Port Daemon: error reading userid.\n");
+               fflush(stdout);
+               close(psock);
+               continue;
+               }
+            if (recvall(psock,userid,msghdr.msglen,MSG_WAITALL)!=msghdr.msglen)
+               {
+               fprintf(stderr,"BSP/NOW Port Daemon: error reading userid.\n");
+               fflush(stdout);
+               close(psock);
+               continue;
+               }
+            userid[msghdr.msglen] = 0;
+
+            if (recvall(psock,(char *)&msghdr,sizeof(msghdr),MSG_WAITALL) 
+                  != sizeof(msghdr) || msghdr.msglen >= sizeof(passwd))
+               {
+               fprintf(stderr,
+                       "BSP/NOW Port Daemon: error reading password.\n");
+               fflush(stdout);
+               close(psock);
+               continue;
+               }
+            if (recvall(psock,passwd,msghdr.msglen,MSG_WAITALL)!=msghdr.msglen)
+               {
+               fprintf(stderr,
+                       "BSP/NOW Port Daemon: error reading password.\n");
+               fflush(stdout);
+               close(psock);
+               continue;
+               }
+            passwd[msghdr.msglen] = 0;
+         
+            /* check that the user does not already have an entry on chain */ 
+            for (this = head; 
+                 this && strcmp(userid,this->userid); this = this->next);
+
+            /* if already registered then request registered 
+               daemon to shutdown */
+            if (this) shutdaemon(BSPTCP_MSG_EXIT,this);
+  
+            /* create entry --- one does not exist */
+            this = malloc(sizeof(user_bsptcpd_t));
+            this->next = NULL;
+            this->prev = NULL;
+            this->userid = malloc(strlen(userid)+1);
+            strcpy(this->userid,userid);
+            this->passwd = malloc(strlen(passwd)+1);
+            strcpy(this->passwd,passwd);
+            this->lookups = 0;
+
+            /* get the port number that the daemon is listening on */
+            if (recvall(psock,(char *)&msghdr,sizeof(msghdr),MSG_WAITALL) 
+                  != sizeof(msghdr) || msghdr.msglen != sizeof(this->port))
+               {
+               fprintf(stderr,
+                       "BSP/NOW Port Daemon:error reading port number.\n");
+               fflush(stdout);
+               close(psock);
+               continue;
+               }
+            if (recvall(psock,(char *)&this->port,msghdr.msglen,MSG_WAITALL) 
+                  != msghdr.msglen)
+               {
+               fprintf(stderr,
+                       "BSP/NOW Port Daemon: error reading port number.\n");
+               fflush(stdout);
+               close(psock);
+               continue;
+               }
+   
+            if (head)
+               {
+               this->prev = tail;
+               tail->next = this;
+               tail = this;
+               }
+             else
+               {
+               head = this;
+               tail = this;
+               }
+            printf("BSP/NOW Port Daemon: Port registration complete "
+                   "for %s@%s:%d\n",userid,bsp_my_hostname,this->port);
+            fflush(stdout);
+            close(psock);
+            continue;
+	    break;
+
+	 default:
+	    printf("BSP/NOW Port Daemon: unknown request type %d\n",
+		   msghdr.msgtype);
+            fflush(stdout);
+            close(psock);
+	    continue;
+         }
+
+      } /* while */
+            
+   } /* main */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Exit chain}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Function \verb!exitchain()! runs down the user registered daemon chain
+sending a shutdown request to all the user regestered daemons. This
+code has to be executed whenever the port daemon shutsdown as the port
+numbers those daemons are listening on will be unknown by any process
+trying to connect.
+\begin{code}
+void exitchain(int msg_type)
+   {
+   char msgbuf[BSPTCP_BUFF_LEN];    /* formatted messages buffer */
+   struct sockaddr_in csockaddr;    /* for addressing BSP daemons */
+   int csock;                       /* socket fd to BSP Daemon */
+
+   bsptcp_msghdr_t msghdr;          /* message header struct */
+   user_bsptcpd_t *this;            /* item on registration chain */
+   user_bsptcpd_t *temp;            /* item on registration chain */
+\end{code}
+
+Attempt to establish a connection with each of the user processor
+daemons registered as running on the local host.
+\begin{code}
+   /* attempt to contact the processes */
+   for (this = head; this; this = temp)
+      {
+      temp = this->next;
+      shutdaemon(msg_type,this);
+      }
+
+   printf("BSP/NOW Port Daemon: Shutdown broadcast complete.\n");
+   } /* exitchain */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Shuting down the daemon}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Function \verb!shutdaemon()! attempts to send a shutdown message to
+the registered daemon and then deregisters the daemon by removing it
+from the registration chain.
+
+\begin{code}
+void shutdaemon(int msg_type,user_bsptcpd_t *this)
+   {
+   char msgbuf[BSPTCP_BUFF_LEN];    /* formatted messages buffer */
+   struct sockaddr_in csockaddr;    /* for addressing BSP daemons */
+   int csock;                       /* socket fd to BSP Daemon */
+
+   bsptcp_msghdr_t msghdr;          /* message header struct */
+\end{code}
+
+Attempt to establish a connection with the user processor 
+daemon registered as running on the local host.
+\begin{code}
+   /* create an internet socket */
+   csock = socket(AF_INET,SOCK_STREAM,0);
+   if (csock < 0)
+      {
+      perror("Error creating control socket");
+      exit(1);
+      }
+   /* setup addressing structure of host and attempt connect */ 
+   memset(&csockaddr,0,sizeof(struct sockaddr_in));
+   csockaddr.sin_family = AF_INET;
+   csockaddr.sin_port = htons(this->port);
+   csockaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+   if (!connect(csock,(struct sockaddr *)&csockaddr,
+                sizeof(struct sockaddr_in)))
+      {
+      msghdr.msgtype = msg_type;
+      msghdr.msgspid = 0;
+      msghdr.msgdpid = 0;
+      msghdr.msglen  = 0;
+      /* send shutdown request to remote Daemon */
+      if (sendall(csock,(char *)&msghdr,sizeof(msghdr),0) < 0)
+         {
+         sprintf(msgbuf,
+           "BSP/NOW Port Daemon: error sending request to "
+           "%s@%s:%d",
+            this->userid,bsp_my_hostname,this->port);
+         perror(msgbuf);
+         printf("%s\n",msgbuf);
+         } 
+      else
+         {
+         printf("BSP/NOW Port Daemon: request sent to %s@%s:%d.\n",
+              this->userid,bsp_my_hostname,this->port);
+         } 
+      }
+   else
+      {
+      sprintf(msgbuf,
+          "BSP/NOW Port Daemon: error trying to connect to %s@%s:%d",
+           this->userid,bsp_my_hostname,this->port);
+      perror(msgbuf);
+      printf("%s\n",msgbuf);
+      }
+
+   close(csock);
+
+   /* take the daemon out of the daemon registration chain and free storage */
+   if (msg_type==BSPTCP_MSG_EXIT)
+      {
+      if (this->prev) this->prev->next = this->next;
+      else head = this->next;
+      if (this->next) this->next->prev = this->prev;
+      else tail = this->prev;
+      free(this->userid);
+      free(this->passwd);
+      free(this);
+      }
+   } /* shutdaemon */
+\end{code}

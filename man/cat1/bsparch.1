@@ -1,0 +1,132 @@
+
+
+
+bsparch(1)                User Commands                bsparch(1)
+
+
+
+NAME
+     bsparch - determine the machine architecture and  communica-
+     tion device.
+
+
+SYNOPSIS
+     bsparch [ -arch ] [ -device ] [ -nodefault ] [ -name ]  [  -
+     defdevice  machine ] [ -convertname machine ] [ -convertdev-
+     ice device ] [ -allarch ] [ -alldevice ] [ -help ]
+
+
+DESCRIPTION
+     bsparch determines the machine specific installation options
+     required  to  install  the  Oxford BSP toolset.  Two factors
+     guide the installation  of  the  toolset:  (1)  the  machine
+     architecture  and operating system release; and (2) the type
+     of device used as the communication medium. The -_a_r_c_h option
+     determines  the  machine  architecture,  and   - _d_e_v_i_c_e  the
+     relevant communication device.
+
+     To date, the tested architectures are:
+
+     SGICHALL64  Silicon Graphics Power Challenge (Irix 6.x)
+     SGIORIGIN       Silicon Graphics Origin 2000 (Irix 6.x)
+     SGI         Silicon Graphics workstation (Irix 5.x)
+     SP2         IBM SP2 running AIX
+     CRAYT3E     Cray T3E
+     CRAYT3D     Cray T3D
+     PARSYTEC    Parsytec Explorer
+     CONVEXSPP   Convex SPP
+     SunOS       SunOS 4.1.x
+     Solaris     SunOS 5.x
+     LINUX       PC based Unix
+     OSF1        Digital's alpha boxes
+     HITACHIMPP  Hitachi SR2001
+
+
+     The tested communication devices are shown below.  It should
+     be  noted,  that only a small subset of the cross-product of
+     architectures and devices are valid builds of the toolset.
+
+     SHMEM_SYSV     System V shared memory
+     SHMEM_SGI      SGI specific shared memory operations
+     MPASS_TCPIP     TCP/IP based message passing
+     MPASS_MPI      MPI
+     MPASS_MPL      IBM's message passing system
+     MPASS_PARIX    Message passing on the Parsytec GC
+     MPASS_EXPRESS  Express (Parasoft Ltd) message passing
+     DRMA_SHMEM     Cray Shmem one-sided communications
+
+     The default device behaviour of _b_s_p_a_r_c_h(_1) can be overridden
+     by  providing  an  environment  variable  _B_S_P__D_E_V_I_C_E  in the
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    1
+
+
+
+
+
+
+bsparch(1)                User Commands                bsparch(1)
+
+
+
+     user's environment, whose value is the name of  the  desired
+     device. You will have to override the default behaviour when
+     installing bsplib(3) on top of MPI.
+
+
+SEE ALSO
+     bsplib(3)
+
+     The Oxford BSP toolset web pages can be found  at:
+     _h_t_t_p://_w_w_w._b_s_p-_w_o_r_l_d_w_i_d_e._o_r_g/_i_m_p_l_m_n_t_s/_o_x_t_o_o_l/
+
+
+BUGS
+     Problems  and  bug  reports  should  be  mailed  to  _b_s_p_l_i_b-
+     _b_u_g_s@_c_o_m_l_a_b._o_x._a_c._u_k
+
+
+AUTHORS
+     The Oxford BSP Toolset implementation of BSPlib was  written
+     by Jonathan.Hill@comlab.ox.ac.uk
+     http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    2
+
+
+

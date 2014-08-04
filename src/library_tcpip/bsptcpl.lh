@@ -1,0 +1,46 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1997 Stephen Donaldson                             %%
+%%                      &  The University of Oxford                      %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsptcpl.lh,v 1.1 1997/07/11 10:28:30 jonh Exp $
+% $Log: bsptcpl.lh,v $
+% Revision 1.1  1997/07/11 10:28:30  jonh
+% Initial revision
+%
+
+File bsptcpl.h contains the prototypes for the fucntions in the 
+file bsptcpl.c (the library of interface functions for the BSP/TCP
+implementation.
+\begin{code}
+#include <sys/time.h>
+
+int bsptcp_set_buffer_size(int *,int*,int);
+void bsptcp_env(int, char *);
+void bsptcp_init(int *);
+int bsptcp_nonblock_send(char *, int, int, int,int);
+void bsptcp_block_recv(char *,int,int *,int *,int *);
+void bsptcp_wait_sends(void);
+int bsptcp_okto_send(int);
+int  bsptcp_probe(int *,int *, int, int);
+void bsptcp_messg_stopall(void);
+void bsptcp_messg_exit(int);
+
+void bsptcp_srand(int);
+int  bsptcp_rand();
+int  bsptcp_usecsleep(int,struct timeval *);
+void bsptcp_write_hostlist(char* fname);
+int  bsptcp_bsptcp_isin_topp_globalload(void);
+\end{code}

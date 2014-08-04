@@ -1,0 +1,101 @@
+.TH "BSPlib" 3BSPlib "1.4 25/9/98" "Oxford BSP Toolset" "BSPlib FUNCTIONS"
+.SH NAME
+BSPlib \- The Bulk Synchronous Parallel  World-Wide standard library. 
+
+.SH DESCRIPTION
+.B BSPlib 
+is a library of C and Fortran 77 bindings for parallel programming
+using the BSP model. User programs are written in a Single Program
+Multiple Data (SPMD) style, and the library supports both bulk
+synchronous direct remote memory access
+.B drma(3)
+(i.e., memory copy between processors) and bulk synchronous message
+passing 
+.B bsmp(3)\c
+\&. The set of basic operations provided by BSPlib are shown in the
+table below (a manual page is available for each operation):
+
+.RS
+.nf
+.ta 2.0i
+Initialisation	bsp_init
+	bsp_begin
+	bsp_end
+Halt	bsp_abort
+Enquiry	bsp_pid
+	bsp_nprocs
+	bsp_time
+Synchronisation	bsp_sync
+DRMA	bsp_push_reg
+	bsp_pop_reg
+	bsp_put
+	bsp_get
+BSMP	bsp_set_tagsize
+	bsp_send
+	bsp_qsize
+	bsp_get_tag
+	bsp_move
+High Performance	
+	bsp_hpput
+	bsp_hpget
+	bsp_hpmove
+.fi
+.RE
+
+
+A higher-level library, summarised in 
+.B bsplib_level1(3)
+ provides language specific operations, and a variety of specialised
+collective communication operations. These are not considered as part
+of the core library, as they can be easily realised in terms of the
+core.
+
+.SH NOTES
+Programs written using BSPlib should be compiled with 
+.B bspfront(1)\c
+\&.
+
+.SH "SEE ALSO"
+bsp_level1(3), bsp_init(3), bsp_begin(3), bsp_end(3), bsp_pid(3),
+bsp_nprocs(3), bsp_time(3), bsp_sync(3), drma(3), bsp_isregistered(3),
+bsp_push_reg(3), bsp_pop_reg(3), bsp_put(3), bsp_get(3),
+bsp_hpput(3), bsp_hpget(3), bsmp(3), bsp_set_tagsize(3), bsp_send(3),
+bsp_qsize(3),bsp_get_tag(3), bsp_move(3), bsp_hpmove(3), bsp_abort(3)
+
+.I ``BSPlib: The BSP Programming Library''
+Jonathan M. D. Hill, Bill McColl, Dan C. Stefanescu, Mark W. Goudreau,
+Kevin Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and Rob
+Bisseling. Parallel Computing, to appear 1998. See
+.I http://www.bsp-worldwide.org
+for more details.
+
+.I ``A proposal for the BSP Worldwide 
+.I Standard Library (preliminary version)''
+Mark W. Goudreau, Jonathan M. D. Hill, Kevin Lang, Bill McColl, Satish
+B. Rao, Dan C. Stefanescu, Torsten Suel, Thanasis Tsantilas. Oxford
+University Computing Laboratory, April 1996. See
+.I http://www.bsp-worldwide.org
+for more details.
+
+.I ``Questions and answers
+.I about BSP'' David B. Skillicorn, Jonathan M. D. Hill, and Bill
+McColl. Journal of Scientific Programming, to appear 1997. (See also
+Technical Report 15-96, Programming Research Group, Oxford University
+Computing Laboratory, August 1996)
+.br
+.I ftp://ftp.comlab.ox.ac.uk/pub/Packages/BSP/papers/SkillHillMcColl_QA.ps.gz
+
+The Oxford BSP toolset web pages can be found  at:
+.br
+.I http://www.bsp-worldwide.org/implmnts/oxtool/
+
+.SH BUGS
+Problems and bug reports should be mailed to 
+.I bsplib-bugs@comlab.ox.ac.uk
+
+.SH AUTHORS
+The Oxford BSP Toolset implementation of BSPlib was written by
+Jonathan.Hill@comlab.ox.ac.uk
+.br
+.B http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+

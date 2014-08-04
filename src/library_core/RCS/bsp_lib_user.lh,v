@@ -1,0 +1,138 @@
+head	1.2;
+access;
+symbols;
+locks
+	jonh:1.2; strict;
+comment	@% @;
+
+
+1.2
+date	95.08.31.16.39.02;	author jonh;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	95.08.31.16.38.46;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@*** empty log message ***
+@
+text
+@%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995, University of Oxford                         %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsp_lib_user.lh,v 1.1 1995/08/31 16:38:46 jonh Exp jonh $
+% $Log: bsp_lib_user.lh,v $
+# Revision 1.1  1995/08/31  16:38:46  jonh
+# Initial revision
+#
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Macros to give user-friendly interface to library}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#define bsp_sstep(id)      _bsp_sstep(id,__FILE__,__LINE__)
+#define bsp_sstep_end(id)  _bsp_sstep_end(id,__FILE__,__LINE__)
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{External functions as seen by the user}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+extern void bsp_start(int, int*, int*);
+extern void bsp_newprocs(int, int*, int*);
+extern void bsp_finish();
+extern void _bsp_sstep(int,char*,int);
+extern void _bsp_sstep_end(int,char*,int);
+extern void bsp_error(char*,...);
+extern void bsp_addr(int,void*);
+extern void _bsp_fetch(int,int,int,void*,int);
+extern void _bsp_store(int,void*,int,int,int);
+extern void bsp_fetch(int,char*,void*,int);
+extern void bsp_store(int,void*,char*,int);
+extern void bsp_sstep_store(int,void*,void*,int);
+
+extern void bsp_broadcast(int,void*,void*,int);
+extern void bsp_gather(int,void*,void*,int);
+/* 
+extern void bsp_scan(void (*)(),void*,void*,int);
+extern void bsp_reduce(void (*)(),void*,void*,int);
+*/
+extern int    bsp_all(int);
+extern int    bsp_any(int);
+extern int    bsp_sumI(int);
+extern float  bsp_sumR(float);
+extern double bsp_sumD(double);
+extern int    bsp_sumI_prefix(int);
+extern float  bsp_sumR_prefix(float);
+extern double bsp_sumD_prefix(double);
+extern int    bsp_productI(int);
+extern float  bsp_productR(float);
+extern double bsp_productD(double);
+extern int    bsp_productI_prefix(int);
+extern float  bsp_productR_prefix(float);
+extern double bsp_productD_prefix(double);
+extern int    bsp_minI(int);
+extern float  bsp_minR(float);
+extern double bsp_minD(double);
+extern int    bsp_maxI(int);
+extern float  bsp_maxR(float);
+extern double bsp_maxD(double);
+extern int    bsp_minI_prefix(int);
+extern float  bsp_minR_prefix(float);
+extern double bsp_minD_prefix(double);
+extern int    bsp_maxI_prefix(int);
+extern float  bsp_maxR_prefix(float);
+extern double bsp_maxD_prefix(double);
+\end{code}
+
+\begin{code}
+extern void bottom(char*,...);
+extern void bsp_debug(char*,...);
+extern void bsp_debug_block(char*,...);
+extern void bsp_debug_start(char*);
+extern void bsp_debug_end(char*);
+extern void bsp_print(char*,...);
+extern void bsp_priny_block(char*,...);
+extern void bsp_print_start(char*);
+extern void bsp_print_end(char*);
+extern void startProfileLog();
+extern void _bsp_dissemination_barrier();
+extern int _bsp_pid;
+extern int _bsp_nprocs;
+\end{code}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d1 21
+a21 2
+% $Id$
+% $Log$
+@

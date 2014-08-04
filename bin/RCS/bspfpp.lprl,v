@@ -1,0 +1,525 @@
+head	1.2;
+access;
+symbols;
+locks
+	jonh:1.2; strict;
+comment	@# @;
+
+
+1.2
+date	96.05.24.11.40.24;	author jonh;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	96.04.03.11.32.16;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@Just about to simplify
+@
+text
+@%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995, University of Oxford                         %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bspfpp.lprl,v 1.1 1996/04/03 11:32:16 jonh Exp jonh $
+% $Log: bspfpp.lprl,v $
+# Revision 1.1  1996/04/03  11:32:16  jonh
+# Initial revision
+#
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Convert F77 containing BSP library calls}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+%bspFunctions = (
+  "bsp_pid",1,       "bsp_nprocs",1,
+  "bsp_init",1,      "bsp_start",1,
+  "bsp_finish",1,    "bsp_sstep",1,
+  "bsp_sstep_end",1, "bsp_store",1,
+  "bsp_addr",1,      "bsp_addr_fetch",1,
+  "bsp_addr_store",1,
+  "bsp_fetch",1,     "bsp_broadcast",1,
+  "bsp_gather",1,    "bsp_reduce",1,
+  "bsp_scan",1,      "bsp_scatter",1,
+  "bsp_sumi",1,      "bsp_sumr",1,      "bsp_sumd",1, 
+  "bsp_producti",1,  "bsp_productr",1,  "bsp_productd",1,
+  "bsp_maxi",1,      "bsp_maxr",1,      "bsp_maxd",1,
+  "bsp_mini",1,      "bsp_minr",1,      "bsp_mind",1);
+\end{code}
+
+\begin{code}
+($Pgm = $0) =~ s|.*/||;
+$infile       ="";
+$tmpfileA     ="/tmp/bspfppA.$$";
+$tmpfileB     ="/tmp/bspfppB.$$";
+$tmpfileC     ="/tmp/bspfppC.$$";
+$outfile      ="";
+$sstep_id     ="";
+$sstep_lineno = 0;
+$next_addr    = 0;
+$miller       = 0;
+$linenumber   = 0;
+$underscore   = 0;
+&main();
+exit(0);
+\end{code}
+
+
+\begin{code}
+sub main {
+  local($going);
+  if ($#ARGV<2) {
+    print STDERR"usage: bspfpp  [-miller] [-uscore] realname infile outfile\n";
+    exit(1);
+  } else {
+    $going=1;
+    while($going) {
+      if ($ARGV[0]=~ /-miller/) {
+        $miller= 1;
+        shift(@@ARGV);
+      } elsif ($ARGV[0]=~ /-uscore/) {
+        $underscore = 1;
+        shift(@@ARGV);
+      }else {
+        $going=0;
+      }
+      $going=0 if $#ARGV==0;
+    }
+    $filename = $ARGV[0];
+    $infile   = $ARGV[1];
+    $outfile  = $ARGV[2];
+    if      (!$miller) {
+      &insertProfileInfo($infile,$tmpfileA);
+      &convertStoreFetchs($tmpfileA,$tmpfileB);
+      &mangleNames($tmpfileB,$outfile);
+      unlink ($tmpfileA,$tmpfileB);
+
+    } else {
+      &insertProfileInfo($infile,$tmpfileA);
+      &mangleNames($tmpfileA,$outfile);
+      unlink ($tmpfileA);
+
+    } 
+  }
+}
+\end{code}
+
+Change this to use an environment of valid names
+\begin{code}
+sub mangleNames {
+  local($convin,$convout) = @@_;
+  local($fun);
+
+  if (!open(INFILE,$convin)) {
+    printf STDERR "$Pgm:mangleNames: unable to open $convin for reading\n";
+    exit(1);
+  }
+
+  if (!open(OUTFILE,"> ". $convout)) {
+    printf STDERR "$Pgm: unable to open $convout for writing\n";
+    exit(1);
+  }
+  while(<INFILE>) {
+    if (/\s(bsp\_\w+)/i) {
+      $fun = $1;
+      $fun =~ tr/A-Z/a-z/;
+      if ($bspFunctions{$fun}) {
+        s/^\s\s\s\s\s\s\s\s+CALL/       CALL/i;
+        s/\sbsp_/ f77_bsp_/ig;
+      }
+    }
+    print OUTFILE $_;
+  }
+  close(INFILE);
+  close(OUTFILE);
+}
+\end{code}
+
+\begin{code}
+sub insertProfileInfo {
+  local($convin,$convout) = @@_;
+  local(@@rest);
+  local($filename_suffix);
+  local($sstep_id);
+
+  if (!open(INFILE,$convin)) {
+    printf STDERR "$Pgm:insertProf: unable to open $convin for reading\n";
+    exit(1);
+  }
+
+  if (!open(OUTFILE,"> ". $convout)) {
+    printf STDERR "$Pgm: unable to open $convout for writing\n";
+    exit(1);
+  } 
+  $filename_suffix = $filename;
+  $filename =~ /\/([^\/]*)$/ && ($filename_suffix = $1);
+  while($line = <INFILE>) {
+    if      ($line =~ /^\s*CALL bsp_sstep\s*\(/i) {
+      ($sstep_id,@@rest) = &grabArguments($');
+      print OUTFILE "        call bsp_sstep($sstep_id,$.,'$filename_suffix')",
+                    join("",@@rest), "\n";
+     
+    } elsif ($line =~ /^\s*CALL bsp_sstep_end\s*\(/i) {
+      ($sstep_id,@@rest) = &grabArguments($');
+      print OUTFILE "        call bsp_sstep_end($sstep_id,$.,'$filename_suffix')",
+                    join("",@@rest), "\n";
+    } else {
+      print OUTFILE $line; 
+    }
+  }
+  close(INFILE);
+  close(OUTFILE);
+}
+\end{code}
+
+\begin{code}
+sub convertStoreFetchs {
+  local($convin,$convout) = @@_;
+  local($superstep_code);
+  local($startsuperstep_code);
+  local($in_superstep)=0;
+   
+  if (!open(INFILE,$convin)) {
+    printf STDERR "$Pgm:convStoreFetch: unable to open $convin for reading\n";
+    exit(1);
+  }
+
+  if (!open(OUTFILE,"> ". $convout)) {
+    printf STDERR "$Pgm: unable to open $convout for writing\n";
+    exit(1);
+  } 
+  while($line = <INFILE>) {
+    $linenumber++;
+    if (&beginSuperStep($line)) {
+      print OUTFILE $line; 
+      $in_superstep   =1;
+    }
+    elsif (&endSuperStep($line)) {
+      print OUTFILE $startsuperstep_code ,$superstep_code;
+      print OUTFILE $line; 
+      $superstep_code = "";
+      $startsuperstep_code = "";
+      $in_superstep   =0;
+    }
+    elsif ($in_superstep) {
+      if (&containsLibraryCall($line)) {
+        local($i,$j)= &rewriteLibraryCall($line);
+        $startsuperstep_code.=$i;
+        $superstep_code     .=$j;
+      } else {
+        $superstep_code .= $line;
+      }
+    } else {
+      print OUTFILE $line;
+    }
+  }
+}
+\end{code}
+
+
+\begin{code}
+sub containsLibraryCall {
+  local($line) = $_[0];
+  local($libcall);
+
+  ($line =~/bsp\_store/) && return 1;
+  ($line =~/bsp\_fetch/) && return 1;
+  return 0;
+}
+
+sub rewriteLibraryCall {
+   local($line)=$_[0];
+   local(@@arguments);
+   local($pid,$src,$dst,$offset,$nbytes,$tmp,$sstep_id);
+
+   local($i); 
+   if ($line =~ /bsp\_store\s*\(/) {
+     $line = $`;
+     @@arguments = &grabArguments($');
+     if (($miller  && $#arguments != 4) || 
+         (!$miller && $#arguments != 5)) {
+        print STDERR "**$Pgm warning**\tThe procedure call bsp_store on ",
+                     "line $linenumber of $infile has\n\t\t\t",
+                     "the wrong number of arguments\n\n";
+     }
+     ($pid,$src,$dst,$offset,$nbytes,@@rest) = @@arguments;
+     $line .= "bsp_addr_store($pid,$src,$next_addr,$offset,$nbytes)". 
+              join("",@@rest);
+     return ("        CALL bsp_addr(".$next_addr++.",$dst)\n",$line);
+   } elsif ($line =~ /bsp\_fetch\s*\(/) {
+     $line = $`;
+     @@arguments = &grabArguments($');
+     if (($miller  && $#arguments != 4) || 
+         (!$miller && $#arguments != 5)) {
+        print STDERR "**$Pgm warning**\tThe procedure call bsp_fetch on ",
+                     "line $linenumber of $infile has\n\t\t\t",
+                     "the wrong number of arguments\n\n";
+     }
+     ($pid,$src,$offset,$dst,$nbytes,@@rest) = @@arguments;
+     $line .= "bsp_addr_fetch($pid,$next_addr,$offset,$dst,$nbytes)". 
+              join("",@@rest);
+     return ("        CALL bsp_addr(".$next_addr++.",$src)\n",$line);
+   } else {
+      print STDERR "**%Pgm error** internal translation problem\n";
+   }
+}
+
+sub grabArguments {
+   local($line)=$_[0];
+   local($after_close);
+   local($inside_brackets);
+   local($level) = 1;
+   local($char);
+   
+   while ($level != 0) {
+     if      ($line =~ /\(|\)/ ) {
+       if ($& eq "(") {
+         $level++;
+       } else {
+         $level--;
+       }
+       $inside_brackets .= $` . $&;
+       $line = $';
+     } else { 
+       $inside_brackets .= $line;
+       $line = <INFILE>;
+       $linenumber++;
+     }
+   }
+   chop($inside_brackets);
+   $after_close = $line;
+
+   $level            =0;
+   local(@@arguments) =();
+   local($word)      ="";
+   
+   foreach $char (split(//,$inside_brackets)) {
+      if ("$char" eq "(") {
+         $level++;
+         $word .= "$char";
+      } elsif ("$char" eq ")") {
+         $level--;
+         $word .= "$char";
+      } elsif (("$char" eq ",") && ($level==0)) {
+        push(@@arguments,$word);
+        $word="";
+      } else {
+        $word .= "$char";
+      }        
+   }
+   push(@@arguments,$word);
+   push(@@arguments,$after_close);
+   return(@@arguments);
+}
+
+sub beginSuperStep {
+  if ($_[0] =~ /bsp\_sstep\s*\(/) {
+    $sstep_lineno = $linenumber;
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+sub endSuperStep {
+  if ($_[0] =~ /bsp\_sstep\_end\s*\(/) {
+    if (!$in_superstep) {
+           print STDERR "**$Pgm warning** found end of super-step on ",
+                        "line $linenumber of $infile before the start\n\n";
+    }  
+    return(1);
+  } else {
+     return(0);
+  }
+}
+\end{code}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d17 5
+a21 2
+% $Id$
+% $Log$
+d27 2
+a28 1
+  "bsp_pid",1,       "bsp_start",1,
+a52 1
+$mpass        = 0;
+d63 2
+a64 2
+  if ($#ARGV<3) {
+    print STDERR"usage: bspfpp [-mpass] [-miller] [-uscore] realname infile outfile\n";
+d69 1
+a69 4
+      if ($ARGV[0]=~ /-mpass/) {
+        $mpass = 1;
+        shift(@@ARGV);
+      } elsif ($ARGV[0]=~ /-miller/) {
+d83 2
+a84 3
+    if      (($mpass)  && (!$miller)) {
+      &insertProfileInfo($infile,$tmpfileC);
+      &convertMessagePassCode($tmpfileC,$tmpfileA);
+d87 1
+a87 1
+      unlink ($tmpfileA,$tmpfileB,$tmpfileC);
+d89 2
+a90 3
+    } elsif (($mpass)  && ($miller)) {
+      &insertProfileInfo($infile,$tmpfileC);
+      &convertMessagePassCode($tmpfileC,$tmpfileA);
+d92 1
+a92 1
+      unlink ($tmpfileA,$tmpfileC);
+d94 1
+a94 11
+    } elsif ((!$mpass) && ($miller)) {
+      &insertProfileInfo($infile,$tmpfileC);
+      &mangleNames($tmpfileC,$outfile);
+      unlink ($tmpfileC);
+
+    } elsif ((!$mpass) && (!$miller)) {
+      &insertProfileInfo($infile,$tmpfileC);
+      &convertStoreFetchs($tmpfileC,$tmpfileA);
+      &mangleNames($tmpfileA,$outfile);
+      unlink ($tmpfileA,$tmpfileC);
+    }
+a207 112
+}
+\end{code}
+
+This routine is completely hacky and not very robust. The routine performs 
+three jobs: 
+\begin{itemize}
+\item Convert procedure \texttt{main} to \texttt{bspusermain_}.
+\item After the declarations in the routine that has a call to 
+      \texttt{bsp\_start}, insert a jump to the line that contains the start.
+\item Create a procedure \texttt{bspstart_stub} that contains a call to the
+      procedure that contained BSP start.
+\end{itemize}
+
+\begin{code}
+sub convertMessagePassCode {
+  local($convin,$convout) = @@_;
+  local(@@arguments);
+  local($before,$maxproc,$nproc,$my_pid,@@rest);
+  local($procedure,$procedure_arity,$line,$going);
+  local($startprocedure,$startprocedure_arity,$i);
+
+  if (!open(INFILE,$convin)) {
+    printf STDERR "$Pgm:convMpass: unable to open $convin for reading\n";
+    exit(1);
+  }
+
+  while($line = <INFILE>) {
+    if ($line=~/^\S/) {
+    } elsif ($line=~/^\s*PROGRAM\s+(\w+)/i){
+      if ($underscore) {
+        $procedure       = "bspusermain";
+      } else {
+        $procedure       = "bspusermain_";
+      }
+      
+      $procedure_arity = 0;
+    } elsif ($line=~/\s*(FUNCTION|SUBROUTINE)\s+(\w+)\s*$/i) {
+      $procedure       = $2;
+      $procedure_arity = 0;
+    } elsif ($line=~/\s*(FUNCTION|SUBROUTINE)\s+(\w+)\(/i) {
+      $procedure      = $2;
+      @@arguments = &grabArguments($');
+      $procedure_arity = $#arguments;
+    } elsif ($line =~ /bsp\_start\s*\(/i) {
+      $startprocedure       = $procedure;
+      $startprocedure_arity = $procedure_arity;
+    }
+  } 
+  close(INFILE);
+  open(INFILE,$convin);
+  open(OUTFILE,"> $convout");
+  while($line = <INFILE>) {
+    if ($line=~ /^\s*PROGRAM|FUNCTION|SUBROUTINE/i) {
+      if      ($line=~/^\s*PROGRAM\s+(\w+)/i) {
+        if ($underscore) {
+          $procedure       = "bspusermain";
+        } else {
+          $procedure       = "bspusermain_";
+        }
+        print OUTFILE "       SUBROUTINE $procedure\n";
+      } elsif ($line=~/\s*(FUNCTION|SUBROUTINE)\s+(\w+)/i) {
+        $procedure = $2;
+         print OUTFILE $line;
+      }
+      if ($startprocedure eq $procedure) {
+        $going=1;
+      
+        while($going) {
+          $line = <INFILE>;
+          # Look for end of declarations
+          if (($line =~ /^(\s|\t)*$/) || ($line=~ /^\S/)) {
+            print OUTFILE $line;
+          } elsif ($line =~ /bsp\_start/) {
+            print OUTFILE $line;
+            $going=0;
+          } elsif (!(($line=~/^\s*(COMMON|EQUIVALENCE|DATA|EXTERNAL|IMPLICIT|INCLUDE|PARAMETER|INTEGER|REAL|DOUBLE|CHARACTER|LOGICAL|COMPLEX|INTRINSIC|DIMENSION|SAVE|POINTER)/i) || 
+                     ($line =~ /^\s\s\s\s\s\S\s/))) {
+            $going = 0;
+            print OUTFILE "\n        IF (f77_bsp_pid() .GT. 0) THEN\n",
+                          "          GOTO 789\n",
+                          "        ENDIF\n",
+                          $line;
+          } else {
+            print OUTFILE $line;
+          }
+        }
+      }
+    } elsif ($line =~ /bsp\_start\s*\(/) {
+      print OUTFILE " 789        $line";
+      
+    } else {
+      print OUTFILE $line;
+    }
+  }   
+  close(INFILE);
+  if ($startprocedure ne "") {
+    print OUTFILE "\n        SUBROUTINE bspstart_stub";
+    if (!$underscore) {
+      print OUTFILE "_";
+    }
+    print OUTFILE "\n           CALL $startprocedure(";
+    for($i=1;$i<$startprocedure_arity;$i++) {
+      print OUTFILE "0,";
+    }
+    $startprocedure_arity>0 && (print OUTFILE "0");
+    print OUTFILE ")\n",
+                  "        END\n\n";
+  }
+  print OUTFILE "\n        PROGRAM main\n",
+                "            CALL bsplibmain\n",
+                "          END\n";
+  close(OUTFILE);
+@

@@ -1,0 +1,260 @@
+\begin{code}
+#define I386
+  /*
+   * File chkprest.c contains checkpoint/restart functions to take 
+   * checkpoints and effect restarts once the restart code has been 
+   * given control. The restart code is generated using unexec (eg. unexelf.c)
+   * by Spencer W. Thomas (available under the  GNU General Public License
+   * from the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+   * Boston, MA 02111-1307, USA).
+   *
+   * This file is used to generate a template assembler source code for 
+   * a particular machine (gcc -S or as -S). The assmebler source must be 
+   * edited to correct the references to the dummy variables (see below)
+   * to be references to the corresponding registers.
+   *
+   * Internal names are prefixed with "cprl_" and names in the external 
+   * interfaces are prefixed "cpr_".
+   *
+   * Author: Stephen Donaldson.
+   */
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
+
+#define CPR_STACK_EXTRA 1024      /* extra padding on stack for realloc */
+
+char *cprl_start_stack;           /* highest stack address in checkpoint */
+char *cprl_bin_name = NULL;       /* ELF executable file name */
+char cprl_rst_name[FILENAME_MAX]; /* name of the restartable ELF binary */
+char cprl_old_name[FILENAME_MAX]; /* name of the old restartable binary */
+char cprl_del_name[FILENAME_MAX]; /* name of the old restartable binary */
+
+char *cprl_sp;                    /* stack pointer at time of checkpoint */
+char *cprl_bp;                    /* frame pointer at time of checkpoint */
+#ifndef I386
+char *cprl_pc;                    /* program counter at time of checkpoint */
+#endif
+unsigned long cprl_stack_size;    /* size of stack included in checkpoint */
+unsigned long cprl_buffer_size=0; /* size of buffer containing the stack */
+char *cprl_saved_stack = NULL;    /* saved stack data in the checkpoint */
+
+
+int cprl_state = 0;              /* state indicator */
+#define CPR_INITIAL   0          /* ... initial state - no checkpoint exists */
+#define CPR_READY     1          /* ... ready to take checkpoint */
+#define CPR_DONE      2          /* ... checkpoint taken */
+
+/* 
+   * Flag that can be tested in the application program to determine
+   * whether the code is the original code or a checkpointed version 
+   * of the code.
+   */
+
+int cpr_restart_count = 0;        /* number of times execution restarted */
+int cpr_restart_ind = 0;          /* restart indicator */
+
+/*
+   * Dummy variables for registers should not be defined. The corresponding
+   * assembler source file should be edited to correct references to these
+   * variables to references to the corresponding registers:
+   *
+   *            Stack pointer(sp)  Frame pointer(bp) Return address(pc)
+   * SPARC      %sp                %fp              %i7
+   * I386       %esp               %ebp             N/A (on stack)
+   *
+   */
+
+extern char *_sp_register;     /* reference to stack pointer register */
+extern char *_bp_register;     /* reference to frame pointer register */
+#ifndef I386
+extern char *_pc_register;     /* reference to return address */
+#endif
+
+  /*
+   * Local prototypes:
+   */
+
+void unexec(char *new, char *old, int, int, int);
+
+void cprl_take(int depth);
+void cprl_restart(int depth);
+ 
+#ifdef SPARC
+void cprl_flush_win(int depth);
+#endif /* SPARC */
+
+/*
+   * Function cprl_init() is called once at a fixed depth in the main
+   * program in order to mark the highest stack address which should
+   * be included in the checkpoints.
+   */
+
+void cpr_init(int depth)
+{
+  int i;
+  cprl_start_stack = _bp_register;
+#ifdef SPARC
+  cprl_flush_win(33);
+#endif
+
+  /*
+   * The following code jumps back up the the frame that is
+   * the correct activation record that allows main to return
+   * properly. Repeat for each increase in the nesting level
+   * from which cprl_init() is called.
+   */
+  for(i=0;i<depth;i++) {
+#ifdef SPARC
+    cprl_start_stack = cprl_start_stack+56;
+    cprl_start_stack = *(char **)cprl_start_stack;
+#endif /* SPARC */
+#ifdef I386
+    cprl_start_stack = *(char **)cprl_start_stack;
+    cprl_start_stack = *(char **)cprl_start_stack;
+#endif /* I386 */
+  }
+}
+
+/*
+   * Function cpr_prepare() deletes the oldest checkpoint and 
+   * prepares for the next checkpoint.
+   */
+
+void cpr_prepare(char *chkp_name, char *prog_name)
+{
+  int rc;
+  char msg[FILENAME_MAX+80];
+
+  if (cprl_state == CPR_READY)
+    {
+      fprintf(stderr,
+	      "Checkpoint/Restart: cprl_prepare() issued in wrong state.\n");
+      exit(1);
+    }
+
+  if (cprl_state == CPR_INITIAL)
+    {
+      cprl_rst_name[0] = 0;
+      cprl_old_name[0] = 0;
+      cprl_del_name[0] = 0;
+    }
+
+  if (cprl_del_name[0])
+    {
+      rc = unlink(cprl_del_name);
+      if (rc && errno != ENOENT)
+	{
+	  sprintf(msg,"Checkpoint/Restart: Error deleting checkpoint %s (%d)",
+		  cprl_del_name,rc);
+	  perror(msg);
+	  exit(1);
+	}
+    }
+
+  if (!cprl_bin_name)
+    {
+      cprl_bin_name = malloc(strlen(prog_name)+1);
+      strcpy(cprl_bin_name,prog_name);
+    }
+
+  strcpy(cprl_del_name,cprl_old_name);
+  strcpy(cprl_old_name,cprl_rst_name);
+  strcpy(cprl_rst_name,chkp_name);
+
+  cprl_state = CPR_READY;
+}
+
+/*
+   * Function cprl_take() creates a new checkpoint file under the 
+   * name passed in the cprl_init() call. 
+   */
+
+void cpr_take() {
+  char temp_file[FILENAME_MAX];
+  char mv_cmd[2*FILENAME_MAX+3];
+  char msg[FILENAME_MAX+80];
+
+#ifdef SPARC
+  cprl_flush_win(33);
+#endif
+  if (cprl_state != CPR_READY)
+    {
+      fprintf(stderr,"Checkpoint/Restart: Internal state error.\n");
+      exit(1);
+    }
+  cprl_sp = _sp_register;
+  cprl_bp = _bp_register;
+#ifndef I386
+  cprl_pc = _pc_register;
+#endif
+  cprl_stack_size = cprl_start_stack-cprl_sp;
+  
+  if (cprl_buffer_size<cprl_stack_size)
+     {
+     cprl_buffer_size=cprl_stack_size+CPR_STACK_EXTRA;
+     if (cprl_saved_stack) free(cprl_saved_stack);
+     cprl_saved_stack = malloc(cprl_buffer_size);
+     if (cprl_saved_stack==NULL)
+        {
+        fprintf(stderr,
+		"Checkpoint/Restart: unable to allocate %d byte stack.\n",
+		cprl_buffer_size);
+        exit(1);
+        }
+     }
+  memcpy(cprl_saved_stack,cprl_sp,cprl_stack_size);
+  /* initialise values for new binary */
+  cpr_restart_ind = 1; 
+  cpr_restart_count++;
+  cprl_state = CPR_DONE;
+
+  tmpnam(temp_file);
+  unexec(temp_file,cprl_bin_name,0,0,0);
+  sprintf(mv_cmd,"mv %s %s",temp_file,cprl_rst_name);
+  if (system(mv_cmd)<0) 
+     {
+     sprintf(msg,"Checkpoint/Restart: Error moving checkpoint %s",
+	     cprl_rst_name);
+     perror(msg);
+     exit(1);
+     }
+  /* restore to values for this binary */
+  cpr_restart_count--;
+  cpr_restart_ind = 0;
+}
+
+/*
+   * Function cprl_restart() executed as part of a restarted checkpoint
+   * restores the stack to the original state as when the checkpoint was
+   * taken and continues execution from this checkpoint.
+   */
+
+void cpr_restart()
+{
+
+#ifdef SPARC
+  cprl_flush_win(33);
+#endif
+  _sp_register = cprl_sp;
+  memcpy(cprl_sp,cprl_saved_stack,cprl_stack_size);
+  _bp_register = cprl_bp;
+#ifndef I386
+  _pc_register = cprl_pc;
+#endif
+
+}
+
+#ifdef SPARC
+/*
+   * The recursive calls cause the register windows to be dumped 
+   * onto the stack.
+   */
+void cprl_flush_win(int depth)
+{
+  if (depth) cprl_flush_win(depth-1);
+}
+#endif /* SPARC */
+\end{code}

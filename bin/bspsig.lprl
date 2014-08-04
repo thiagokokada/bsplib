@@ -1,0 +1,808 @@
+\begin{code}#! @PERL@
+$bindir        = "@bindir@";
+$includedir    = "@includedir@";
+$libdir        = "@libdir@";
+$mandir        = "@mandir@";
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% $Id$
+%% $Log$
+
+\begin{code}
+push(@INC,$includedir);
+push(@INC,$bindir);
+require "bsputil";
+require "bspprof_theory.prl";
+
+select(STDERR); $| = 1; select(STDOUT); # no STDERR buffering, please.
+($Pgm = $0) =~ s|.*/||;
+$Version        = "1.3, 25th Nov 1997";
+$bug_reports_to = 'bsplib-bugs@comlab.ox.ac.uk';
+
+$ShortUsage = "\n$Pgm usage: for basic information, try the `-help' option\n";
+\end{code}
+
+\begin{code}
+$Verbose    = 0;
+$OutputType = 0;
+$InputFile  ="PROF.bsp";
+$Runtime    =0.0;
+$SortBlock  =400;
+$SortType   ="commtheory";
+$Compress   =0;
+$Stat       =0;
+$BucketSize =1;
+$Ignore     =0.1;
+$arch       ="";
+$device     ="";
+$libtype    ="";
+$columns    =80;
+$machname   ="unknown machine";
+$max_int    =42949672960;
+
+%sstepTable_line = ();# sstep_id -> int
+%sstepTable_file = ();# sstep_id -> string
+
+%ssteps_stat     = ();    # [(Int,Int))] -> int
+%ssteps_hrel     = ();    # sstepno -> hrel
+%ssteps_commtime = ();    # sstepno -> time
+%ssteps_comptime = ();    # sstepno -> time
+%ssteps_id       = ();    # sstepno -> sstep_id
+%ssteps_count    = ();    # sstepno -> int
+%ssteps_commcost = ();    # sstepno -> float
+@ssteps          = ();    # [Int]
+
+\end{code}
+
+
+\begin{code}
+  arg: while ($_ = $ARGV[0]) {
+  shift(@ARGV);
+  #--------HELP------------------------------------------------
+  /^-(help|man)$/     && do {&FormatManual("bspsig.1");exit(0);};
+
+  /^-v$/        && do {$Verbose = 1; next arg;};
+
+  /^-sort$/     && do {$SortType=&grab_next_arg("-sort");
+                       if (!($SortType=~/hrel|syncs|commtheory|commreal/   ||
+                             $SortType=~/delta|comp|rcomptheory|rcompreal/ ||
+                             $SortType=~/w|w\/h|w\/syncs|comm/)) {
+                         print STDERR "$Pgm: unrecognised sort option ",
+                                      "\"$SortType\".\n";
+                         $Status++;
+                       }
+		       next arg;};
+
+  /^-wfm$/      && do {$OutputType=1;
+		       $SortType  ="comp";
+		       next arg;};
+  /^-stat$/     && do {$Stat=1; next arg;};
+
+  /^-sig$/      && do {$OutputType=2;
+		       $SortType  ="comp";
+		       next arg;};
+
+  /^-ignore$/   && do {$Ignore=&grab_next_arg("-ignore");
+                       $Ignore=$Ignore/1.0;
+		       next arg;};
+
+  /^-bucket$/   && do {$BucketSize=&grab_next_arg("-bucket");
+                       $BucketSize=int($BucketSize);
+		       next arg;};
+
+  /^-compress$/ && do {$Compress=&grab_next_arg("-compress");
+                       if ($Compress =~ /^(\d+)$/) {
+                       } else {
+                         print STDERR "$Pgm: -compress needs integer ".
+                                      "argument\n";
+                         $Status++;
+                       }
+                       next arg;};
+
+  /^-slg$/     && do {  $i = &grab_next_arg("-slg");
+                       if ($i=~ /^(\d*\.\d+),(\d+),(\d*\.\d+),(\d+)$/) {
+                           $bsp_s    = &getNumber($1);
+                           $bsp_l    = &getNumber($2);
+                           $bsp_g    = &getNumber($3);
+                           $bsp_nhalf= &getNumber($4);
+                       } elsif ($i=~ /^(\d*\.\d+),(\d+),(\d*\.\d+)$/) {
+                           $bsp_s    = &getNumber($1);
+                           $bsp_l    = &getNumber($2);
+                           $bsp_g    = &getNumber($3);
+                           $bsp_nhalf= 10;
+                       } else {
+                          print STDERR "$Pgm error: -slg ",
+                                       "float_s,integer_l,float_g,integer_nhalf";
+                          $Status++;
+                       }
+                        next arg;};
+
+  /\.bsp$/    && do {$InputFile = $_; next arg;};
+  print STDERR "Unrecognised option \"",$_,"\"\n";
+  $Status++;
+  }
+  if ($Status>0) {
+    print STDERR $ShortUsage;
+    exit(1);
+  }
+  print STDERR "$Pgm: ($Version)\n" if $Verbose;
+  $timenow = time;
+  $syncs = &readProfile();
+  @sstep_sites = keys %sstepTable_line;
+  $before_size = $#ssteps+1;
+  if ($before_size==0) {
+    printf STDERR "$Pgm: profile file $InputFile is empty\n";
+    exit(1);
+  }
+  printf STDERR "\n$Pgm: read-combine.    [%4d distinct]%6d to %6d elems. ".
+                " [%7.2f secs]\n",
+		 $#sstep_sites+1,$syncs,$before_size, 
+		time - $timenow if $Verbose;
+ 
+  if ($#ssteps>$SortBlock) {
+    $timenow = time;
+    $before_size   = $#ssteps+1;
+    @ssteps_temp   = @ssteps;
+    @ssteps_result = ();
+    while ($#ssteps_temp>0) {
+      @ssteps=@ssteps_temp;
+      if ($#ssteps_temp<$SortBlock) {
+        @ssteps_temp=();
+      } else {
+        splice(@ssteps,$SortBlock-$#ssteps-1);   # take $SortBlock @ssteps
+        splice(@ssteps_temp,0,$SortBlock);       # drop $SortBlock @ssteps
+      }
+      @ssteps = sort hrelation_key @ssteps;
+      &combineData(1);  
+      splice(@ssteps_result,$#ssteps_result+1,0,@ssteps);
+    }
+    @ssteps = @ssteps_result;
+    printf STDERR "$Pgm: blocks(%4d) of sort-combine. ".
+                  "  %6d to %6d elems   [%7.2f secs]\n",
+	          $SortBlock,$before_size,$#ssteps+1, 
+                  time - $timenow  if $Verbose; 
+  }
+
+  $timenow=time;
+  @ssteps = sort hrelation_key @ssteps;
+  $before_size = $#ssteps+1;
+  &combineData(1);
+  printf STDERR "$Pgm: sort then combine.         ".
+                "     %6d to %6d elems   [%7.2f secs]\n",
+	        $before_size,$#ssteps+1, time - $timenow  if $Verbose;  
+
+  if ($Compress>0) {
+    $BucketSize = 2;
+    while (($#ssteps>=$Compress)    && 
+           ($#ssteps>$#sstep_sites)) {
+      $timenow = time;
+      $before_size   = $#ssteps+1;
+      @ssteps = sort hrelation_key @ssteps;
+      &combineData(1); 
+      printf STDERR "$Pgm: compressing(%4d).            ".
+                  "  %6d to %6d elems   [%7.2f secs]\n",
+	          $BucketSize,$before_size,$#ssteps+1, 
+                  time - $timenow  if $Verbose; 
+      $BucketSize *= 2;
+    }
+    print STDERR "\n" if $Verbose;
+  }   
+
+  if ($OutputType==2) {
+    $BucketSize=1;
+    @ssteps = sort hrelation_key @ssteps;
+    &combineData(0); 
+  }
+  
+  &setBSPmachineParams($nprocs);
+
+  foreach $i (@ssteps) {
+    $hrel            = &div0($ssteps_commcost{$i},$ssteps_count{$i});
+    $ssteps_hrel{$i} = $hrel;
+    if ($hrel==0) {
+      $ssteps_commcost{$i}= $bsp_l * $ssteps_count{$i};
+    } else {
+      $ssteps_commcost{$i}=(( (($bsp_nhalf/$hrel)+1)*$bsp_g * $hrel)+$bsp_l)*
+			   $ssteps_count{$i};
+    }
+    $ssteps_commcost{$i}=&div0($ssteps_commcost{$i}/1000.0,
+			       $bsp_real_s*1000.0);
+  }
+
+  if ($SortType eq "hrel") {
+    print "Sorted with respect to size of h-relation\n";
+    @ssteps = sort hrelation_key @ssteps;
+
+  } elsif ($SortType eq "syncs") {
+    print "Sorted with respect to superstep count\n";
+    @ssteps = sort count_key @ssteps;
+
+  } elsif (($SortType eq "commtheory") || ($SortType eq "commtheory")) {
+    print "Sorted with respect to theoretical communication cost\n";
+    @ssteps = sort commtheory_key @ssteps;
+
+  } elsif ($SortType eq "commreal") {
+    print "Sorted with respect to actual communication cost\n";
+    @ssteps = sort commreal_key @ssteps;
+
+  } elsif ($SortType eq "delta") {
+    print "Sorted with respect to difference in theoretical and ",
+          "real communication cost\n";
+    @ssteps = sort delta_key @ssteps;
+
+  } elsif (($SortType eq "comp") || ($SortType eq "w")) {
+    print "Sorted with respect to computation time\n";
+    @ssteps = sort comp_key @ssteps;
+
+  } elsif ($SortType eq "rcomptheory") {
+    print "Sorted with respect to ratio of computation to ",
+          "theoretical communcation cost\n";
+    @ssteps = sort rcomptheory_key @ssteps;
+
+  } elsif ($SortType eq "rcompreal") {
+    print "Sorted with respect to ratio of computation to ",
+          "communcation time\n";
+    @ssteps = sort rcompreal_key @ssteps;
+
+  } elsif ($SortType eq "w/h") {
+    print "Sorted with respect to w/h\n";
+    @ssteps = sort woverh_key @ssteps;
+
+  } elsif ($SortType eq "w/syncs") {
+    print "Sorted with respect to w/syncs\n";
+    @ssteps = sort woversyncs_key @ssteps;
+  }
+  if ($OutputType==0) {
+    &terminalWidth();
+    &printProfile();
+  } elsif ($OutputType==1) {
+    &printWfmProfile();
+  } else {
+    %sstepTable_file = ();
+    %sstepTable_line = ();
+    &printWfmProfile();
+  }
+  &printStats() if $Stat;
+  exit(1);
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Read data}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub readProfile {
+  local($sstepid,$commtime,$comptime,$lasttime);
+  local($h_rel,$i,$j,$k,$sstepno,$filename,$lineno,$bytes);
+  local($syncs,$sstepno_find);
+  local(%ssteps_bytes) = ();    # [(int,int)] -> [sstepno]
+
+  if (!open(PROFILE,$InputFile)) {
+    print STDERR "$Pgm: failed to open profile data in $InputFile\n";
+    exit(1);
+  }
+  $sstepno  = 1;
+  $syncs    = 0;
+  $lasttime = 0.0;
+  while (<PROFILE>) {
+    if (/^c\s+(\d+)\s+(\d+.\d+)\s+(\d+.\d+).*\@\@\s+/o) {
+      $syncs++;
+      $sstepid   = $1;
+      $commtime  = $3 - $2;
+      $comptime  = $2-$lasttime;
+      $comptime  = 0 if ($2<$lasttime);
+      $lasttime  = $3;
+      chop($bytes     = $');
+      $sstepno_find = 0;
+      foreach $i (split(/\s+/,$ssteps_bytes{$bytes})) {
+        $sstepno_find = $i if ($ssteps_id{$i}==$sstepid);
+      }
+      if ($sstepno_find) {
+        # Combine exact match
+        $ssteps_commtime{$sstepno_find} += $commtime;
+        $ssteps_comptime{$sstepno_find} += $comptime;
+        $ssteps_count{$sstepno_find}++;
+      } else {
+        $ssteps_bytes{$bytes}  .= "$sstepno ";
+        $ssteps_commtime{$sstepno}  = $commtime;
+        $ssteps_comptime{$sstepno}  = $comptime;
+        $ssteps_id{$sstepno}    = $sstepid;
+        $ssteps_count{$sstepno} = 1;
+        push(@ssteps,$sstepno++);
+      }
+    } elsif (/^s\s+(\d+)\s+(\d+)\s+/) {
+      $sstepid = $1;
+      $lineno  = $2;
+      $filename=$';
+      $sstepTable_line{$sstepid} = $lineno;
+      $sstepTable_file{$sstepid} = $filename;
+   
+    } elsif (/^N\s*/) {
+      chop($arch = $') if ($arch eq "");
+      $machname = &backtick("$bindir/bsparch -convertname $arch");
+      if ($machname eq "") {
+         $machname = &backtick("bsparch -convertname $arch");
+      }
+
+    } elsif (/^X\s*/) {
+      chop($device = $') if ($device eq "");
+
+    } elsif (/^F/) {
+      if (/-prof/ && /-flibrary-level\s+(\d+)/) {
+        $libtype = "P$1";
+      } elsif (/-flibrary-level\s+(\d+)/) {
+        $libtype = "O$1";
+      }
+    } elsif (/^E\s*/) {
+      chop($Runtime = $');
+      $Runtime = $Runtime / 1.0;
+    } elsif (/^P\s*/) {
+      $nprocs = int($');
+    }
+  }
+  close(PROFILE);
+  while (($bytes,$i) = each %ssteps_bytes) {
+    $h_rel = 0;
+    foreach $j (split(/\s+/,$bytes)) {
+      if ($j > $h_rel) {
+        $h_rel   = $j;
+      } 
+    }
+    $h_rel = $h_rel/4; #Convert bytes to 32bit words
+    foreach $j (split(/\s+/,$i)) {
+      $ssteps_hrel{$j} = $h_rel;
+      $ssteps_commcost{$j} = $h_rel*$ssteps_count{$j};
+    }
+  }
+  if ($Stat) {
+    # Convert this datastructure into a form useful 
+    while (($bytes,$i) = each %ssteps_bytes) {
+      $k=0;
+      foreach $j (split(/\s+/,$i)) {
+        $k += $ssteps_count{$j};
+      }
+      $ssteps_stat{$bytes}=$k;
+    }
+  }
+  %ssteps_bytes=();
+  return $syncs;
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Combine data}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub combineData {
+  local($same_cost_centre) = $_[0];
+  local(@result);
+  local($i,$j,$last,$id,$last_id,$hrel,$last_hrel);
+
+  @result=();
+  $last      = shift(@ssteps);
+  $last_id   = $ssteps_id{$last};
+  $last_hrel = $ssteps_hrel{$last};
+  foreach $i (@ssteps) {
+    $id   = $ssteps_id{$i};
+    $hrel = $ssteps_hrel{$i};
+    if ((int($hrel/$BucketSize)==int($last_hrel/$BucketSize)) && 
+        (!$same_cost_centre || ($id == $last_id))) {
+      $ssteps_count{$last} += $ssteps_count{$i};
+      $ssteps_commtime{$last}  += $ssteps_commtime{$i};
+      $ssteps_commcost{$last}  += $ssteps_commcost{$i};
+      $ssteps_comptime{$last}  += $ssteps_comptime{$i};
+    } else {
+      push(@result,$last);
+      $last      = $i;
+      $last_id   = $id;
+      $last_hrel = $hrel;
+    }
+  }
+  push(@result,$last);
+
+  @ssteps = @result;
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Print data}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub terminalWidth {
+  if (open(STTY,"stty -a |")) {
+    while(<STTY>) {
+      if (/(\d+)\s+columns/ && (int($1)>80)) {
+        $columns=$1;
+      }
+    }
+  }
+  close(STTY);
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Print data}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub printProfile {
+  local($sstepno,$sstepid);
+  local($time,$i,$totcommcost,$totcommtime,$tothrel);
+  local($totcomptime,$totcount,$totdelta);
+  local($comm_scale, $comm_head);
+  local($comp_scale, $comp_head);
+  local($extra);
+  local($filename_len,$filename);
+  local($format,$format_tot,$extra_spc,$extra_dash,$extra_equal);
+
+  $extra        = int(($columns-80)/13);
+  $filename_len = $columns-71-(9*$extra);
+  $extra_dash ="";
+  $extra_spc  ="";
+  $extra_equal="";
+  for($i=0;$i<$extra;$i++) {
+    $extra_dash  .= '-';
+    $extra_equal .= '=';
+    $extra_spc   .= ' ';
+  }
+  if ($extra==0) {
+    $format    = "%6d|%6d|%7.2f|%7.2f|%7.2f|%7.2f|%8.2f|%8.2f|%5d|%s\n";
+    $format_tot= "      |%6d|%7.2f|%7.2f|%7.2f|%7.2f|%8.2f|%8.2f|     |\n";
+  } else {
+    $format = sprintf("%%%dd|%%%dd|".
+                      "%%%d.2f|%%%d.2f|%%%d.2f|%%%d.2f|%%%d.2f|%%%d.2f|".
+                      "%%%dd|%%s\n",
+		      6+$extra,6+$extra,
+		      7+$extra,7+$extra,7+$extra,7+$extra,8+$extra,8+$extra,
+		      5+$extra);
+    $format_tot=sprintf("$extra_spc      |%%%dd|%%%d.2f|%%%d.2f|%%%d.2f|".
+                        "%%%d.2f|%%%d.2f|%%%d.2f|$extra_spc     |\n",
+                        6+$extra,7+$extra,7+$extra,7+$extra,
+                        7+$extra,8+$extra,8+$extra);
+   }
+  $totcommcost = 0;
+  $totcommtime = 0;
+  $totdelta    = 0;
+  $tothrel     = 0;
+  foreach $i (@ssteps) {
+    $tothrel     += $ssteps_count{$i} * $ssteps_hrel{$i};
+    $totcommtime += $ssteps_commtime{$i};
+    $totcomptime += $ssteps_comptime{$i};
+    $totcommcost += $ssteps_commcost{$i};
+    $totcount    += $ssteps_count{$i};
+    $totdelta    += $ssteps_commcost{$i}-$ssteps_commtime{$i};
+  }
+
+  if (($totcommtime<10.0) && ($totcommcost<10.0)) {
+    $comm_scale = 1000.0;
+    $comm_head  = "msec";
+  } else {
+    $comm_scale = 1.0;
+    $comm_head  = "secs";
+  }
+
+  if ($totcomptime<10.0) {
+    $comp_scale = 1000.0;
+    $comp_head  = "msec";
+  } else {
+    $comp_scale = 1.0;
+    $comp_head  = "secs";
+  }
+
+  # Division by zero..
+  $totcommcost = 1.0 if $totcommcost == 0.0;
+  $totcommtime = 1.0 if $totcommtime == 0.0;
+  $totcomptime = 1.0 if $totcommtime == 0.0;
+
+  print "\n",
+        "$extra_spc$extra_spc$extra_spc       C O M M U N I C A T I O N ",
+        "$extra_spc$extra_spc    |",
+        "$extra_spc  C O M P U T A T I O N$extra_spc$extra_spc  |",
+        " $extra_spc SUPERSTEP\n",
+        "$extra_dash$extra_dash$extra_dash$extra_dash$extra_dash",
+        "-------------------------------------+",
+        "$extra_dash$extra_dash$extra_dash$extra_dash$extra_dash",
+        "--------------------------------------\n",
+        " H-REL$extra_spc| SYNCS$extra_spc| THEORY$extra_spc|",
+        "  REAL $extra_spc| DELTA $extra_spc|  REAL $extra_spc|$extra_spc Ratio Comp/Comm$extra_spc | $extra_spc    |\n",
+        " words$extra_spc|$extra_spc      |  $comm_head $extra_spc|",
+        "  $comm_head $extra_spc|  T-R  $extra_spc|  $comp_head $extra_spc|",
+        " theory $extra_spc|  real  $extra_spc| line$extra_spc|  file\n",
+        "$extra_dash------+$extra_dash------+$extra_dash-------+",
+        "$extra_dash-------+$extra_dash-------+$extra_dash-------+",
+        "$extra_dash--------+$extra_dash--------+$extra_dash-----+",
+        "$extra_dash-----\n";
+  foreach $sstepno (@ssteps) {
+    $hrel       = $ssteps_hrel{$sstepno};
+    $sstepid    = $ssteps_id{$sstepno};
+    $filename   = $sstepTable_file{$sstepid};
+    $filename   =~/(.{1,$filename_len}$)/ && ($filename = $1);
+    printf 	$format,
+                $hrel,$ssteps_count{$sstepno},
+		$ssteps_commcost{$sstepno}*$comm_scale,
+		$ssteps_commtime{$sstepno}*$comm_scale,
+                ($ssteps_commcost{$sstepno}-
+		 $ssteps_commtime{$sstepno})*$comm_scale,
+                $ssteps_comptime{$sstepno}*$comp_scale,
+                &div0($ssteps_comptime{$sstepno},$ssteps_commcost{$sstepno}),
+		&div0($ssteps_comptime{$sstepno},$ssteps_commtime{$sstepno}),
+		$sstepTable_line{$sstepid},
+		$filename;
+  }
+  print "$extra_equal======+$extra_equal======+$extra_equal=======+",
+        "$extra_equal=======+$extra_equal=======+$extra_equal=======+",
+        "$extra_equal========+$extra_equal========+$extra_equal=====+",
+        "$extra_equal=====\n";
+  printf $format_tot,
+         $totcount,
+         $totcommcost*$comm_scale,
+         $totcommtime*$comm_scale,
+         ($totcommcost-$totcommtime)*$comm_scale,
+	 $totcomptime*$comp_scale,
+         &div0($totcomptime,$totcommcost),
+         &div0($totcomptime,$totcommtime);
+ 
+  printf "\n\tBSP cost (usecs) = %.3e +  %.3e(g/s)  +  %d(l/s)\n",
+          $totcomptime*1000000.0,
+          $tothrel,
+          $totcount;
+         
+         
+  printf "\n\tTheoretical communication  time = %10.3f secs [%8.2f%%] \n".
+         "\tActual total communication time = %10.3f secs [%8.2f%%]\n".
+         "\tActual total elapsed       time = %10.3f secs\n",
+	 $totcommcost,
+         100.0*&div0($totcommcost,$Runtime),
+         $totcommtime,100.0*&div0($totcommtime,$Runtime),$Runtime;
+
+
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Print data}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub printWfmProfile {
+  local($i, $hrel, $sstepid, $filename,$filename_len);
+  local($sync_perc,$comm_perc,$comp_perc);
+  local($syncs,$W,$W_over_h);
+  local($nosyncs,$syncs_tot,$comm_tot,$comp_tot,$total);
+
+  $filename_len = 14;
+  print "\n";
+  print " syncs| h-rel |     w    |    w/h   |\%comp|\%comm|\%sync| line| filename\n";
+  print "------+-------+----------+----------+-----+-----+-----+-----+-------------\n";
+  $nosyncs  =0.0;
+  $syncs_tot=0;
+  $comp_tot =0.0;
+  $comm_tot =0.0;
+  foreach $sstepno (@ssteps) {
+    $nosyncs+=$ssteps_count{$sstepno};
+    $comp_tot +=$ssteps_comptime{$sstepno}*$bsp_real_s; 
+    $comm_tot +=($ssteps_hrel{$sstepno}*$bsp_g)*$ssteps_count{$sstepno};
+    $syncs_tot+=$ssteps_count{$sstepno}*$bsp_l;
+  }
+  $comp_tot *= 1000000.0;
+  $total = $comp_tot + $comm_tot + $syncs_tot;
+  foreach $sstepno (@ssteps) {
+    $hrel       = $ssteps_hrel{$sstepno};
+    $sstepid    = $ssteps_id{$sstepno};
+    $filename   = $sstepTable_file{$sstepid};
+    $filename   =~/(.{1,$filename_len}$)/ && ($filename = $1);
+ 
+    $syncs      = $ssteps_count{$sstepno};
+    $W          = ($ssteps_comptime{$sstepno}*$bsp_real_s*1000000.0)/$syncs;
+    if ($hrel==0) {
+      $W_over_h = "infinity";
+    } else {
+      $W_over_h   = sprintf("%10d",$W/$hrel);
+    }
+
+    $comp_perc = ($ssteps_comptime{$sstepno}*$bsp_real_s*100000000.0)/$total;
+    $comm_perc = ((($ssteps_hrel{$sstepno}*$bsp_g)*$ssteps_count{$sstepno})/
+                  $total)*100.0;
+    $sync_perc = (($bsp_l*$ssteps_count{$sstepno})/$total)*100.0;
+    if (($comp_perc+$comm_perc)>$Ignore) {
+      printf 	"%6d|%7d|%10d|%10s|%5.1f|%5.1f|%5.1f|%5d|%s\n",
+                  $syncs,
+		  $hrel,
+		  $W,
+		  $W_over_h,
+		  $comp_perc,
+		  $comm_perc,
+		  $sync_perc,
+		  $sstepTable_line{$sstepid},
+		  $filename;
+    }
+  }
+  print "======+=======+==========+==========+=====+=====+=====+=====+=============\n";
+  printf "%6d|       |%10d|          |%5.1f|%5.1f|%5.1f|     |\n",
+	$nosyncs,
+	$comp_tot,
+	$comp_tot /$total*100.0,
+	$comm_tot /$total*100.0,
+        $syncs_tot/$total*100.0;
+
+  printf "\n\tUpper bound for G=%5.1f\n",($comp_tot/$comm_tot)*$bsp_g;
+  printf "\tUpper bound for L=%d\n",($comp_tot/$syncs_tot)*$bsp_l;
+  
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Print stats}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub printStats {
+  local($bytes,$count,$in,$out,$proc);
+  local($accum_max_h, $accum_avg_h, $accum_min_h);
+  local($max_h, $avg_h, $min_h);
+  local(@in_out);
+  local(@comm_per_process)=();
+
+  print "\nAccumulated H-relation statistics:\n";
+  $accum_max_h=0;
+  $accum_avg_h=0;
+  $accum_min_h=0;
+  while (($bytes,$count) = each %ssteps_stat) {
+    $max_h=0;
+    $avg_h=0;
+    $min_h=2147483640;
+    @in_out = split(/\s+/,$bytes);
+    $proc=0;
+    while ($#in_out>0) {
+      $in = shift @in_out;
+      $out= shift @in_out;
+      $out=$in if $in>$out;
+      $out=$out/4;
+      $comm_per_process[$proc++] += $out * $count;
+      $min_h = $out if $out<$min_h;
+      $max_h = $out if $out>$max_h;
+      $avg_h+= $out;
+    }
+    $accum_max_h+=$max_h*$count;
+    $accum_avg_h+=($avg_h/$nprocs)*$count;
+    $accum_min_h+=$min_h*$count;
+  }
+  $max_h=0;
+  $avg_h=0;
+  $min_h=2147483640;
+  for ($i=0;$i<$nprocs;$i++) {
+    $out = $comm_per_process[$i];
+    $max_h = $out if $out>$max_h;
+    $min_h = $out if $out<$min_h;
+    $avg_h+= $out;
+  }
+  $avg_h = $avg_h / $nprocs;
+
+  printf "\tSum Max h (Max supersteps)= %12d\n",
+	$accum_max_h;
+
+  printf "\tMax Sum h (Max async)     = %12d [%5.2f%% of max]\n",
+	$max_h,
+	&div0($max_h,$accum_max_h)*100.0;
+
+  printf "\tSum Avg h (Volume)        = %12d [%5.2f%% of max]\n",
+	$accum_avg_h,&div0($accum_avg_h,$accum_max_h)*100.0;
+
+  printf "\tMin Sum h (Min async)     = %12d [%5.2f%% of max]\n",
+	$min_h,
+	&div0($min_h,$accum_max_h)*100.0;
+
+  printf "\tSum Min h (Min supersteps)= %12d [%5.2f%% of max]\n\n",
+	$accum_min_h,
+	&div0($accum_min_h,$accum_max_h)*100.0;
+
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Sorting keys}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub hrelation_key {
+  local($hrel1,$hrel2,$equal);
+
+  $hrel1 = $ssteps_hrel{$b};
+  $hrel2 = $ssteps_hrel{$a};
+  if ((int($hrel1/$BucketSize)) == (int($hrel2/$BucketSize))) {
+    $equal = $sstepTable_line{$ssteps_id{$b}} <=> 
+             $sstepTable_line{$ssteps_id{$a}};
+
+    if ($equal==0)  {
+      return ($sstepTable_file{$ssteps_id{$b}} cmp 
+              $sstepTable_file{$ssteps_id{$a}});
+    } else {
+      return ($equal);
+    }
+  } else {
+    return ( $hrel1 <=> $hrel2 );
+  }
+}
+
+sub commtheory_key {
+  local($cost1,$cost2,$equal);
+
+  $cost1 = $ssteps_commcost{$b};
+  $cost2 = $ssteps_commcost{$a};
+  if ($cost1 == $cost2) {
+    $equal = $sstepTable_file{$ssteps_id{$b}} cmp 
+             $sstepTable_file{$ssteps_id{$a}};
+
+    if ($equal==0)  {
+      return ($sstepTable_line{$ssteps_id{$b}} <=> 
+              $sstepTable_line{$ssteps_id{$a}});
+    } else {
+      return ($equal);
+    }
+  } else {
+    return ( $cost1 <=> $cost2 );
+  }
+}
+
+sub count_key {
+  return($ssteps_count{$b}<=> $ssteps_count{$a});
+}
+
+sub delta_key {
+  return(($ssteps_commcost{$a}-$ssteps_commtime{$a}) <=> 
+         ($ssteps_commcost{$b}-$ssteps_commtime{$b}));
+}
+
+sub commreal_key {
+  return($ssteps_commtime{$b} <=> $ssteps_commtime{$a});
+}
+
+sub comp_key {
+  return($ssteps_comptime{$b} <=> $ssteps_comptime{$a});
+}
+
+sub rcomptheory_key {
+  return(&div0($ssteps_comptime{$b},$ssteps_commcost{$b}) <=>
+         &div0($ssteps_comptime{$a},$ssteps_commcost{$a}));
+}
+sub rcompreal_key {
+  return(&div0($ssteps_comptime{$b},$ssteps_commtime{$b}) <=>
+         &div0($ssteps_comptime{$a},$ssteps_commtime{$a}));
+}
+
+sub woverh_key {
+  local ($hrel_a, $hrel_b, $res_a , $res_b);
+
+  $hrel_a = $ssteps_hrel{$a};
+  $hrel_b = $ssteps_hrel{$b};
+  if ($hrel_a==0) {
+    $res_a = $max_int;
+  } else {
+    $res_a = $ssteps_comptime{$a}/$hrel_a;
+  }
+  if ($hrel_b==0) {
+    $res_b = $max_int;
+  } else {
+    $res_b = $ssteps_comptime{$b}/$hrel_b;
+  }
+  return($res_a <=> $res_b);
+}
+
+sub woversyncs_key {
+  return(&div0($ssteps_comptime{$b},$ssteps_count{$b}) <=>
+         &div0($ssteps_comptime{$a},$ssteps_count{$a}));
+}
+\end{code}
+

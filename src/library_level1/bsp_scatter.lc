@@ -1,0 +1,39 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Scatter function}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#include "bsp.h"
+#include "bsp_f77_names.h"
+\end{code}
+
+\begin{code}
+void bsp_scatter(int pid, void *src, void *dst, int nbytes) {
+#ifdef SANITY_CHECK
+  if (!bsp_constantI(pid))
+    bsp_abort("{bsp_scatter} the scattering pid is not constant "
+              "on all the processors");
+
+  if (!bsp_constantI(nbytes))
+    bsp_abort("{bsp_scatter} the scattering nbytes is not constant "
+              "on all the processors");
+#endif
+  bsp_get(pid,src,nbytes*bsp_pid(),dst,nbytes);
+  bsp_sync();
+}
+\end{code}

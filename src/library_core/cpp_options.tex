@@ -1,0 +1,196 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Documentation on various CPP build options}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+This section acts as a snapshot of the C pre-processor flags used in
+source of the $0.8\beta$ implementation of \bsplib{} as of 19th
+December 1996.
+%%%%%%%%%%%%
+\subsection{Generic device flags}
+%%%%%%%%%%%%
+
+\begin{enumerate}
+\item \texttt{BSP\_SHMEM} building for a shared memory architecture.
+
+\item \texttt{BSP\_MPASS} build for a distributed memory architecture
+  with message passing support.
+
+\item \texttt{BSP\_DRMA} build for an architecture with native DRMA
+  facilities.
+\end{enumerate}
+
+%%%%%%%%%%%%
+\subsection{Machine specific build flags}
+%%%%%%%%%%%%
+
+Native versions of either the shared memory, message passing, or DRMA
+operations are selected depending upon the following build flags:
+\begin{enumerate}
+\item \texttt{MPASS\_MPI} generic message passing implementation.
+
+\item \texttt{SHMEM\_SYSV} generic shared memory implementation based
+  upon System V shared memory and semaphores. Machine specific options
+  really only take effect in the \texttt{bsp\_lib\_shmem.lh}.
+  \begin{enumerate}
+  \item \texttt{SHMEM\_SYSV\_NO\_SEMAPHORE\_UNION} there are a couple
+    of variants of system V shared memory. This option switches
+    on one of the variants. If it doesn't work with this on, then try
+    it when it isn't defined.
+  \end{enumerate}
+
+\item \texttt{SHMEM\_SGI} native locks and semaphores on the Silicon
+  Graphics Power Challenge.
+
+
+\item \texttt{MPASS\_MPL} native message passing library on the IBM SP1/SP2.
+
+\item \texttt{MPASS\_PARIX} native message passing for the Parsytec
+  GC machine. This ``native'' implementation of the library runs like
+  a dog.
+
+\item \texttt{MPASS\_EXPRESS} Express (TM ParaSoft Corporation)
+  message passing. Testing on the Hitachi SR2001.
+
+\item \texttt{DRMA\_SHMEM} Cray T3D shmem library.
+\end{enumerate}
+
+
+%%%%%%%%%%%%
+\subsection{Generic compilation options}
+%%%%%%%%%%%%
+Different versions of the library can be built from the single source
+tree provided. For example, a version of the library that performs
+checks on communications or profiles communication can be
+built. Another version is friendly to other BSP processes running on
+the same machine. The following options outline the different versions
+that are built during a BSP installation. \texttt{bspfront} chooses
+the appropriate library when linking BSP programs.
+
+\begin{enumerate}
+\item Busy or non-busy waiting?
+  \begin{enumerate}
+  \item \texttt{RESOURCE\_FRIENDLY} makes sure processes don't busily
+    wait on resources.
+
+  \item \texttt{TURBO} pull out all the stops in the quest for speed.
+    This probably means busy waiting.
+
+  \item otherwise a compromise between the two extremes is adopted
+  \end{enumerate}
+  
+
+\item \texttt{STATISTICS} creates the file \texttt{STAT.bsp} that
+  contains general statistics on the execution of the program.
+
+\item \texttt{PROFILE} generates a profile log \texttt{PROF.bsp}
+  suitable for processing by \texttt{bspprof}.
+
+\item \texttt{CALLGRAPH\_PROFILE} generates call graph profiling
+information in the file \texttt{PROF.bsp}. 
+
+\item \texttt{SANITY\_CHECK} perform lots of checking to see if BSP
+  programs are well defined. When this is on, you can't expect to
+  trust any cost analysis results.
+
+\item \texttt{DEBUG} my debugging build of the library. This
+  won't be much help to anyone else.
+
+\item \texttt{USE\_BCOPY} use \texttt{bcopy} in preference to
+  \texttt{memcpy}. 
+
+\item Fortran naming conventions
+  \begin{enumerate}
+    \item \texttt{UNDERSCORE} variables have an underscore
+      appended to their names.
+
+    \item \texttt{UPPERCASE} variables are capitalised.
+
+    \item Otherwise assume the names of variables are the same as C.
+    \end{enumerate}
+\end{enumerate}
+
+%%%%%%%%%%%%
+\subsection{Shared memory options}
+%%%%%%%%%%%%
+Options specific to any of the shared memory implementations of
+\bsplib{}. Some of the prior architecture or generic compilation
+options will turn on the options below.
+
+\begin{enumerate}
+\item \texttt{SEMAPHORE\_BLOCKING} a semaphore is used to implement a
+  blocking mechanism for shared memory buffers. If this option isn't
+  set, then a faster busy waiting scheme that simulates the semaphore
+  is used (set when \texttt{RESOURCE\_FRIENDLY}).
+
+
+\item Barrier synchronisation
+  \begin{enumerate}
+  \item \texttt{BARRIER\_TREE} logarithmic tree barrier of semaphores
+
+  \item \texttt{BARRIER\_HARDWARE} use a hardware barrier mechanism if
+    available.
+
+  \item \texttt{BARRIER\_BUSYWAIT\_COUNTER} simple counting
+    barrier.
+
+  \item \texttt{BARRIER\_NONBUSYWAIT\_COUNTER} simple counting
+    barrier that sleeps on a semaphore to wait (set when
+    \texttt{RESOURCE\_FRIENDLY}).
+
+  \item \texttt{BARRIER\_BUSYWAIT\_VECTOR\_COUNTER} fastest barrier
+    scheme to date. It uses the machines cache coherence mechanism to
+    provide the mutual exclusion required by the barrier. The scheme
+    busily waits to start off with, and then progressively becomes
+    friendlier by using exponetial backoff (sleeping).  
+  \end{enumerate}
+\end{enumerate}
+
+%%%%%%%%%%%%
+\subsection{Message passing}
+%%%%%%%%%%%%
+Options specific to any of the message passing implementations of
+\bsplib{}. Some of the prior architecture or generic compilation
+options will turn on the options below.
+
+
+
+\begin{enumerate}
+\item Barrier synchronisation is implemented by a total exchange
+  because all the message headers of all communications are
+  communicated to each process by using a total exchange. The
+  following options effect the algorithm used for the total exchange:
+
+  \begin{enumerate} \item \texttt{LOG\_INIT\_EXCHANGE} perform an
+  initial reduction to minimise the total number of messages sent
+  during a total exchange. This makes an empty barrier look
+  logarithmic and not linear; for a full $h$-relation, this just
+  wastes time...  \end{enumerate}
+\end{enumerate}
+
+
+%%%%%%%%%%%
+\subsection{DRMA options}
+%%%%%%%%%%%%
+Options specific to any of the implementations that are built on-top of
+native one-sided communications (e.g., the T3D). Some of the prior
+architecture or generic compilation options will turn on the options
+below.
+
+\begin{enumerate}
+\item \texttt{BSP\_RANDOMISE\_PIDS} When starting the program, the
+machine gives the user a linear ordering of processors where there
+will be locality between processors with similar process-ids.  This
+option randomises the processors. This is particularly useful on the
+T3D when a power of two number of processes is started, and a smaller
+number is actually used in the BSP implementation. Instead of idling a
+set of processors with real pid from \texttt{bsp\_nprocs} to the
+number of processors actually allocated, a random set of processors
+will be idled. This makes better use of the communication network by
+placing ``idle'' processors within the ``space'' of the working set.
+
+
+\end{enumerate}% LocalWords:  BSP HMEM RMA DRMA MPASS SHMEM YSV bsp ib hmem lh
+% LocalWords:  EMAPHORE NION GI SP ARIX Parsytec GC XPRESS TM ParaSoft RIENDLY
+% LocalWords:  TURBO STAT bspprof CALLGRAPH ROFILE bcopy memcpy REE ARDWARE IDS
+% LocalWords:  USYWAIT OUNTER ONBUSYWAIT ECTOR OTAL XCHANGE ANDOMISE ids pid
+% LocalWords:  procs

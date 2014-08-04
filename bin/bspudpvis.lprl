@@ -1,0 +1,850 @@
+\begin{code}#! @PERL@
+$bindir        = "@bindir@";
+$includedir    = "@includedir@";
+$libdir        = "@libdir@";
+$mandir        = "@mandir@";
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1998 University of Oxford                          %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+push(@INC,$includedir);
+push(@INC,$bindir);
+require "ctime.pl";
+require "bsputil";
+require "bspprof_strata.prl";
+
+select(STDERR); $| = 1; select(STDOUT); # no STDERR buffering, please.
+($Pgm = $0) =~ s|.*/||;
+$Version        = "1.3, 25th Nov 1997";
+$bug_reports_to = 'bsplib-bugs@comlab.ox.ac.uk';
+
+$Status     = 0;
+$Colour     = 0;
+$barignore  = 0.01;
+$ShortUsage = "\n$Pgm usage: for basic information, try the `-help' option\n";
+\end{code}
+
+\begin{code}
+$Verbose   = 0;
+$Dump      = 0;
+
+$cmpoints             = 28;
+$a4width              = 842;      # A4     Rotated!!
+$a4height             = 596;      # A4     Rotated!!
+
+$letterwidth          = 782;      # Letter Rotated!!
+$letterheight         = 604;      # Letter Rotated!!
+
+$papertype            = "a4";
+$paperwidth           = $a4width;
+$paperheight          = $a4height;
+
+$comm_col             = 0.5;
+$wait_col             = 0.9;
+$cpu_col              = 0.0;
+$maxlabels_per_column = 16;
+$proclabel_ind        = $cmpoints;
+$ssteplabel_ind       = 1*$cmpoints;
+$strata_ind           = int(1*$cmpoints);
+$key_ind              = 0.5*$cmpoints;
+$strata_key_ind       = 6*$cmpoints;
+$graphwidth           = 0;
+$graphheight          = 0;
+
+$title       = "";
+$outfile     = "";
+$infile      = "prof.msc";
+$profdate    = &ctime(time);
+chop($profdate);
+$machname    = &backtick("$bindir/bsparch -name");
+$elapsed_time= 0.0;
+$infinity    = 604800.0;
+$max_time    = $infinity;
+$min_time    = 0.0;
+$ticks       = 10;
+$nprocs      = 1;
+$zooming     = 0;
+$cache       = 0;
+$compressed  = 0;
+$show_events = 0;
+$timing_adjust=1;
+$clock_resolution = 0.00000001;
+
+@src_array        = ();
+@dst_array        = ();
+@pairing_array    = ();
+@event_array      = ();
+@isrecv_array     = ();
+@proc_array       = ();
+@timestamp_array  = ();
+@msgtype_array    = ();
+@bsplibtype_array = ();
+@msgseq_array     = ();
+@msgack_array     = ();
+@msghigh_array    = ();
+
+  arg: while ($_ = $ARGV[0]) {
+  shift(@ARGV);
+  #--------HELP------------------------------------------------
+  /^-(help|man)$/ && do {&FormatManual("bspudpvis.1"); exit(0);};
+
+  /^-v$/    && do {$Verbose = 1; next arg;};
+
+  #--------GENERIC OPTIONS-------------------------------------
+
+  /^-noevent$/  && do { $show_events=0; next arg;};
+  /^-dump$/     && do { $Dump       =0; next arg;};
+  /^-noadjust$/ && do { $timing_adjust=0; next arg;};
+
+  /^-zoom$/     && do { $zooming = 1;
+		        $show_events=1;
+                        $i = shift(@ARGV); 
+                        if ($i=~ /^(\d*\.?\d+),(\d*\.?\d+)$/) {
+                           $min_time = &getNumber($1);
+                           $max_time = &getNumber($2);
+                           if ($min_time > $max_time) {
+                             $tmp      = $min_time;
+                             $min_time = $max_time;
+                             $max_time = $tmp;
+                           }
+                           
+                        } else {
+                          print STDERR "$Pgm error: -zoom <number>,<number>";
+                          $Status++;
+                        }
+                        next arg;};
+
+  /^-title$/  && do { $title = shift(@ARGV); next arg;};
+
+  /^-letter$/ && do {$papertype   = "letter";
+                      $paperwidth  = $letterwidth;
+                      $paperheight = $letterheight;
+                      next arg;};
+
+  /^-a4$/     && do {$papertype   = "a4";
+                     $paperwidth  = $a4width;
+                     $paperheight = $a4height;
+                     next arg;};
+  
+  #--------OUTPUT/INPUT FILES----------------------------------
+  /\.ps$/   && do  {$outfile = $_; next arg;}; 
+  /\.msc$/  && do  {$infile  = $_; $cache=0;  next arg;};
+  /\.smsc$/ && do  {$infile  = $_; $cache=1; next arg;};
+  /\.msc\.gz$/  && do {$infile  = $_; $cache=0; $compressed=1;next arg;};
+  /\.smsc\.gz$/ && do {$infile  = $_; $cache=1; $compressed=1;next arg;};
+  print STDERR "$Pgm: unrecognised option \"",$_,"\"\n";
+  $Status++;
+  }
+  if ($Status>0) {
+    print STDERR $ShortUsage;
+    exit(1);
+  }
+  if ($outfile eq "") {
+    $infile  =~ /\.s?msc/ && ($outfile = $` . ".ps");
+  }
+
+  print STDERR "$Pgm (v$Version):\tReading from \"$infile\",\n",
+               "\t\t\t\tPostScript output to \"$outfile\"\n\n"; 
+  if (!open(PSFILE,"> $outfile")) {
+    print STDERR "Pgm: unable to open \"$outfile\" for writing\n";
+    exit(1);
+  }
+
+  $graphwidth     = $paperwidth  - $cmpoints;
+  $graphheight    = int($paperheight - (1.7*$cmpoints));
+  $graphheight   -= 0.75*$cmpoints if (length($title)>0);
+
+  &readProfile();
+  &autoScale() if $zooming;
+  &psPrologue();
+  if ($max_time==$infinity) {
+    $max_time=$elapsed_time;
+    ($min_time,$max_time,$ticks) = &axisScale($min_time,$max_time);
+  } else {
+    $ticks=10;
+  }
+  if (!$cache) {
+    &timeAdjustments() if ($timing_adjust);
+    &cacheSortedData();
+  }
+
+  &dumpProfile() if ($Dump);
+  &drawMessageSequenceChart();
+  &psEpilogue();
+  close(PSFILE);
+  exit(0);
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Auto scale}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub autoScale {
+  local($i,$min,$max);
+  
+  $min = $max_time;
+  $max = $min_time;
+  for($i=0;$i<=$#src_array;$i++) {
+    $min = $timestamp_array[$i] if ($timestamp_array[$i] < $min);
+    $max = $timestamp_array[$i] if ($timestamp_array[$i] > $max);
+  }
+  $min_time=$min;
+  $max_time=$max;
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Read profile data}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub readProfile {
+  local($timenow,$ts,$i,$j,$infiletmp);
+
+  if ($compressed) {
+    print STDERR "$Pgm: uncompressing ";
+    $infiletmp = "gunzip -c $infile |";
+  } else {
+    $infiletmp = "cat $infile |";
+  }
+  if (!$cache) {
+    $infiletmp .= " sort |";
+  } 
+
+  if (!open(PROFILE,$infiletmp)) {
+    print STDERR "Pgm: unable to open \"$infiletmp\" for reading\n";
+    exit(1);
+  }
+ 
+  $timenow = time;
+  while(<PROFILE>) {
+    if (/^\s+(\d+)\-(\d+)\-(\d+)\-(\w)\s+(\d+)\s+(\d+\.\d+)\s+(\w)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/) {
+     if ($6 >= $min_time && $6 <= $max_time) {
+        push(@src_array,       $1);
+        push(@dst_array,       $2);
+        push(@event_array,     $3);
+        push(@isrecv_array,    $4 eq "R");
+        push(@proc_array,      $5);
+        push(@timestamp_array, $6);
+        push(@msgtype_array,   $7);
+        push(@bsplibtype_array,$8);
+        push(@msgseq_array,    $9);
+        push(@msgack_array,    $10);
+        push(@msghigh_array,   $11);
+      }
+    }
+  }
+  close(PROFILE);
+  printf STDERR "$Pgm: read   %6d elements. [%7.2f secs]\n",
+	        $#src_array+1,time-$timenow;
+
+  for($i=0;$i<=$#src_array;$i++) {
+    if (($event_array[$i]==$event_array[$i+1]) && 
+        ($src_array[$i]==$src_array[$i+1])     && 
+        ($dst_array[$i]==$dst_array[$i+1])     && 
+        ($isrecv_array[$i])                    &&
+        (!$isrecv_array[$i+1])                 &&
+        ($bsplibtype_array[$i] ne "E")) {
+      $pairing_array[$i]=$i+1;
+      $pairing_array[$i+1]=$i;
+
+    } elsif ($pairing_array[$i]!=($i-1)) {
+      $pairing_array[$i]=-2;
+    }
+
+    $elapsed_time=$timestamp_array[$i] if ($timestamp_array[$i]>$elapsed_time);
+    $nprocs   = $proc_array[$i]+1 if ($proc_array[$i]+1>$nprocs);
+  }
+ 
+}
+
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Cache file}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub cacheSortedData {
+  local($cacheout,$i,$sendrecv);
+
+  if ($infile =~ /\.msc/) {
+    $cacheout = $` . ".smsc.gz";  
+    if (!open(CACHEFILE,"| gzip -c > $cacheout")) {
+       print STDERR "Pgm: unable to open \"$cacheout\" for writing\n";
+       exit(1);
+    }
+    $timenow = time;
+    for($i=0;$i<=$#src_array;$i++) {
+      $sendrecv = "R" if ($isrecv_array[$i]);
+      $sendrecv = "S" if (!$isrecv_array[$i]);
+      
+      printf CACHEFILE " %d-%d-%d-%s %d %f %s %d %d %d %d\n",
+                       $src_array[$i],$dst_array[$i],
+                       $event_array[$i],$sendrecv,
+                       $proc_array[$i],$timestamp_array[$i],
+                       $msgtype_array[$i],$bsplibtype_array[$i],
+		       $msgseq_array[$i], $msgack_array[$i],$msghigh_array[$i];
+
+    }
+    close(CACHEFILE);
+    printf STDERR "$Pgm: caching sorted input [%7.2f secs]\n",
+	   time-$timenow;
+  }
+  @profile_data = ();
+}
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Print textual version of profile}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub dumpProfile {
+  local($i);
+
+  printf STDERR "%5.2f -> %5.2f on %d procs\n",$min_time,$max_time,$nprocs;
+  for ($i=0;$i<=$#src_array;$i++) {
+    printf STDERR "%d<->%d) %d %d %d recv=%d %d %f %s %s\n",
+	   $i,$pairing_array[$i],
+	   $src_array[$i],$dst_array[$i],$event_array[$i],
+           $isrecv_array[$i],$proc_array[$i],
+	   $timestamp_array[$i]+$time_adjustments[$proc_array[$i]],
+	   $msgtype_array[$i],$bsplibtype_array[$i];
+  }
+} 
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Time adjustments}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub timeAdjustments {
+  local($i,$proc_send,$proc_recv,$adjust,$no_adjustments,$timenow);
+  local($smallest,$fixedpoint_adjustments);
+  local(@time_adjustments);
+  local(@last_adjustments);
+
+  do {
+    $fixedpoint_adjustments = 1;
+    $no_adjustments         = 0;
+    $timenow                = time;
+    for($i=0;$i<$nprocs;$i++) {$time_adjustments[$i]=0.0;}
+
+    for($i=0;$i<=$#src_array;$i++) {
+      if ($isrecv_array[$i] && ($pairing_array[$i+1]==$i)) {
+        $proc_recv = $proc_array[$i];
+        $proc_send = $src_array[$i];
+
+        $adjust = ($timestamp_array[$i]   + $time_adjustments[$proc_recv]) -
+                ($timestamp_array[$i+1] + $time_adjustments[$proc_send]);
+        if ($adjust< (-$clock_resolution)) {
+          $no_adjustments++;
+          printf STDERR "$Pgm: Adjustment of %f to event %d between %d and %d\n",
+                 -$adjust,$event_array[$i],$proc_send,$proc_recv if ($Verbose);
+          $time_adjustments[$proc_send] -= -$adjust;
+        }
+      }
+    }
+    $smallest=0.0;
+    for($i=0;$i<$nprocs;$i++) {
+      if ($time_adjustments[$i]<$smallest) {
+        $smallest = $time_adjustments[$i];
+      }
+    }
+    for($i=0;$i<$nprocs;$i++) {
+      $time_adjustments[$i] += -$smallest;
+      $fixedpoint_adjustments = $fixedpoint_adjustments &&
+                                $time_adjustments[$i] == $last_adjustments[$i];
+      $last_adjustments[$i] = $time_adjustments[$i];
+    }
+      
+    if ($Verbose) {
+      print STDERR "$Pgm: time adjustments:\n";
+      for($i=0;$i<$nprocs;$i++) {
+        printf STDERR "\tProcess %d  +%f secs\n",$i,$time_adjustments[$i];
+      }
+    }
+    if ($fixedpoint_adjustments) {
+      for($i=0;$i<=$#src_array;$i++) {
+        $timestamp_array[$i] += $time_adjustments[$proc_array[$i]];  
+      }
+    }
+    printf STDERR "$Pgm: %d timing adjustments   [%7.2f secs]\n", 
+           $no_adjustments,time - $timenow;
+   } while ($no_adjustments >0 && !$fixedpoint_adjustments);
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Draw message sequence chart}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub drawMessageSequenceChart {
+  local($i,$j,$type,$timenow,$bsplib_event);  
+  local($datapkt,$ackpkt,$retrypkt,$droppkt,$totalpkt);
+
+  $datapkt=0;$ackpkt=0;$retrypkt=0;$droppkt=0;$totalpkt=0;
+  $timenow = time;
+  print PSFILE "gsave 0.75 cm 0.75 cm moveto ",
+               "$graphwidth 1.5 cm sub 0 rlineto stroke \n";
+  print PSFILE "/Helvetica findfont 10 scalefont setfont\n";
+
+  # Draw time axis
+  for($i=0;$i<=($ticks+1);$i++) {
+    $offset = $cmpoints*0.75+((($graphwidth-1.5*$cmpoints)*$i)/$ticks);
+    printf PSFILE "%d 0.75 cm moveto 0 0.25 cm neg rlineto stroke\n",
+	          $offset;
+
+    printf PSFILE "%d 0.75 cm moveto 0 0.6 cm neg rmoveto\n",$offset;
+    $str = sprintf("%.6f",$min_time + (($max_time-$min_time)*$i)/$ticks);
+    printf PSFILE "(%s) stringwidth pop 2 div neg 0 rmoveto (%s) show\n",
+                  $str,$str;
+	          
+  }
+  $graphheight-=1.5*$cmpoints;
+  $graphwidth-=1.5*$cmpoints;
+  print PSFILE "grestore 0.75 cm 0.75 cm translate gsave\n";
+  
+  # Draw p horizontal time lines
+  for($i=0;$i<$nprocs;$i++) {
+    printf PSFILE "0 %d moveto %d 0 rlineto stroke\n",
+                 (2*$i+1)*($graphheight)/(2*$nprocs),
+		 $graphwidth;
+  }
+
+  # Draw send receive pairs
+  for($j=0;$j<=5;$j++) {
+    for($i=0;$i<=$#src_array;$i++) {
+      if (($timestamp_array[$i]>=$min_time) && 
+          ($timestamp_array[$i]<=$max_time)) {
+
+        if ($msgtype_array[$i] eq "E") {
+          $type=4;
+        } elsif (!$isrecv_array[$i] && $pairing_array[$i]<0) {
+          $type = 3;
+          $droppkt++ if (!$j);
+        } elsif ($msgtype_array[$i] eq "R") {
+          $type = 2;
+          $retrypkt++ if (!$j);
+        } elsif ($msgtype_array[$i] eq "A") {
+          $type = 1;
+          $ackpkt++ if (!$j);
+        } elsif ($msgtype_array[$i] eq "D") {
+          $type=0;
+          $datapkt++ if (!$j);
+        } elsif ($msgtype_array[$i] eq "L") {
+          $type=5;
+          $datapkt++ if (!$j);
+        } else {
+          print STDERR "$Pgm: switch error\n";
+          exit(1);
+        }
+
+        if ($j==$type && $type==4) {
+          printf PSFILE 
+             "%d %d (%d) event\n",
+             ($timestamp_array[$i]-$min_time)*
+                $graphwidth/($max_time - $min_time),
+             (2*$proc_array[$i]+1)*($graphheight)/(2*$nprocs),   
+             $bsplibtype_array[$i];
+
+        } elsif ($j==$type && $isrecv_array[$i] && $pairing_array[$i]>=0) {
+          printf PSFILE 
+             "%d %d %d %d %d (BSP=%d Sq=%d Ak=%d Hi=%d) send\n",
+	     ($timestamp_array[$i]-$min_time)*
+                $graphwidth/($max_time - $min_time),
+             (2*$proc_array[$i]+1)*($graphheight)/(2*$nprocs),
+             ($timestamp_array[$i+1]-$min_time)*
+	        $graphwidth/($max_time - $min_time),
+             (2*$proc_array[$i+1]+1)*($graphheight)/(2*$nprocs),
+             $type,
+             $bsplibtype_array[$i],
+             $msgseq_array[$i], 
+             $msgack_array[$i],
+             $msghigh_array[$i];
+
+        } elsif ($j==$type && !$isrecv_array[$i] && $pairing_array[$i]<0) {
+          printf PSFILE 
+             "%d %d %d (%d) drop\n",
+             ($timestamp_array[$i]-$min_time)*
+                $graphwidth/($max_time - $min_time),
+             (2*$proc_array[$i]+1)*($graphheight)/(2*$nprocs),
+             $type,$msgseq_array[$i];
+        } 
+      }
+    }
+  }
+ 
+  
+  $totalpkt = $datapkt + $ackpkt + $retrypkt + $droppkt;
+  printf PSFILE "%d %d 10 (Data=%d [%.2f%%]) stringat\n",
+	 $graphwidth/5,
+ 	 $graphheight - 0.5*$cmpoints,
+	 $datapkt,
+	 ($datapkt*100.0)/$totalpkt;
+
+  printf PSFILE "%d %d 10 (Acks=%d [%.2f%%]) stringat\n",
+	 2*$graphwidth/5,
+ 	 $graphheight - 0.5*$cmpoints,
+	 $ackpkt,
+	 ($ackpkt*100.0)/$totalpkt;
+
+  printf PSFILE "%d %d 10 (Resent=%d [%.2f%%]) stringat\n",
+	 3*$graphwidth/5,
+ 	 $graphheight - 0.5*$cmpoints,
+	 $retrypkt,
+	 ($retrypkt*100.0)/$totalpkt;
+
+  printf PSFILE "%d %d 10 (Dropped=%d [%.2f%%]) stringat\n",
+	 4*$graphwidth/5,
+ 	 $graphheight - 0.5*$cmpoints,
+	 $droppkt,
+	 ($droppkt*100.0)/$totalpkt;
+
+  $bsplib_event = -1;
+  for ($i=0;$i<=$#src_array;$i++) {
+    if (($timestamp_array[$i]>$min_time) && 
+        ($timestamp_array[$i]<$max_time) &&
+        ($proc_array[$i]==0)             &&
+        ($msgtype_array[$i] ne "A")      &&
+        ($bsplibtype_array[$i]!=$bsplib_event)) {
+      printf PSFILE "%d (%d) sstep\n",
+         ($timestamp_array[$i]-$min_time)*$graphwidth/($max_time - $min_time),
+         $bsplibtype_array[$i];
+      $bsplib_event=$bsplibtype_array[$i];
+    
+    }
+  }
+
+  printf STDERR "$Pgm: written postscript.     [%7.2f secs]\n",time-$timenow;
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Create Postscript prologue}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub psPrologue {
+  local($iscolour);
+  
+  if ($Colour) {
+    $iscolour = "true";
+  } else {
+    $iscolour = "false";
+  }
+
+  print PSFILE <<"_END_PS_PROLOGUE_";
+%!PS-Adobe-2.0
+%%Creator:      $Pgm $Version Copyright 1998 Oxford University
+%%Title:        Oxford BSP Toolset profiler
+%%CreationDate: $profdate
+%%Pages: 1
+%%PageOrder: Ascend
+%%Orientation: Landscape
+%%BoundingBox: 0 0 $paperheight $paperwidth 
+%%DocumentPaperSizes: $papertype
+%%EndComments
+%%$Pgm: Written by Jonathan Hill, Stephen Donaldson
+%%$Pgm: ({Jonathan.Hill,Stephen.Donaldson}\@comlab.ox.ac.uk)
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Global Variables
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+/title        ($title)   def
+/pagewidth    $paperwidth    def
+/pageheight   $paperheight   def
+/cm           {28 mul}    def
+/profdate     ($profdate) def
+/etime        ($elapsed_time seconds elapsed on a $machname) def
+/proftag      (Oxford BSP Toolset [Message sequence chart of UDP/IP packets]) def
+/profcolour   $iscolour    def
+/showevents   $show_events def
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Stringat
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+/stringat {
+  4 dict begin
+  /str      exch def
+  /fs       exch def
+  /y        exch def
+  /x        exch def
+
+    x y moveto
+    /Helvetica findfont fs scalefont setfont
+    str stringwidth pop 2 div neg 0 rmoveto str show
+  end
+} def
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Draw the border
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+/barDrawBorder
+{
+	gsave
+	newpath
+	0.5 cm 0.5 cm moveto
+	pagewidth 1 cm sub 0 rlineto
+	0 pageheight 1 cm sub rlineto
+        pagewidth neg 1 cm add 0 rlineto         
+	closepath
+	stroke
+        0.5 cm pageheight 1.2 cm sub moveto
+        pagewidth 1 cm sub 0 rlineto
+        stroke
+        /Helvetica findfont 10 scalefont setfont
+        $zooming 0 eq
+        {
+          1.0 cm pageheight 1.0 cm sub moveto
+          proftag show
+        }
+        {
+          1.0 cm pageheight 1.0 cm sub 8 50 9 2 proftag zoomIcon
+        } ifelse
+        1.0 cm pageheight 1.0 cm sub moveto
+        etime stringwidth pop
+        pagewidth 1 cm sub exch sub 2 div
+        0 rmoveto
+        etime show
+
+        pagewidth 1.0 cm sub pageheight 1.0 cm sub moveto
+        profdate stringwidth pop
+        neg 0 rmoveto
+        profdate show
+        title stringwidth pop
+        0 gt
+        {
+         0.5 cm pageheight 1.95 cm sub moveto 
+         pagewidth 1 cm sub 0 rlineto
+         stroke
+         0.5 cm pageheight 1.75 cm sub moveto
+         /Helvetica-BoldOblique findfont 15 scalefont setfont
+         title stringwidth pop
+         pagewidth 1 cm sub exch sub 2 div
+         0 rmoveto
+         title show
+        } if
+	grestore
+} def
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% zoomIcon
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+/zoomIcon {
+  7 dict begin
+  /text     exch def
+  /yoffset  exch def
+  /xfoffset exch def
+  /xoffset  exch def
+  /radius   exch def
+  /y        exch def
+  /x        exch def
+	
+	gsave 
+        newpath x y moveto
+	text show stroke
+	x xoffset add y yoffset add radius 0 360 arc 
+        x xoffset add y yoffset add radius 0 315 arc 
+	radius 2 add dup neg rlineto 
+	6 setlinewidth stroke
+	newpath x xoffset add y yoffset add radius 0 360 arc closepath
+	gsave gsave x xoffset add y yoffset add radius 0 360 arc 
+        1.0 setgray fill grestore clip
+	0.0 setgray
+	/Helvetica findfont 13 scalefont setfont
+	x xfoffset sub y  moveto
+	text show grestore
+	grestore
+  end
+} def
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% square
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+/square {
+  5 dict begin
+  /blue  exch def
+  /green exch def
+  /red   exch def
+  /y     exch def
+  /x     exch def
+
+    newpath
+      x y moveto
+      5  5 rmoveto
+      0 -10 rlineto
+      -10 0 rlineto
+      0  10 rlineto
+    closepath
+    gsave
+      red green blue setrgbcolor fill
+    grestore
+    stroke
+  end
+} def
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% diamond
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+/diamond {
+  5 dict begin
+  /blue  exch def
+  /green exch def
+  /red   exch def
+  /y     exch def
+  /x     exch def
+
+    newpath
+      x y moveto
+      0 4 rmoveto
+      -4 -4 rlineto
+      4 -4 rlineto
+      4 4  rlineto
+    closepath
+    gsave
+      red green blue setrgbcolor fill
+    grestore
+    stroke
+  end
+} def
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Send arrow
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+/send  {
+  6 dict begin
+  /arclabel exch def
+  /msgtype  exch def
+  /sendproc exch def
+  /sendtime exch def
+  /recvproc exch def
+  /recvtime exch def
+  
+  gsave
+  sendtime sendproc moveto
+  gsave
+    msgtype 0 eq {[]     0 setdash 0.5 setgray} if
+    msgtype 1 eq {[10 5] 0 setdash 0 0 1       setrgbcolor} if
+    msgtype 2 eq {[]     0 setdash 1 0 0       setrgbcolor} if
+    msgtype 5 eq {[2 2] 0 setdash 0.5 setgray}  if
+    recvtime recvproc lineto stroke
+  grestore
+  sendtime sendproc 1.0 1.0 0.0 diamond
+  recvtime recvproc 0.0 0.0 1.0 diamond
+  showevents 1 eq {
+    sendtime sendproc translate
+    recvproc sendproc sub recvtime sendtime sub 2 copy
+    add 0 ne {
+      atan rotate  
+      5 3 moveto /Helvetica findfont 8 scalefont setfont arclabel show
+    } if
+  } if
+  grestore
+  end
+} def
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Dropped packet
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+/drop  {
+  4 dict begin
+  /seqno    exch def
+  /msgtype  exch def
+  /sendproc exch def
+  /sendtime exch def
+  
+  gsave 
+    gsave
+      1 0 0 setrgbcolor 
+      sendtime sendproc 1.0 0.0 0.0 diamond
+    grestore
+    showevents 1 eq {
+      sendtime sendproc 5 add 8 seqno stringat
+    } if
+  grestore
+  end
+} def
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Dropped packet
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+/event  {
+  4 dict begin
+  /eventno  exch def
+  /eventproc exch def
+  /eventtime exch def
+  
+  gsave 
+    gsave
+      1 0 0 setrgbcolor 
+      eventtime eventproc 1.0 0.0 0.0 square
+    grestore
+    showevents 1 eq {
+      eventtime eventproc 5 add 8 eventno stringat
+    } if
+  grestore
+  end
+} def
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Change in BSPlib message types
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+/sstep  {
+  2 dict begin
+  /eventno  exch def
+  /sendtime exch def
+  
+  gsave 
+    gsave
+      sendtime 10 1.0 1.0 1.0 square
+      sendtime 15 moveto
+      sendtime 28 lineto
+      stroke
+    grestore
+    
+    showevents 1 eq {
+      sendtime 7 8 eventno stringat
+    } if
+  grestore
+  end
+} def
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+90 rotate
+0 pageheight neg translate
+barDrawBorder
+0.5 cm 0.5 cm translate
+%%EndProlog
+_END_PS_PROLOGUE_
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Create Postscript prologue}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+sub psEpilogue {
+  print PSFILE <<"_END_PS_EPILOGUE_";
+showpage
+%%EOF
+_END_PS_EPILOGUE_
+}
+\end{code}

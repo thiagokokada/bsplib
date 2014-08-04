@@ -1,0 +1,378 @@
+head	1.2;
+access;
+symbols;
+locks; strict;
+comment	@% @;
+
+
+1.2
+date	96.02.09.08.57.34;	author jonh;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	95.08.31.16.36.22;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@moved to level1
+@
+text
+@%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995, University of Oxford                         %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsp_scan_shmem.lc,v 1.1 1995/08/31 16:36:22 jonh Exp jonh $
+% $Log: bsp_scan_shmem.lc,v $
+% Revision 1.1  1995/08/31  16:36:22  jonh
+% Initial revision
+%
+
+\begin{code}
+#include "bsp_lib.h"
+#include "bsp_profile.h"
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Scan function}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+The \texttt{src} and \texttt{dst} addresses don't have to be disjoint.
+
+\begin{code}
+void bsp_scanreduce(void (*op)(void*,void*,void*,int*),
+                    void *src, void *dst, int argnbytes,int isscan) {
+  int i,temp;
+  int nbytes     = argnbytes; /* op could change the value of nbytes */
+  int res_offset = 0;
+  int arg_offset = argnbytes;
+
+#ifdef PROFILE
+  bspprof_sstep_start(0,__LINE__,__FILE__);
+#endif
+  if (_bsp_nprocs > 1) {
+#ifdef SANITY_CHECK
+    if (nbytes > (BSP_BUFFER_SIZE/2)) 
+      bsp_error("{bsp_scan}: internal buffer too small");
+#endif
+#ifdef DEBUG
+    bsp_debug("{scan}: All processors writing to shared memory");
+#endif
+    set_spinlock(_shmem.proc_lock[_bsp_pid]);
+    memcpy((char*)_shmem.proc_bufferA[_bsp_pid], (char*) src, nbytes);
+    unset_spinlock(_shmem.proc_lock[_bsp_pid]);
+    barrier_sync();
+#ifdef PROFILE
+    bspprof_sstep_wait();
+#endif
+  
+    for (i=1; i< _bsp_nprocs; i=2*i) {
+#ifdef DEBUG
+      bsp_debug("{scan} Performing scan at iteration %d",i);
+#endif
+      temp       = res_offset;
+      res_offset = arg_offset;
+      arg_offset = temp;
+      /* Alternate the copying of the result into disjoint sections of */
+      /* each processors buffer. Make sure that those processors that  */
+      /* have fallen out of the scan do a memory copy so that the      */
+      /* result is in the same segment as all other processors results */
+      if (_bsp_pid >= i) {
+        op( (char*) _shmem.proc_bufferA[_bsp_pid]  +res_offset,
+            (char*) _shmem.proc_bufferA[_bsp_pid-i]+arg_offset,
+            (char*) _shmem.proc_bufferA[_bsp_pid]  +arg_offset,
+            &nbytes); 
+        nbytes = argnbytes;
+      }
+      else
+        memcpy((char*) _shmem.proc_bufferA[_bsp_pid]+res_offset,
+               (char*) _shmem.proc_bufferA[_bsp_pid]+arg_offset,
+               nbytes);       
+      barrier_sync(); 
+    }
+#ifdef DEBUG
+    bsp_debug("{scan} Copying scanned result from last process to all");
+#endif
+    if (isscan)
+       memcpy((char*) dst, 
+              (char*) _shmem.proc_bufferA[_bsp_pid]+res_offset,
+              nbytes);
+    else
+       memcpy((char*) dst, 
+              (char*) _shmem.proc_bufferA[_bsp_nprocs-1]+res_offset,
+              nbytes);
+#ifdef PROFILE
+    bspprof_sstep_comm();
+#endif
+    barrier_sync(); 
+    /* Wait until the copy is complete,otherwise another operation */
+    /* could start stomping on the buffer.                         */
+  }
+#ifdef PROFILE
+  bspprof_sstep_end();
+  if (isscan) bspprof_sstep_inout_scancomm(nbytes,"bsp_scan");
+  else        bspprof_sstep_inout_scancomm(nbytes,"bsp_reduce");
+#endif
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Scan and reduce functions}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_reduce(void (*op)(void*,void*,void*,int*),
+              void *src, void *dst, int nbytes) {
+  if (_bsp_nprocs <=1)
+    memcpy(dst,src,nbytes);
+  else     
+    bsp_scanreduce(op,src,dst,nbytes,0);
+}
+
+void bsp_scan(void (*op)(void*,void*,void*,int*),
+              void *src, void *dst, int nbytes) {
+
+  if (_bsp_nprocs <=1) 
+    memcpy(dst,src,nbytes);
+  else
+    bsp_scanreduce(op,src,dst,nbytes,1);
+}
+\end{code}
+
+%%%%%%%%%%%%%
+\subsection{Specialised reduces}
+%%%%%%%%%%%%%
+\begin{code}
+int bsp_sumI(int x) {
+  int i,**shared,result=0;
+
+  if (_bsp_nprocs<=1) return x;
+  else {
+#ifdef PROFILE
+    bspprof_sstep_start(0,__LINE__,"bsp_sumI");
+#endif
+    shared = (int**) _shmem.proc_bufferA;
+    shared[_bsp_pid][0]=x;
+    barrier_sync();
+#ifdef PROFILE
+    bspprof_sstep_wait();
+#endif
+    for(i=0;i<_bsp_nprocs;i++) result += shared[i][0];
+    barrier_sync();
+#ifdef PROFILE
+    bspprof_sstep_comm();
+    bspprof_sstep_end();
+    bspprof_sstep_inout_scancomm(sizeof(int),"bsp_sumI");
+#endif
+    return(result);
+  }
+}
+
+float bsp_sumR(float x) {
+  int i; 
+  float **shared,result=0.0;
+
+  if (_bsp_nprocs<=1) return x;
+  else {
+#ifdef PROFILE
+    bspprof_sstep_start(0,__LINE__,"bsp_sumR");
+#endif
+    shared = (float**) _shmem.proc_bufferA;
+    shared[_bsp_pid][0]=x;
+    barrier_sync();
+#ifdef PROFILE
+    bspprof_sstep_wait();
+#endif
+    for(i=0;i<_bsp_nprocs;i++) result += shared[i][0];
+    barrier_sync();
+#ifdef PROFILE
+    bspprof_sstep_comm();
+    bspprof_sstep_end();
+    bspprof_sstep_inout_scancomm(sizeof(double),"bsp_sumR");
+#endif
+    return(result);
+  }
+}
+
+double bsp_sumD(double x) {
+  int i; 
+  double **shared,result=0.0;
+
+  if (_bsp_nprocs<=1) return x;
+  else {
+#ifdef PROFILE
+    bspprof_sstep_start(0,__LINE__,"bsp_sumD");
+#endif
+    shared = (double**) _shmem.proc_bufferA;
+    shared[_bsp_pid][0]=x;
+    barrier_sync();
+#ifdef PROFILE
+    bspprof_sstep_wait();
+#endif
+    for(i=0;i<_bsp_nprocs;i++) result += shared[i][0];
+    barrier_sync();
+#ifdef PROFILE
+    bspprof_sstep_comm();
+    bspprof_sstep_end();
+    bspprof_sstep_inout_scancomm(sizeof(double),"bsp_sumD");
+#endif
+    return(result);
+  } 
+}
+\end{code}
+
+\begin{code}
+int bsp_all(int x) {
+  int i,**shared,result=1;
+
+  if (_bsp_nprocs<=1) return x;
+  else {
+#ifdef PROFILE
+    bspprof_sstep_start(0,__LINE__,"bsp_all");
+#endif
+    shared = (int**) _shmem.proc_bufferA;
+    shared[_bsp_pid][0]=x;
+    barrier_sync();
+#ifdef PROFILE
+    bspprof_sstep_wait();
+#endif
+    for(i=0;i<_bsp_nprocs;i++) result = result && shared[i][0];
+    barrier_sync();
+#ifdef PROFILE
+    bspprof_sstep_comm();
+    bspprof_sstep_end();
+    bspprof_sstep_inout_scancomm(sizeof(int),"bsp_all");
+#endif
+    return(result);
+  }
+}
+
+int bsp_any(int x) {
+  int i,**shared,result=0;
+
+  if (_bsp_nprocs<=1) return x;
+  else {
+#ifdef PROFILE
+    bspprof_sstep_start(0,__LINE__,"bsp_any");
+#endif
+    shared = (int**) _shmem.proc_bufferA;
+    shared[_bsp_pid][0]=x;
+    barrier_sync();
+#ifdef PROFILE
+    bspprof_sstep_wait();
+#endif
+    for(i=0;i<_bsp_nprocs;i++) result = result || shared[i][0];
+    barrier_sync();
+#ifdef PROFILE
+    bspprof_sstep_comm();
+    bspprof_sstep_end();
+    bspprof_sstep_inout_scancomm(sizeof(int),"bsp_any");
+#endif
+    return(result);
+  }
+}
+\end{code}
+
+
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d17 5
+a21 2
+% $Id$
+% $Log$
+d34 2
+a35 2
+void bsp_scanreduce(void (*op)(void*,void*,void*,int),
+                    void *src, void *dst, int nbytes,int isscan) {
+d37 1
+d39 1
+a39 1
+  int arg_offset = nbytes;
+d41 3
+d52 3
+a54 3
+    set_spinlock(_shmem->proc_buffer_write[_bsp_pid]);
+    memcpy((char*)_shmem->proc_buffer[_bsp_pid], (char*) src, nbytes);
+    unset_spinlock(_shmem->proc_buffer_write[_bsp_pid]);
+d56 3
+d71 7
+a77 5
+      if (_bsp_pid >= i) 
+        op( (char*) _shmem->proc_buffer[_bsp_pid]  +res_offset,
+            (char*) _shmem->proc_buffer[_bsp_pid-i]+arg_offset,
+            (char*) _shmem->proc_buffer[_bsp_pid]  +arg_offset,
+            nbytes); 
+d79 2
+a80 2
+        memcpy((char*) _shmem->proc_buffer[_bsp_pid]+res_offset,
+               (char*) _shmem->proc_buffer[_bsp_pid]+arg_offset,
+d89 1
+a89 1
+              (char*) _shmem->proc_buffer[_bsp_pid]+res_offset,
+d93 1
+a93 1
+              (char*) _shmem->proc_buffer[_bsp_nprocs-1]+res_offset,
+d95 3
+d102 5
+d114 1
+a114 1
+void bsp_reduce(void (*op)(void*,void*,void*,int),
+d116 4
+a119 1
+  bsp_scanreduce(op,src,dst,nbytes,0);
+d122 1
+a122 1
+void bsp_scan(void (*op)(void*,void*,void*,int),
+d124 5
+a128 1
+  bsp_scanreduce(op,src,dst,nbytes,1);
+d139 21
+d161 24
+a184 6
+  shared = (int**) _shmem->proc_buffer;
+  shared[_bsp_pid][0]=x;
+  barrier_sync();
+  for(i=0;i<_bsp_nprocs;i++) result += shared[i][0];
+  barrier_sync();
+  return(result);
+d187 28
+d218 20
+a237 6
+  shared = (int**) _shmem->proc_buffer;
+  shared[_bsp_pid][0]=x;
+  barrier_sync();
+  for(i=0;i<_bsp_nprocs;i++) result = result && shared[i][0];
+  barrier_sync();
+  return(result);
+d243 20
+a262 6
+  shared = (int**) _shmem->proc_buffer;
+  shared[_bsp_pid][0]=x;
+  barrier_sync();
+  for(i=0;i<_bsp_nprocs;i++) result = result || shared[i][0];
+  barrier_sync();
+  return(result);
+@

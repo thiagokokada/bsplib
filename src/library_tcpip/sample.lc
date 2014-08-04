@@ -1,0 +1,201 @@
+% $Id: sample.lc,v 1.1 1997/07/11 10:29:00 jonh Exp $
+% $Log: sample.lc,v $
+% Revision 1.1  1997/07/11 10:29:00  jonh
+% Initial revision
+%
+
+\begin{code}
+#include <stdlib.h>
+#include <stdio.h>
+
+#include "bsptcpl.h"
+
+void main(int argc, char *argv[])
+   {
+   int i, j;
+   int mypid;
+   char *env;
+   char buf[BSPTCP_BUFF_LEN];
+   int buflen;
+   int nprocs;
+   int rprocs;
+   char *nullptr = NULL;
+   int size;
+   int trials;
+   int exps;
+   int from;
+   int type;
+   int nbytes;
+
+   if (argc > 1)
+      {
+      sscanf(argv[1],"%d",&rprocs);
+      printf("\nNumber of processes requested = %d\n",rprocs);
+      }
+
+   bsptcp_set_buffer_size(1000);
+   bsptcp_env(rprocs,"/users/jonh/BSP/build/SGI/library_tcpip/sample");
+
+   bsptcp_init(&nprocs);
+
+   if (nprocs < 2)
+      {
+      fprintf(stderr,"Expected procs not initialised (%d is too few).\n",
+              nprocs);
+      bsptcp_messg_exit(-1);
+      }
+
+   printf("The sample program has started.\n"); fflush(stdout);
+
+   env = getenv("BSPTCP_PID");
+   if (env)
+      sscanf(env,"%d",&mypid);
+   else
+      mypid = 0;
+
+   /*
+    * Get the size of the message from the user and broadcast to all 
+    * patricipating processes:
+    */
+
+   if (!mypid)
+      {
+      printf("Size of message: "); fflush(stdout);
+      scanf("%d",&size);
+      printf("\nMessage size is %d\n",size);
+      for (i = 1; i < nprocs; i++)
+         while (!bsptcp_nonblock_send((char *)&size,sizeof(size),i,1,1))
+            bsptcp_wait_sends();
+      }
+   else
+      {
+      from = -1;
+      type = 1;         
+      bsptcp_probe(&from,&type,1,0);
+      bsptcp_block_recv((char *)&size,sizeof(size),&from,&type,&nbytes);
+      if (type == 1)
+         {
+         printf("Pid %d received size of %d from pid %d\n",
+            mypid,size,from); fflush(stdout);
+         }
+      else
+         {
+         printf("Size of message type not received.\n"); fflush(stdout);
+         bsptcp_messg_stopall();
+         }
+      }
+     
+   /*
+    * Get the number of trials to run and broadcast to all the other
+    * participating processes:
+    */ 
+
+   if (!mypid)
+      {
+      printf("Number of trials: "); fflush(stdout);
+      scanf("%d",&trials);
+      printf("\nNumber of trials is %d\n",trials);
+      for (i = 1; i < nprocs; i++)
+         while(!bsptcp_nonblock_send((char *)&trials,sizeof(trials),i,2,1))
+            bsptcp_wait_sends();
+      }
+   else
+      {
+      from = -1;
+      type = 2;         
+      bsptcp_probe(&from,&type,1,0);
+      bsptcp_block_recv((char *)&trials,sizeof(trials),&from,&type,&nbytes);
+      if (type == 2)
+         {
+         printf("Pid %d received number of trials = %d from pid %d\n",
+            mypid,trials,from); fflush(stdout);
+         }
+      else
+         {
+         printf("Number of trials message type not received.\n"); 
+         fflush(stdout);
+         bsptcp_messg_stopall();
+         }
+      }
+
+   /*
+    * Run the trials of experiments:
+    */
+
+   for(exps = 0; exps < 8; exps++)
+      {
+      for (j = 0; j < trials; j++)
+         {
+         memset(buf,'Z',size);
+         while (!bsptcp_nonblock_send(buf,size,(mypid+1)%nprocs,0,1))
+            bsptcp_wait_sends();
+         memset(buf,0,sizeof(buf));
+      
+         bsptcp_wait_sends(); 
+      
+         from = (mypid-1+nprocs)%nprocs;
+         type = 0;
+         bsptcp_block_recv(buf,size,&from,&type,&buflen);
+         buf[buflen] = 0;
+/*       printf("BSP pid %d received from pid %d : %s\n",mypid,from,buf); */
+         if (buflen != size)
+            {
+            printf("Expected %d, but received %d.\n",size,buflen);
+            fflush(stdout);
+            }
+         } 
+
+      if (mypid != 0) 
+         {
+         while(!bsptcp_nonblock_send(buf,strlen(buf),0,0,1)) 
+            bsptcp_wait_sends(); 
+         }
+      else
+         {
+         for (i = 1; i < nprocs; i++)
+            {
+            from = -1;
+            type = 0;
+            bsptcp_probe(&from,&type,1,0);
+            bsptcp_block_recv(buf,sizeof(buf),&from,&type,&buflen);
+            buf[buflen] = 0;
+            printf("BSP pid %d received from pid %d : %s\n",mypid,from,buf);
+            }
+         }
+
+      /*
+       * All the processes now ``synchronise'':
+       */
+   
+      if (mypid)
+         {
+         while (!bsptcp_nonblock_send(buf,1,0,3,1))
+            bsptcp_wait_sends();
+         from = 0;
+         type = 4;         
+         bsptcp_block_recv(buf,1,&from,&type,&nbytes);
+         }
+      else
+         {
+         for (j = 0; j < nprocs-1; j++)
+            {
+            from = -1;
+            type = 3;         
+            bsptcp_probe(&from,&type,1,0);
+            bsptcp_block_recv(buf,1,&from,&type,&nbytes);
+            }
+         for (j = 1; j < nprocs; j++)
+            while (!bsptcp_nonblock_send(buf,1,j,4,1))
+               bsptcp_wait_sends();
+         }
+      }
+
+  /*
+   * Shutdown:
+   */ 
+   if (mypid)
+      bsptcp_messg_exit(0);
+   else
+      exit(0);   
+   }
+\end{code}

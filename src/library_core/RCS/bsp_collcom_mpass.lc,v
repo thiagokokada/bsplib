@@ -1,0 +1,332 @@
+head	1.2;
+access;
+symbols;
+locks; strict;
+comment	@# @;
+
+
+1.2
+date	96.02.09.08.49.10;	author jonh;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	95.09.06.14.22.00;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.2
+log
+@moving collective communication into level1
+@
+text
+@%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995, University of Oxford                         %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsp_collcom_mpass.lc,v 1.1 1995/09/06 14:22:00 jonh Exp jonh $
+% $Log: bsp_collcom_mpass.lc,v $
+# Revision 1.1  1995/09/06  14:22:00  jonh
+# Initial revision
+#
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+\chapter{High level BSP collective communication operations} 
+\label{sect:bspirix}
+
+Operations such as \texttt{reduce}, \texttt{broadcast} and
+\texttt{scan} would normally be defined in terms of the BSP library.
+The routines given here are built directly ontop of the message
+passing library available on the SP2.
+
+\begin{code}
+#include "bsp_lib.h"
+#include "bsp_profile.h"
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Broadcast function}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+src and dst may be aliased.
+\begin{code}
+void bsp_broadcast(int pid, void *src, void *dst, int nbytes) {
+  int errno;
+  char *addr;
+
+#ifdef STATISTICS
+  if (_bsp_pid==pid) _bspstat.broadcast_nbytes+=nbytes;
+#endif
+#ifdef SANITY_CHECK
+  if (!bsp_constantI(pid))
+    bsp_error("{bsp_broadcast} the broadcasting pid is not constant "
+              "on all the processors");
+
+  if (!bsp_constantI(nbytes))
+    bsp_error("{bsp_broadcast} the broadcasting nbytes is not constant "
+              "on all the processors");
+#endif
+#ifdef PROFILE
+  bspprof_sstep_start(0,__LINE__,"bsp_broadcast");
+#endif
+  if (pid==_bsp_pid) {
+    memcpy(dst,src,nbytes);
+    errno = messg_broadcast(src,nbytes,pid);
+    if (errno) 
+      bsp_error("{bsp_broadcast}: couldn't broadcast");
+  } else {
+    errno = messg_broadcast(dst,nbytes,pid);
+    if (errno) 
+      bsp_error("{bsp_broadcast}: failed to receive broadcast");
+  }
+#ifdef PROFILE
+  bspprof_sstep_comm();
+  bspprof_sstep_end();
+  if (_bsp_pid==pid) 
+    bspprof_sstep_inout_colcomm(0,__LINE__,"bsp_broadcast",
+                                0,0,1,nbytes);
+  else
+    bspprof_sstep_inout_colcomm(0,__LINE__-3,"bsp_broadcast",
+                                1,nbytes,0,0);
+#endif
+}
+\end{code}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Gather  function}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Inverse of gather. \texttt{src} on each processor is put into
+\texttt{offset} bytes from \texttt{dst} on \texttt{pid}.
+\texttt{offset} is calculated with respect to the sending machine.
+
+\begin{code}
+void bsp_gather(int pid, void *src, void *dst, int nbytes) {
+  int errno,i;
+  static char *scratch     =NULL;
+  static int   scratch_size=0;
+
+#ifdef STATISTICS
+  if (_bsp_pid==pid) _bspstat.gather_nbytes+=nbytes*_bsp_nprocs;
+#endif
+#ifdef SANITY_CHECK
+  if (!bsp_constantI(pid))
+    bsp_error("{bsp_gather} the gathering pid is not constant "
+              "on all the processors");
+
+  if (!bsp_constantI(nbytes)) 
+    bsp_error("{bsp_gather} the gathering nbytes is not constant "
+              "on all the processors");
+#endif
+#ifdef PROFILE
+  bspprof_sstep_start(0,__LINE__,"bsp_gather");
+#endif
+  if (_bsp_pid!=pid) {
+    if (scratch==NULL) {
+      scratch_size = _bsp_nprocs*nbytes;
+      scratch      = malloc(_bsp_nprocs*nbytes);
+#ifdef SANITY_CHECK
+      if (scratch==NULL)
+        bsp_error("{bsp_gather} failed to malloc scratch space");
+#endif
+    } else if (scratch_size < nbytes) {
+      scratch_size = _bsp_nprocs*nbytes;
+      scratch      = realloc(scratch,scratch_size);   
+#ifdef SANITY_CHECK
+      if (scratch==NULL)
+        bsp_error("{bsp_gather} failed to realloc scratch space");
+#endif
+    }
+    errno = messg_gather(pid,src,scratch,nbytes);
+  } else {
+    errno = messg_gather(pid,src,dst,nbytes);
+  }
+#ifdef SANITY_CHECK
+  if (errno)
+    bsp_error("{bsp_gather}: failed");
+#endif
+#ifdef PROFILE
+  bspprof_sstep_comm();
+  bspprof_sstep_end();
+  if (_bsp_pid==pid) 
+    bspprof_sstep_inout_colcomm(0,__LINE__,"bsp_gather",
+                                _bsp_nprocs,nbytes*_bsp_nprocs,
+                                0,0);
+  else
+    bspprof_sstep_inout_colcomm(0,__LINE__-4,"bsp_gather",
+                                0,0,
+                                1,nbytes);
+#endif
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Gather  function without profiling}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+A gather is used within the profilign routines. Unfortunately, it is
+possible to get into an infinite recursion if the profile buffer is a
+little too small. Heres a version of gather that doesnt do any
+checking or profiling.
+\begin{code}
+void bsp_gather_noprof(int pid, void *src, void *dst, int nbytes) {
+  int errno;
+  static char *scratch     =NULL;
+  static int   scratch_size=0;
+
+  if (_bsp_pid!=pid) {
+    if (scratch==NULL) {
+      scratch_size = _bsp_nprocs*nbytes;
+#ifdef DEBUG
+      bsp_debug("{bsp_gather_no_prof}: allocate %d bytes",scratch_size);
+#endif
+      scratch      = malloc(scratch_size);
+      if (scratch==NULL)
+        bsp_error("{bsp_gather_noprof} unable to allocate %d bytes",
+                  scratch_size);                 
+    } else if (scratch_size < nbytes) {
+      scratch_size = _bsp_nprocs*nbytes;
+#ifdef DEBUG
+      bsp_debug("{bsp_gather_no_prof}: reallocate %d bytes",scratch_size);
+      mpc_flush(1);
+#endif
+      scratch      = realloc(scratch,scratch_size);
+      if (scratch==NULL)
+        bsp_error("{bsp_gather_noprof} unable to reallocate %d bytes",
+                  scratch_size);
+    }
+    errno = messg_gather(pid,src,scratch,nbytes);
+  } else {
+    errno = messg_gather(pid,src,dst,nbytes);
+  }
+  if (errno)
+    bsp_error("{bsp_gather_noprog}: failed with error %d",errno);
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Scatter}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_scatter(int pid, void* src, void* dst, int nbytes) {
+
+#ifdef SANITY_CHECK
+  if (!bsp_constantI(pid))
+    bsp_error("{bsp_scatter} the scattering pid is not constant "
+              "on all the processors");
+
+  if (!bsp_constantI(nbytes))
+    bsp_error("{bsp_scatter} the scattering nbytes is not constant "
+              "on all the processors");
+#endif
+  if (_bsp_nprocs*nbytes > BSP_BUFFER_SIZE) {
+    bsp_sstep(0);
+      bsp_addr(42,src);
+      bsp_addr_fetch(pid,42,nbytes*_bsp_pid,dst,nbytes);
+    bsp_sstep_end(0);
+  } else {
+    bsp_broadcast(pid,src,_bsp_scratch_buffer,nbytes*_bsp_nprocs);
+    memcpy(dst,_bsp_scratch_buffer + (_bsp_pid*nbytes),nbytes);
+  }
+}
+\end{code}
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d17 5
+a21 2
+% $Id$
+% $Log$
+d44 1
+d46 2
+a47 2
+#ifdef PROFILE
+  if (_bsp_pid==pid) _bspprof.broadcast_nbytes+=nbytes;
+d50 1
+a50 1
+  if (bsp_sumI(pid) != (pid * _bsp_nprocs))
+d54 1
+a54 1
+  if (bsp_sumI(nbytes) != (nbytes * _bsp_nprocs))
+d58 3
+d71 10
+a88 1
+Its semantics are as if it where implemented as:
+d90 1
+a90 1
+\begin{verbatim}
+d92 6
+a97 2
+#ifdef PROFILE
+  if (_bsp_pid==pid) _bspprof.gather_nbytes+=nbytes;
+d100 2
+a101 2
+  if (bsp_sumI(pid) != pid * _bsp_nprocs)
+    bsp_error("{bsp_gather} the broadcasting pid is not constant "
+d104 2
+a105 2
+  if (bsp_sumI(nbytes) != nbytes * _bsp_nprocs)
+    bsp_error("{bsp_gather} the broadcasting nbytes is not constant "
+d108 39
+a146 4
+  bsp_sstep(100);
+     bsp_addr(0,dst);
+     bsp_addr_store(pid,src,0,_bsp_pid*nbytes,nbytes);
+  bsp_sstep_end(100);
+d148 1
+a148 1
+\end{verbatim}
+d150 42
+d193 3
+a195 1
+src and dst cannot be aliased. dst is only changed on pid.
+d197 1
+a197 3
+void bsp_gather(int pid, void *src, void *dst, int nbytes) {
+  int errno;
+  void *scratch;
+a198 3
+#ifdef PROFILE
+  if (_bsp_pid==pid) _bspprof.gather_nbytes+=nbytes;
+#endif
+d200 2
+a201 2
+  if (bsp_sumI(pid) != pid * _bsp_nprocs)
+    bsp_error("{bsp_gather} the broadcasting pid is not constant "
+d204 2
+a205 2
+  if (bsp_sumI(nbytes) != nbytes * _bsp_nprocs)
+    bsp_error("{bsp_gather} the broadcasting nbytes is not constant "
+d208 5
+a212 4
+  if (_bsp_pid!=pid) {
+    scratch = malloc(nbytes);
+    errno = messg_gather(pid,src,scratch,nbytes);
+    free(scratch);
+d214 2
+a215 1
+    errno = messg_gather(pid,src,dst,nbytes);
+a216 2
+  if (errno)
+    bsp_error("{bsp_gather}: failed");
+a218 1
+
+@

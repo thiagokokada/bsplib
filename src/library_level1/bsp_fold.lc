@@ -1,0 +1,231 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsp_scan_mpass.lc,v 1.2 1996/01/19 14:32:33 jonh Exp jonh $
+% $Log: bsp_scan_mpass.lc,v $
+% Revision 1.2  1996/01/19  14:32:33  jonh
+% Changing to a generic BSP implementation
+%
+% Revision 1.1  1995/08/31  16:36:03  jonh
+% Initial revision
+%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\texttt{bsp\_fold}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#include "bsp.h"
+#include "bsp_level1.h"
+#include "bsp_f77_names.h"
+#include <stdlib.h>
+#if !defined(PARAMID) && !defined(WIN32)
+#include <unistd.h>
+#endif
+#include <limits.h>
+#include <stdio.h>
+#define FOLD_CACHE_SIZE sizeof(double)
+
+static int bsp_fold_breakeven;
+static char *fold_cache;
+\end{code}
+
+The BSP fold operation peforms a reduction on a value held in each
+process, and broadcasts the result to each process. It is assumed that
+the destination data-structure on each prcoess has been previously
+registered.  There are currently two implementations of fold, where
+the implementation chooses between them depending upon the values of
+$p$, $l$ and $g$.  When costing the algorithm, we assume that the cost
+of applying the associative operator $\oplus$ used in the fold is
+proportional to the size $n$ of data-structure used as an argument to
+$\oplus$.
+
+\paragraph{Total exchange based}
+Register a table in each process, route each element to be folded to
+every process, and then peform a local fold on the accumulated data.
+The total cost is:
+
+\begin{equation}
+(p-1)2n + (p-1)png + 2l
+\end{equation}
+
+\paragraph{Scan based}
+Whenever $n$ is large, then a parallel prefix scan followed by a
+two-stage broadcast can be performed. The total cost is:
+
+\begin{equation}\label{eqn:scanbased}
+\lceil\log p\rceil 3n + (p-1)n + 
+\lceil\log p\rceil ng + (p-1)ng + 
+\lceil\log p\rceil l + 2l
+\end{equation}
+
+For small amounts of data, the first algorithm will be better than the
+latter. The algorithm with cost shown in equation~\ref{eqn:scanbased}
+becomes more viable when the data size $n$ is greater than
+
+% Maple
+% solve( log(p)*(3*n + (n*g) + l) + (2*(p-1)*(n/p)*g)+(2*l) = 
+%        ((p-1)*2*n + (p-1)*n*g + 2*l), {n});
+% plot( {logp*(3*n + (n*g) + l) + (2*(p-1)*(n/p)*g)+(2*l), 
+%       ((p-1)*2*n + (p-1)*n*g + 2*l)}, n=1..1000);
+%
+%                                    ln(p) l
+%              {n = - -------------------------------------------}
+%                     3ln(p) + ln(p) g + 3 g - 2 g/p - 2p + 2 - g p
+%
+\
+\begin{equation}
+n > \frac{\lceil\log p\rceil l}{gp + p + 2g/p -2 -3g - 3\lceil\log
+  p\rceil - \lceil\log p\rceil g}
+\end{equation}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Initialisation}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_fold_init() {
+  double p,l,g, top, bot, log_p=0.0;
+  int ilog_p;
+
+  for(ilog_p=1;ilog_p < bsp_nprocs(); ilog_p*=2) log_p += 1.0;
+
+  p   = (double) bsp_nprocs();
+  l   = bsp_l();
+  g   = bsp_g();
+  top = 4.0 * log_p*l;
+  bot = g*p + 2*p + ((2.0*g)/p) - 2.0 -3.0*g - 3.0*log_p - log_p*g;
+  bsp_fold_breakeven = (top<bot)?0:((bot<0.000001)?INT_MAX:((int)(top/bot)));
+
+#ifdef DEBUG
+  bsp_debug("{bsp_fold_init} using otal exchange fold when n<%d bytes",
+            bsp_fold_breakeven);
+#endif
+  fold_cache = malloc(FOLD_CACHE_SIZE*bsp_nprocs());
+  if (fold_cache==NULL)
+    bsp_abort("{bsp_fold_init} unable to allocate %d bytes",FOLD_CACHE_SIZE);
+  bsp_pushregister(fold_cache,FOLD_CACHE_SIZE*bsp_nprocs());
+  bsp_sync();
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Statistics output}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_fold_stat(FILE *fptr) {
+  fprintf(fptr,"bsp_fold cost:\n"
+               "\tmin (totex,scan+bcast)\n"
+               "\twhere totex      = (p-1)n + (p-1)ng +2l\n"
+               "\t      scan+bcast = log(p)*(n+n*g+l) + 2*(p-1)*(n/p)*g+2*l\n"
+               "\t      n          = size of element used in associative operator\n\n");
+  fprintf(fptr,"\tusing totex fold when n < log(p)l/(gp+p+2g/p-1-3g-log(p)-g log(p))\n");
+  fprintf(fptr,"\t                      n < %d bytes\n\n",bsp_fold_breakeven);
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Toltal exchange fold}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+static void bsp_fold_totex(void (*op)(void*,void*,void*,int*),
+              void *src, void *dst, int nbytes) {
+  char *totex_table;
+  int i,pid, nprocs;
+
+  pid    = bsp_pid();
+  nprocs = bsp_nprocs();
+  
+  if (nprocs==1) memcpy(dst,src,nbytes);
+  else {
+    if (nbytes <= FOLD_CACHE_SIZE) totex_table = fold_cache;
+    else {
+      i = nprocs*nbytes;
+#ifdef DEBUG
+      bsp_debug("{bsp_fold} allocating %d bytes",i);
+#endif
+      totex_table = (char*) malloc(i);
+      if (totex_table==NULL)
+        bsp_abort("{bsp_fold} unable to allocate %d bytes",totex_table);
+      bsp_pushregister(totex_table,i);
+      bsp_sync();
+    }
+    for(i=0;i<nprocs;i++)
+      bsp_hpput(i,src,totex_table,pid*nbytes,nbytes);
+    bsp_sync();
+#ifdef DEBUG
+    bsp_debug("{bsp_fold} finished total exchange");
+#endif
+    for(i=0;i<(nprocs-1);i++) {
+#ifdef DEBUG
+      bsp_debug("Combining results from %d and %d",i,i+1);
+#endif
+      op(dst,
+         totex_table+(i*nbytes),
+         totex_table+((i+1)*nbytes),
+         &nbytes);
+      memcpy(totex_table+((i+1)*nbytes),dst,nbytes);
+    }
+    if (nbytes > FOLD_CACHE_SIZE) {
+      bsp_popregister(totex_table);
+      free(totex_table);
+    }
+  }
+}
+\end{code}    
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{The fold function itself}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_fold_cpp(void (*op)(void*,void*,void*,int*),
+                  void *src, void *dst, int nbytes,
+		  int lineno, char* filename) {
+#ifdef SANITY_CHECK
+  if (!bsp_constantI(nbytes))
+    bsp_abort("{bsp_fold} line %d of \"%s\"\n"
+              "\tnbytes is not constant on all the processors",
+	      lineno,filename);
+#endif
+  if (nbytes<bsp_fold_breakeven)
+    bsp_fold_totex(op,src,dst,nbytes);
+  else {
+    bsp_scan(op,src,dst,nbytes);
+    bsp_bcast(bsp_nprocs()-1,dst,dst,nbytes);
+  }
+}
+
+void BSPFOLD(void (*op)(void*,void*,void*,int*),
+             void *src, void *dst, int *nbytes) {
+#ifdef SANITY_CHECK
+  if (!bsp_constantI(*nbytes))
+    bsp_abort("{bsp_fold}\n"
+              "\tnbytes is not constant on all the processors");
+#endif
+  if (*nbytes<bsp_fold_breakeven)
+    bsp_fold_totex(op,src,dst,*nbytes);
+  else {
+    bsp_scan(op,src,dst,*nbytes);
+    bsp_bcast(bsp_nprocs()-1,dst,dst,*nbytes);
+  }
+}
+
+#undef bsp_fold
+void bsp_fold(void (*op)(void*,void*,void*,int*),
+	      void *src, void *dst,int nbytes) {
+  bsp_fold_cpp(op,src,dst,nbytes,0,"unknown .c file");
+}
+\end{code}

@@ -1,0 +1,132 @@
+
+
+
+bsp_hpmove(3)           BSPlib FUNCTIONS            bsp_hpmove(3)
+
+
+
+NAME
+     bsp_hpmove - a lean method for moving a BSMP packet from the
+     system queue.
+
+
+C SYNOPSIS
+     #include "bsp.h"
+
+     int bsp_hpmove(void **_t_a_g__p_t_r__b_u_f,void **_p_a_y_l_o_a_d__p_t_r__b_u_f);
+
+
+DESCRIPTION
+     The operation bsp_hpmove is a non-copying method of  receiv-
+     ing  messages  that  is available in languages with pointers
+     such as C, but not vanilla Fortran. bsp_hpmove is a function
+     which  returns  -1, if the system buffer is empty. Otherwise
+     it returns the length of the payload of the first message in
+     the buffer and:
+
+
+     a)   places a pointer to the tag in _t_a_g__p_t_r__b_u_f;
+
+
+     b)   places a pointer to the payload in _p_a_y_l_o_a_d__p_t_r__b_u_f;
+
+
+     c)   removes the  message  from  from  the  incoming  system
+          buffer.
+
+
+
+SEE ALSO
+     bsmp(3)  ,bsp_send(3),   bsp_set_tagsize(3),   bsp_qsize(3),
+     bsp_get_tag(3), bsp_move(3)
+
+     ``_A _p_r_o_p_o_s_a_l _f_o_r _t_h_e _B_S_P _W_o_r_l_d_w_i_d_e _S_t_a_n_d_a_r_d _L_i_b_r_a_r_y (_p_r_e_l_i_m_-
+     _i_n_a_r_y  _v_e_r_s_i_o_n)''  Mark  W.  Goudreau,  Jonathan M. D. Hill,
+     Kevin Lang, Bill McColl, Satish B. Rao, Dan  C.  Stefanescu,
+     Torsten  Suel, Thanasis Tsantilas. Oxford University Comput-
+     ing Laboratory, April 1996. See _h_t_t_p://_w_w_w._b_s_p-_w_o_r_l_d_w_i_d_e._o_r_g
+     for more details.
+
+
+
+BUGS
+     Problems  and  bug  reports  should  be  mailed  to  _b_s_p_l_i_b-
+     _b_u_g_s@_c_o_m_l_a_b._o_x._a_c._u_k
+
+
+AUTHORS
+     The Oxford BSP Toolset implementation of BSPlib was  written
+     by Jonathan.Hill@comlab.ox.ac.uk
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    1
+
+
+
+
+
+
+bsp_hpmove(3)           BSPlib FUNCTIONS            bsp_hpmove(3)
+
+
+
+     http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    2
+
+
+

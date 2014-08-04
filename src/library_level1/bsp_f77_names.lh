@@ -1,0 +1,213 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id$
+% $Log$
+\begin{code}
+#ifdef F2CUNDERSCORE
+#undef UNDERSCORE
+#undef DOUBLEUNDERSCORE
+#undef UPPERCASE
+#undef LOWERCASE
+#endif
+
+#ifdef UNDERSCORE
+#define BSPBCAST                bspbcast_
+#define BSPGATHER               bspgather_
+#define BSPSCAN                 bspscan_
+#define BSPFOLD                 bspfold_
+#define BSPALL                  bspall_
+#define BSPANY                  bspany_
+#define BSPSUMI                 bspsumi_
+#define BSPSUMR                 bspsumr_
+#define BSPSUMD                 bspsumd_
+#define BSPSUMI_PREFIX          bspsumi_prefix_
+#define BSPSUMR_PREFIX          bspsumr_prefix_
+#define BSPSUMD_PREFIX          bspsumd_prefix_
+#define BSPPRODUCTI             bspproducti_
+#define BSPPRODUCTR             bspproductr_
+#define BSPPRODUCTD             bspproductd_
+#define BSPPRODUCTI_PREFIX      bspproducti_prefix_
+#define BSPPRODUCTR_PREFIX      bspproductr_prefix_
+#define BSPPRODUCTD_PREFIX      bspproductd_prefix_
+#define BSPMINI                 bspminI_
+#define BSPMINR                 bspminR_
+#define BSPMIND                 bspminD_
+#define BSPMINI_PREFIX          bspminI_prefix_
+#define BSPMINR_PREFIX          bspminR_prefix_
+#define BSPMIND_PREFIX          bspminD_prefix_
+#define BSPMAXI                 bspmaxI_
+#define BSPMAXR                 bspmaxR_
+#define BSPMAXD                 bspmaxD_
+#define BSPMAXI_PREFIX          bspmaxI_prefix_
+#define BSPMAXR_PREFIX          bspmaxR_prefix_
+#define BSPMAXD_PREFIX          bspmaxD_prefix_
+
+#define BSPPUT_COMMON           bspput_common_
+#define BSPHPPUT_COMMON         bsphpput_common_
+#define BSPGET_COMMON           bspget_common_
+#define BSPHPGET_COMMON         bsphpget_common_
+#define BSPSYNC_NUMBER          bspsync_number_
+#define CPPSYNC_NUMBER          cppsync_number_
+
+#define BSPS                    bsps_
+#define BSPL                    bspl_
+#define BSPG                    bspg_
+#define BSPNHALF                bspnhalf_
+
+#else
+#ifdef DOUBLEUNDERSCORE
+#define BSPBCAST                bspbcast__
+#define BSPGATHER               bspgather__
+#define BSPSCAN                 bspscan__
+#define BSPFOLD                 bspfold__
+#define BSPALL                  bspall__
+#define BSPANY                  bspany__
+#define BSPSUMI                 bspsumi__
+#define BSPSUMR                 bspsumr__
+#define BSPSUMD                 bspsumd__
+#define BSPSUMI_PREFIX          bspsumi_prefix__
+#define BSPSUMR_PREFIX          bspsumr_prefix__
+#define BSPSUMD_PREFIX          bspsumd_prefix__
+#define BSPPRODUCTI             bspproducti__
+#define BSPPRODUCTR             bspproductr__
+#define BSPPRODUCTD             bspproductd__
+#define BSPPRODUCTI_PREFIX      bspproducti_prefix__
+#define BSPPRODUCTR_PREFIX      bspproductr_prefix__
+#define BSPPRODUCTD_PREFIX      bspproductd_prefix__
+#define BSPMINI                 bspminI__
+#define BSPMINR                 bspminR__
+#define BSPMIND                 bspminD__
+#define BSPMINI_PREFIX          bspminI_prefix__
+#define BSPMINR_PREFIX          bspminR_prefix__
+#define BSPMIND_PREFIX          bspminD_prefix__
+#define BSPMAXI                 bspmaxI__
+#define BSPMAXR                 bspmaxR__
+#define BSPMAXD                 bspmaxD__
+#define BSPMAXI_PREFIX          bspmaxI_prefix__
+#define BSPMAXR_PREFIX          bspmaxR_prefix__
+#define BSPMAXD_PREFIX          bspmaxD_prefix__
+
+#define BSPPUT_COMMON           bspput_common__
+#define BSPHPPUT_COMMON         bsphpput_common__
+#define BSPGET_COMMON           bspget_common__
+#define BSPHPGET_COMMON         bsphpget_common__
+#define BSPSYNC_NUMBER          bspsync_number__
+#define CPPSYNC_NUMBER          cppsync_number__
+
+#define BSPS                    bsps__
+#define BSPL                    bspl__
+#define BSPG                    bspg__
+#define BSPNHALF                bspnhalf__
+
+#else
+#ifdef F2CUNDERSCORE
+#define BSPBCAST                bspbcast_
+#define BSPGATHER               bspgather_
+#define BSPSCAN                 bspscan_
+#define BSPFOLD                 bspfold_
+#define BSPALL                  bspall_
+#define BSPANY                  bspany_
+#define BSPSUMI                 bspsumi_
+#define BSPSUMR                 bspsumr_
+#define BSPSUMD                 bspsumd_
+#define BSPSUMI_PREFIX          bspsumi_prefix__
+#define BSPSUMR_PREFIX          bspsumr_prefix__
+#define BSPSUMD_PREFIX          bspsumd_prefix__
+#define BSPPRODUCTI             bspproducti_
+#define BSPPRODUCTR             bspproductr_
+#define BSPPRODUCTD             bspproductd_
+#define BSPPRODUCTI_PREFIX      bspproducti_prefix__
+#define BSPPRODUCTR_PREFIX      bspproductr_prefix__
+#define BSPPRODUCTD_PREFIX      bspproductd_prefix__
+#define BSPMINI                 bspminI_
+#define BSPMINR                 bspminR_
+#define BSPMIND                 bspminD_
+#define BSPMINI_PREFIX          bspminI_prefix__
+#define BSPMINR_PREFIX          bspminR_prefix__
+#define BSPMIND_PREFIX          bspminD_prefix__
+#define BSPMAXI                 bspmaxI_
+#define BSPMAXR                 bspmaxR_
+#define BSPMAXD                 bspmaxD_
+#define BSPMAXI_PREFIX          bspmaxI_prefix__
+#define BSPMAXR_PREFIX          bspmaxR_prefix__
+#define BSPMAXD_PREFIX          bspmaxD_prefix__
+
+#define BSPPUT_COMMON           bspput_common__
+#define BSPHPPUT_COMMON         bsphpput_common__
+#define BSPGET_COMMON           bspget_common__
+#define BSPHPGET_COMMON         bsphpget_common__
+#define BSPSYNC_NUMBER          bspsync_number__
+#define CPPSYNC_NUMBER          cppsync_number__
+
+#define BSPS                    bsps_
+#define BSPL                    bspl_
+#define BSPG                    bspg_
+#define BSPNHALF                bspnhalf_
+
+#else
+#ifdef UPPERCASE
+/* Use macro as name */
+
+#else
+
+#define BSPBCAST                bspbcast
+#define BSPGATHER               bspgather
+#define BSPSCAN                 bspscan
+#define BSPFOLD                 bspfold
+#define BSPALL                  bspall
+#define BSPANY                  bspany
+#define BSPSUMI                 bspsumI
+#define BSPSUMR                 bspsumR
+#define BSPSUMD                 bspsumD
+#define BSPSUMI_PREFIX          bspsumI_prefix
+#define BSPSUMR_PREFIX          bspsumR_prefix
+#define BSPSUMD_PREFIX          bspsumD_prefix
+#define BSPPRODUCTI             bspproductI
+#define BSPPRODUCTR             bspproductR
+#define BSPPRODUCTD             bspproductD
+#define BSPPRODUCTI_PREFIX      bspproductI_prefix
+#define BSPPRODUCTR_PREFIX      bspproductR_prefix
+#define BSPPRODUCTD_PREFIX      bspproductD_prefix
+#define BSPMINI                 bspminI
+#define BSPMINR                 bspminR
+#define BSPMIND                 bspminD
+#define BSPMINI_PREFIX          bspminI_prefix
+#define BSPMINR_PREFIX          bspminR_prefix
+#define BSPMIND_PREFIX          bspminD_prefix
+#define BSPMAXI                 bspmaxI
+#define BSPMAXR                 bspmaxR
+#define BSPMAXD                 bspmaxD
+#define BSPMAXI_PREFIX          bspmaxI_prefix
+#define BSPMAXR_PREFIX          bspmaxR_prefix
+#define BSPMAXD_PREFIX          bspmaxD_prefix
+
+#define BSPPUT_COMMON           bspput_common
+#define BSPHPPUT_COMMON         bsphpput_common
+#define BSPGET_COMMON           bspget_common
+#define BSPHPGET_COMMON         bsphpget_common
+#define BSPSYNC_NUMBER          bspsync_number
+#define CPPSYNC_NUMBER          cppsync_number
+
+#define BSPS                    bsps
+#define BSPL                    bspl
+#define BSPG                    bspg
+#define BSPNHALF                bspnhalf
+#endif
+#endif
+#endif
+#endif
+\end{code}

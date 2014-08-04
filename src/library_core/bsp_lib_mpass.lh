@@ -1,0 +1,1004 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsp_lib_mpass.lh,v 1.5 1996/06/13 10:18:16 jonh Exp jonh $
+% $Log: bsp_lib_mpass.lh,v $
+% Revision 1.5  1996/06/13  10:18:16  jonh
+% Preliminary BSPlib proposal
+%
+% Revision 1.4  1996/02/26  10:09:59  jonh
+% going to reduce L
+%
+% Revision 1.3  1995/11/08  09:52:14  jonh
+% Solved CSS Transmit bug....
+%
+% Revision 1.2  1995/11/07  09:43:11  jonh
+% Changing sync/async communication....
+%
+% Revision 1.1  1995/08/31  16:38:16  jonh
+% Initial revision
+%
+This file contains macros that provide implementations for the
+following message passing systems:
+\begin{description}
+\item[\texttt{MPASS\_MPL}]     Native message passing on the IBM SPx
+
+\item[\texttt{MPASS\_PARIX}]   Native message passing on the Parsytec GC
+
+\item[\texttt{MPASS\_EXPRESS}] The Express message passing system on
+                               the Hitachi SR2001
+
+\item[\texttt{MPASS\_PARMACS}]  Parmacs based message passing
+
+\item[\texttt{MPASS\_MPI}]     MPI based message passing
+
+\item[\texttt{MPASS\_TCPIP}]   Generic TCP/IP communication.
+
+\item[\texttt{MPASS\_UDPIP}]   Generic UDP/IP communication.
+\end{description}
+
+\begin{code}
+
+#if defined(MPASS_UDPIP)  || defined(MPASS_3C905B)
+#include "../library_udpip/bspudpl.h"
+#else
+
+#ifdef MPASS_TCPIP
+#include "../library_tcpip/bsptcpl.h"
+#else
+
+#ifdef MPASS_MPL
+#include "mpproto.h"
+#else
+
+#ifdef MPASS_MPI
+#include "mpi.h"
+#else
+
+#ifdef MPASS_PARIX
+#include <sys/root.h>
+#include <sys/rrouter.h>
+#include <virt_top.h>
+#include <sys/comm.h>
+#else
+
+#ifdef MPASS_EXPRESS
+#include "express.h"
+#else
+
+#if MPASS_PARMACS
+#ifdef MPASS_PARMACS_HOST
+#include <pmhost.h>
+#else
+#include <pmnode.h>
+#endif 
+#endif /* MPASS_PARMACS */
+#endif /* MPASS_EXPRESS */
+#endif /* MPASS_PARIX   */
+#endif /* MPASS_MPI     */
+#endif /* MPASS_MPL     */
+#endif /* MPASS_UDPIP   */
+#endif /* MPASS_TCPIP   */
+\end{code}
+
+\texttt{BSP\_BUFFER\_SIZE} and \texttt{BSP\_COMM\_FIFO\_SIZE} are global
+variables set in a preload file from the compiler.
+\texttt{BSP\_MAX\_PROCS} is the largest number of processors that will
+be given to a BSP user. 
+\begin{code}
+#ifdef BSP_ONLINE_PROCS
+#define BSP_MAX_PROCS BSP_ONLINE_PROCS
+#else
+#define BSP_MAX_PROCS 128
+#endif
+\end{code}
+
+\begin{code}
+#define BSP_MPASS_FORK                   1
+#define BSP_MPASS_SSTEP_COMM_ODD         2
+#define BSP_MPASS_SSTEP_COMM_EVEN        3
+#define BSP_MPASS_SSTEP_EXCHANGE_ODD     4
+#define BSP_MPASS_SSTEP_EXCHANGE_EVEN    5
+#define BSP_MPASS_DEBUG_WAIT             6
+#define BSP_MPASS_SOFTWARE_BCAST         7
+#define BSP_MPASS_SOFTWARE_GATHER        8
+#define BSP_MPASS_SOFTWARE_CONSTANT_ODD  9
+#define BSP_MPASS_SOFTWARE_CONSTANT_EVEN 10
+#define BSP_MPASS_ARGV_SIZE              11
+#define BSP_MPASS_ARGV_DATA              12
+#define BSP_MPASS_STATISTICS_DATA        13
+#define BSP_MPASS_ABORT                  14
+#define BSP_MPASS_LAST_DEFINE            15
+\end{code}
+
+Maximum time(usec) spent in backing off a communication.
+\begin{code}
+#define BSP_MPASS_MAXBACKOFF 4194304
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Message passing operations}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+All communications are assumed to be of messages upto the size
+\texttt{BSP\_BUFFER\_SIZE}. The sematics of the operations can informally be
+described as:
+\begin{description}
+\item[nonblocking-send] Perform an asynchronous send preferably
+  without buffering. If the operation fails (i.e., the send was not
+  performed due to no buffer capacity on the sender), then the sender
+  should go directly into a reveive to ensure queues are drained, and
+  deadlock will not arise. The data-structure sent is not allowed to
+  be changed locally until after \texttt{wait-sends}.
+
+\item[wait-sends] The function has two purposes: (1) if a send fails
+  because the lower-level protocol stack is unable to accept a
+  message, then this function will wait until the protocol stack can
+  accept at least one message; and (2) Ensure that the data-structures
+  referenced in any prior send operations can be changed. This may
+  involve wait-sends \emph{internally} having to send an ACK so that
+  any unacknowledged sends can be acknowledged. Alternatively, it may
+  buffer messages, and defer these acknowledgements.
+
+\item[block-receive] Perform a blocking wait until a message is recieved.
+
+\item[blocking-probe] Busy wait until something comes in. Wildcard
+  process ID, but not type is available.
+
+\item[non-blocking-probe] Check to see if anything has come in. Again,
+  wild-card may be on process ID, but not type.
+\end{description}
+
+%%%%%%%%%%%%%%%%
+\subsection{Macro Prototypes:}
+%%%%%%%%%%%%%%%%
+
+\begin{verbatim}
+void f77whatis_nprocs_mypid(int*,int*);
+void cwhatis_nprocs_mypid(int *,char***,int*,int*);
+void setup_group_before_kill_unwanted(int,int*);
+void setup_group_after_kill_unwanted(int,int*);
+void setup_nonblocksend_buffersize(int*,int*,int,int,int);
+void block_recv(char*,int,*int,*int,*int);
+int  nonblock_send(char*,int,int,int,int);
+void wait_sends();
+int  nonblock_probe(int*,int*,int);
+void block_probe(int*,int*);
+void messg_stopall();
+void messg_exit(int);
+void barrier_sync();
+\end{verbatim}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{UDPIP communication support}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#if defined(MPASS_UDPIP) || defined(MPASS_3C905B)
+#define PID_DONTCARE (-1)
+#define comm_handle   int
+#define status_handle int
+
+#define cwhatis_nprocs_mypid(refargc,refargv,refnprocs,refpid)        \
+  (getenv("BSPTCP_PID")?                                              \
+    (bspudp_init(refnprocs),(*(refpid)=atoi(getenv("BSPTCP_PID")),0)):\
+    (*(refnprocs)=1,(*(refpid)=0),0))
+  
+#define f77whatis_nprocs_mypid(refnprocs,refpid) \
+     cwhatis_nprocs_mypid(ohshit,ohshit,refnprocs,refpid)
+
+#define setup_group_before_kill_unwanted(nprocs,refgids) /*donothing*/
+
+#define setup_group_after_kill_unwanted(nprocs,refgids)  /*donothing*/
+
+#define setup_nonblocksend_buffersize(refsize,refnbuffers,slot,round,latency) \
+     (*refsize)=bspudp_set_buffer_size(refsize,refnbuffers,slot,round,latency)
+
+#define block_recv(msg,size,from,type,nbytes) \
+     bspudp_block_recv((char*)(msg),size,from,type,nbytes,            	\
+			  (*type!=BSP_MPASS_SSTEP_COMM_ODD)     && 	\
+			  (*type!=BSP_MPASS_SSTEP_COMM_EVEN)    && 	\
+			  (*type!=BSP_MPASS_SSTEP_EXCHANGE_ODD) && 	\
+			  (*type!=BSP_MPASS_SSTEP_EXCHANGE_EVEN))
+
+#define nonblock_send(msg,size,to,type,lastone)                        	\
+     bspudp_nonblock_send((char*)(msg),size,to,type,              	\
+			  (type!=BSP_MPASS_SSTEP_COMM_ODD)     && 	\
+			  (type!=BSP_MPASS_SSTEP_COMM_EVEN)    && 	\
+			  (type!=BSP_MPASS_SSTEP_EXCHANGE_ODD) && 	\
+			  (type!=BSP_MPASS_SSTEP_EXCHANGE_EVEN),lastone)
+
+#define nonblocksend_blockrecv(o,os,d,t,i,is,s,n) \
+  _bsp_software_nonblocksend_blockrecv(o,os,d,t,i,is,s,n)
+
+#define wait_sends() bspudp_wait_sends() 
+
+#define nonblock_probe(src,type,wait) bspudp_probe(src,type,0,wait,   	\
+			  (*type!=BSP_MPASS_SSTEP_COMM_ODD)     && 	\
+			  (*type!=BSP_MPASS_SSTEP_COMM_EVEN)    && 	\
+			  (*type!=BSP_MPASS_SSTEP_EXCHANGE_ODD) && 	\
+			  (*type!=BSP_MPASS_SSTEP_EXCHANGE_EVEN))
+
+#define block_probe(src,type) bspudp_probe(src,type,1,0,                \
+			  (*type!=BSP_MPASS_SSTEP_COMM_ODD)     && 	\
+			  (*type!=BSP_MPASS_SSTEP_COMM_EVEN)    && 	\
+			  (*type!=BSP_MPASS_SSTEP_EXCHANGE_ODD) && 	\
+			  (*type!=BSP_MPASS_SSTEP_EXCHANGE_EVEN))
+
+#ifdef MPASS_3C905B
+#define messg_comm_status(x) /* bspkern_comm_status(x) */
+#else
+#define messg_comm_status(x) /* do nothing */
+#endif
+
+extern int bspudp_active_nprocs;
+#define messg_active_procs(x)                \
+  do {                                       \
+    bspudp_active_nprocs=x;                  \
+    if (bspudp_active_nprocs>_bsp_noslots)   \
+      bspudp_active_nprocs=_bsp_noslots;     \
+  } while(0)
+
+#define messg_stopall()    bspudp_messg_stopall()
+
+#define MPASS_ATEXIT
+#define messg_exit(status)      \
+  do {                          \
+    bspudp_messg_exit(status);  \
+    if (_bsp_pid) exit(status); \
+  } while(0)
+
+#define barrier_sync() _bsp_software_barrier()
+#else
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{TCPIP communication support}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef MPASS_TCPIP
+#define PID_DONTCARE (-1)
+#define comm_handle   int
+#define status_handle int
+
+#define cwhatis_nprocs_mypid(refargc,refargv,refnprocs,refpid)        \
+  (getenv("BSPTCP_PID")?                                              \
+    (bsptcp_init(refnprocs),(*(refpid)=atoi(getenv("BSPTCP_PID")),0)):\
+    (*(refnprocs)=1,(*(refpid)=0),0))
+  
+#define f77whatis_nprocs_mypid(refnprocs,refpid) \
+     cwhatis_nprocs_mypid(ohshit,ohshit,refnprocs,refpid)
+
+#define setup_group_before_kill_unwanted(nprocs,refgids) /*donothing*/
+
+#define setup_group_after_kill_unwanted(nprocs,refgids)  /*donothing*/
+
+#define setup_nonblocksend_buffersize(refsize,refnbuffers,slot,round,latency) \
+     (*refsize)=bsptcp_set_buffer_size(refsize,refnbuffers,slot)
+
+#define block_recv(msg,size,from,type,nbytes) \
+     bsptcp_block_recv((char*)(msg),size,from,type,nbytes)
+
+#define nonblock_send(msg,size,to,type,lastone)                        	\
+     bsptcp_nonblock_send((char*)(msg),size,to,type,              	\
+			  (type!=BSP_MPASS_SSTEP_COMM_ODD)     && 	\
+			  (type!=BSP_MPASS_SSTEP_COMM_EVEN)    && 	\
+			  (type!=BSP_MPASS_SSTEP_EXCHANGE_ODD) && 	\
+			  (type!=BSP_MPASS_SSTEP_EXCHANGE_EVEN))
+
+#define nonblocksend_blockrecv(o,os,d,t,i,is,s,n) \
+  _bsp_software_nonblocksend_blockrecv(o,os,d,t,i,is,s,n)
+
+#define wait_sends() bsptcp_wait_sends() 
+
+#define nonblock_probe(src,type,wait) bsptcp_probe(src,type,0,wait)
+
+#define block_probe(src,type) bsptcp_probe(src,type,1,0)
+
+#define messg_comm_status(x) /* do nothing */
+
+extern int bsptcp_active_nprocs;
+#define messg_active_procs(x)                \
+  do {                                       \
+    bsptcp_active_nprocs=x;                  \
+    if (bsptcp_active_nprocs>_bsp_noslots)   \
+      bsptcp_active_nprocs=_bsp_noslots;     \
+  } while(0)
+
+#define messg_stopall()    bsptcp_messg_stopall()
+
+#define MPASS_ATEXIT
+#define messg_exit(status)      \
+  do {                          \
+    bsptcp_messg_exit(status);  \
+    if (_bsp_pid) exit(status); \
+  } while(0)
+
+#define barrier_sync() _bsp_software_barrier()
+#else
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{SP2 MPL library}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef MPASS_MPL
+#define PID_DONTCARE   DONTCARE
+#define comm_handle   int
+#define status_handle int
+
+#define cwhatis_nprocs_mypid(refargc,refargv,refnprocs,refpid) \
+  mpc_environ(refnprocs,refpid)
+
+#define f77whatis_nprocs_mypid(refnprocs,refpid) \
+     cwhatis_nprocs_mypid(ohshit,ohshit,refnprocs,refpid)
+
+#define setup_group_before_kill_unwanted(nprocs,refgids) /*donothing*/
+
+#define setup_group_after_kill_unwanted(nprocs,refgids)              \
+  do {                                                               \
+    _bspmpass_errno = mpc_group(nprocs,refgids,1,&_mpass.group);    \
+    if (_bspmpass_errno)                                             \
+      bsp_abort("{bsp_start}: unable to create communication group");\
+  } while(0)
+\end{code}
+
+The SP2 doesnt bother about message sizes for communication....I'll
+set run mode for the commuication here however.
+\begin{code}
+#define setup_nonblocksend_buffersize(refsize,refnbuffers,slot,round,latency) \
+  do {                                                          \
+    _bspmpl_nbuf[0] = 0;                                        \
+    if (mpc_task_set(_bspmpl_nbuf,2))                           \
+      bsp_abort("{bsp_start}: cannot set run mode for Sp2");    \
+    _bspmpl_nbuf[0] = *(refsize);                               \
+    _bspmpl_nbuf[1] = 1;                                        \
+    if (mpc_task_set(_bspmpl_nbuf,3))                           \
+      bsp_abort("{bsp_start}: cannot set buffer size for Sp2"); \
+  } while(0)
+\end{code}
+
+\begin{code}
+#ifdef SANITY_CHECK
+#define block_recv(msg,size,from,type,nbytes)                   \
+  do {                                                          \
+    if (mpc_brecv(msg,size,from,type,nbytes))                   \
+      bsp_abort("{block_recv} failed(%d) at line %d \"%s\"\n"   \
+                "msg =%d\n *( size )=%d\n *( from )=%d\n"       \
+                " *( type )=%d\n *( nbytes )=%d",               \
+                mperrno, __LINE__,__FILE__,                     \
+                msg,size,*(from),*(type),*(nbytes));            \
+  } while(0)
+#else
+#define block_recv(msg,size,from,type,nbytes) \
+  mpc_brecv(msg,size,from,type,nbytes)
+#endif
+\end{code}
+
+If too many non-blocking sends are performed without waiting on them,
+then the error ``CSS too many transmit descriptors is raised''. This
+is a work-around that blocks on a prior send if too many have gone out....
+\begin{code}
+#define nonblock_send(msg,size,to,type,lastone)           \
+  ( (_bspmpass_msgid>10000)?                              \
+    (  (_bspmpass_msgid=DONTCARE,                         \
+        mpc_wait(&_bspmpass_msgid,&_bspmpl_nbytes)),      \
+       (mpc_send(msg,size,to,type,&_bspmpass_msgid),1)):  \
+    (mpc_send(msg,size,to,type,&_bspmpass_msgid),1))
+\end{code}
+
+\begin{code}
+#ifdef TURBO
+#define nonblocksend_blockrecv(o,os,d,t,i,is,s,n) \
+  do {                                            \
+    nonblock_send(o,os,d,t,0);                    \
+    _bspmpass_type = t;                           \
+    block_recv(i,is,s,&_bspmpass_type,n);         \
+  } while (0)
+
+#else
+#define nonblocksend_blockrecv(o,os,d,t,i,is,s,n) \
+  _bsp_software_nonblocksend_blockrecv(o,os,d,t,i,is,s,n)
+#endif
+\end{code}
+
+
+\begin{code}
+#define wait_sends()                          \
+  do {                                         \
+    _bspmpass_msgid = ALLMSG;                  \
+    mpc_wait(&_bspmpass_msgid,&_bspmpl_nbytes);\
+  } while(0)
+\end{code}
+
+\begin{code}
+#define nonblock_probe(src,type,wait)          \
+  (mpc_probe(src,type,&_bspmpass_status)?      \
+     (bsp_abort("{nonblock_probe} failed"),0): \
+     (_bspmpass_status!=-1))
+
+#define block_probe(src,type)                       \
+  do {                                              \
+    _bspmpass_errno = -1;                           \
+    while(_bspmpass_errno==-1) {                    \
+      if (mpc_probe(src,type,&_bspmpass_errno)==-1) \
+        bsp_abort("{block_probe} failed");          \
+    }                                               \
+  } while(0);
+                                                
+#define messg_comm_status(x) /* do nothing */
+
+#define messg_active_procs(x) /* Do nothing */
+
+#define messg_stopall()    mpc_stopall(0)
+
+#define messg_exit(status) exit(0); 
+\end{code}
+
+The MPL barrier synchronisation on the SP2 is about twice as slow as
+the software dissemination barrier.
+\begin{code}
+#define barrier_sync() _bsp_software_barrier()
+#else
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Parystec Explorer Parix library}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef MPASS_PARIX
+#define PID_DONTCARE   (-1)
+#define comm_handle int
+#define status_handle int
+
+#define cwhatis_nprocs_mypid(refargc,refargv,refnprocs,refpid) \
+  (*(refnprocs) = GET_ROOT ()->ProcRoot->nProcs,              \
+  (*(refpid)    = GET_ROOT ()->ProcRoot->MyProcID,            \
+   0))
+
+#define f77whatis_nprocs_mypid(refnprocs,refpid) \
+     cwhatis_nprocs_mypid(ohshit,ohshit,refnprocs,refpid)
+
+#define setup_group_before_kill_unwanted(nprocs,refgids) /*donothing*/
+#define setup_group_after_kill_unwanted(nprocs,refgids)  /*donothing*/
+#define setup_nonblocksend_buffersize(size,refnbuffers,slot,round,latency) \
+   *(size) = MAX_MESSAGE_SIZE
+\end{code}
+   
+\begin{code}
+#define nonblock_send(msg,size,to,type,lastone)            \
+  (PutMessage(to,type,MSG_TYPE_USER_START,42,-1,msg,size),1)
+
+#define block_recv(msg,size,from,type,nbytes)              \
+  do {                                                     \
+    if (_bspparix_received==NULL) {                        \
+      if (GetMessage(*(from),*(type),MSG_TYPE_USER_START,  \
+                     -1,&_bspparix_message)==-1)           \
+        bsp_abort("{block_recv} failed");                  \
+      *(from)  =_bspparix_message.Header.SourceProcId;     \
+      *(type)  =_bspparix_message.Header.ReqId;            \
+      *(nbytes)=_bspparix_message.Header.Size;             \
+      memcpy(msg,_bspparix_message.Body,*(nbytes));        \
+    } else {                                               \
+      *(from)  =_bspparix_received->Header.SourceProcId;   \
+      *(type)  =_bspparix_received->Header.ReqId;          \
+      *(nbytes)=_bspparix_received->Header.Size;           \
+      memcpy(msg,_bspparix_received->Body,*(nbytes));      \
+      _bspparix_received=NULL;                             \
+    }                                                      \
+  } while(0)
+\end{code}
+
+\begin{code}
+#define nonblocksend_blockrecv(o,os,d,t,i,is,s,n) \
+  _bsp_software_nonblocksend_blockrecv(o,os,d,t,i,is,s,n)
+\end{code}
+
+\begin{code}
+#define wait_sends() /* donothing*/
+\end{code}
+
+\begin{code}
+#define nonblock_probe(src,type,wait)                              \
+  ((_bspmpass_status=GetMessage(*(src),*(type),MSG_TYPE_USER_START,\
+                                0,&_bspparix_message)),            \
+   (((_bspmpass_status==GM_TIMEOUT) || (_bspmpass_status!=42))?    \
+       (_bspparix_received=NULL,0):                                \
+       (_bspparix_received=&_bspparix_message,                     \
+       (*(src)=_bspparix_message.Header.SourceProcId,              \
+       (*(type)=_bspparix_message.Header.ReqId)))                  \
+   ))
+
+#define block_probe(src,type)                                      \
+  do {                                                             \
+    _bspmpass_status=GetMessage(*(src),*(type),MSG_TYPE_USER_START,\
+                                -1,&_bspparix_message);            \
+    if (_bspmpass_status==-1)                                      \
+      bsp_abort("{block_probe} failed");                           \
+    _bspparix_received = &_bspparix_message;                       \
+    *(src) =_bspparix_message.Header.SourceProcId;                 \
+    *(type)=_bspparix_message.Header.ReqId;                        \
+  } while(0)
+\end{code}
+
+\begin{code}
+#define messg_comm_status(x) /* do nothing */
+
+#define messg_active_procs(x) /* Do nothing */
+
+#define messg_stopall()    AbortServer(0)  
+
+#define messg_exit(status) exit(0); 
+\end{code}
+
+\begin{code}
+#define barrier_sync() _bsp_software_barrier()
+
+#else
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Parmacs library}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef MPASS_PARMACS
+#define MPASS_NEEDS_HOST_PROGRAM
+#define MPASS_HOST_SWAP_BYTE_ORDERING
+#define PID_DONTCARE   (PM_ANYPID)
+#define PID_HOSTID     (pm_hostpid())
+#define comm_handle int
+#define status_handle int
+
+#define cwhatis_nprocs_mypid(refargc,refargv,refnprocs,refpid)      \
+  ((pm_init()<0)?1:                                                 \
+   (((*(refpid)=pm_mypid())==PM_NOPID)?                             \
+     (bsp_abort("{bsp_begin} unable to calculate process id"),1):   \
+     (*(refnprocs)=pm_nrnodes(),0)))
+
+#define f77whatis_nprocs_mypid(refnprocs,refpid) \
+     cwhatis_nprocs_mypid(ohshit,ohshit,refnprocs,refpid)
+
+#define setup_group_before_kill_unwanted(nprocs,refgids) /*donothing*/
+#define setup_group_after_kill_unwanted(nprocs,refgids)  /*donothing*/
+#define setup_nonblocksend_buffersize(size,refnbuffers,slot,round,latency) \
+   /* Do nothing */
+\end{code}
+   
+\begin{code}
+#ifdef MPASS_PARMACS_HOST
+#define nonblock_send(msg,size,to,type,lastone)          \
+  ((pm_send(to,type,size,(char*) (msg))==(size))?1:      \
+   (fprintf(stderr,"{nonblock_send(%s)} line %d of %s\n",\
+            pm_strerror(pm_error()),__LINE__,__FILE__),0))
+#else
+#define nonblock_send(msg,size,to,type,lastone)          \
+  ((pm_send(to,type,size,(char*) (msg))==(size))?1:      \
+   (bsp_debug("{nonblock_send(%s)} line %d of %s\n",     \
+              pm_strerror(pm_error()),__LINE__,__FILE__),0))
+#endif
+
+#define block_recv(msg,size,from,type,nbytes)                        \
+  do {                                                               \
+    char *msg_ptr=(char*) (msg);                                     \
+    *(nbytes)=pm_recv(*(from),*(type),_bsp_buffer_size,               \
+                      &msg_ptr,from,type);                           \
+    if (*(nbytes)<0)                                                 \
+      bsp_abort("{block_recv} line %d of %s\n"                       \
+                "FROM=%d TYPE=%d NBYTES=%d "                         \
+                "failed with \"%s\"",                                \
+                __LINE__,__FILE__,                                   \
+                *(from),*(type),*(nbytes),                           \
+                pm_strerror(pm_error()));                            \
+  } while(0)
+\end{code}
+
+\begin{code}
+#define nonblocksend_blockrecv(o,os,d,t,i,is,s,n) \
+  _bsp_software_nonblocksend_blockrecv(o,os,d,t,i,is,s,n)
+\end{code}
+
+\begin{code}
+#define wait_sends() /* donothing*/
+\end{code}
+
+\begin{code}
+#define nonblock_probe(src,type,wait)                              \
+  pm_probe(*(src),*(type),src,type)
+
+#define block_probe(src,type)                                      \
+  pm_wait(1,src,type,src,type)
+\end{code}
+
+\begin{code}
+#define messg_comm_status(x)  /* do nothing */
+
+#define messg_active_procs(x) /* Do nothing */
+
+#define messg_stopall()                         \
+  do {                                          \
+    int exit_status=1;                          \
+    nonblock_send(&exit_status,sizeof(int),     \
+                  PID_HOSTID,BSP_MPASS_ABORT,0);\
+    pm_delete();                                \
+    pm_end();                                   \
+  } while(0)
+
+#define MPASS_ATEXIT
+#define messg_exit(status)                        \
+  do {                                            \
+    int exit_status=0;                            \
+    if (_bsp_pid==0)                              \
+      nonblock_send(&exit_status,sizeof(int),     \
+                    PID_HOSTID,BSP_MPASS_ABORT,0);\
+    pm_end();                                     \
+  } while(0)
+\end{code}
+
+\begin{code}
+#define barrier_sync() _bsp_software_barrier()
+
+#else
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Hitachi SR2001 Express library}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef MPASS_EXPRESS
+#define PID_DONTCARE   DONTCARE
+#define comm_handle   int
+#define status_handle int
+
+#define cwhatis_nprocs_mypid(refargc,refargv,refnprocs,refpid)       \
+  (exparam(&_bspexpress_params),                                     \
+   (*(refnprocs) = _bspexpress_params.nprocs,                        \
+    (*(refpid)  = _bspexpress_params.procnum,                        \
+     (((fasync(stdout)<0)?(bsp_abort("fasync(stdout) failed"),1):1), \
+      (((fasync(stderr)<0)?(bsp_abort("fasync(stdout) failed"),1):1),\
+      0)))))
+
+#define f77whatis_nprocs_mypid(refnprocs,refpid) \
+     cwhatis_nprocs_mypid(ohshit,ohshit,refnprocs,refpid)
+          
+#define setup_group_before_kill_unwanted(nprocs,refgids) /*donothing*/
+
+#define setup_group_after_kill_unwanted(nprocs,refgids)  /*donothing*/
+\end{code}
+
+\begin{code}
+#define setup_nonblocksend_buffersize(refsize,refnbuffers,slot,round,latency)\
+ /*empty*/
+\end{code}
+
+\begin{code}
+#ifdef SANITY_CHECK
+#define block_recv(msg,size,from,type,nbytes) \
+  do {                                        \
+    *(nbytes) = exread(msg,size,from,type);   \
+    if (*(nbytes) < 0)                        \
+      bsp_abort("{block_recv} failed");       \
+  } while(0)
+#else
+#define block_recv(msg,size,from,type,nbytes) \
+  do {                                        \
+    *(nbytes) = exread(msg,size,from,type);   \
+  } while(0)
+#endif
+\end{code}
+
+
+\begin{code}
+#define nonblock_send(msg,size,to,type,lastone)                    \
+  ((exwrite(msg,size,(_bspexpress_dst = to,   &_bspexpress_dst),   \
+                     (_bspmpass_type  = type, &_bspmpass_type)))<0?\
+     (bsp_abort("{nonblock_send} failed"),0):                      \
+     (1))
+\end{code}
+
+\begin{code}
+#ifdef TURBO
+#define nonblocksend_blockrecv(o,os,d,t,i,is,s,n)           \
+  do {                                                      \
+    _bspmpass_type  = t;                                    \
+    _bspexpress_dst = d;                                    \
+    *(n) = exchange(i,is,s,&_bspmpass_type,                 \
+                    o,os,&_bspexpress_dst,&_bspmpass_type); \
+    if ((_bspmpass_type!=t) || (_bspexpress_dst != d))      \
+      bsp_abort("{nonblocksend_blockrecv} failed");         \
+  } while(0)
+#else
+#define nonblocksend_blockrecv(o,os,d,t,i,is,s,n) \
+  do {                                            \
+    nonblock_send(o,os,d,t,0);                    \
+    _bspmpass_type = t;                           \
+    block_recv(i,is,s,&_bspmpass_type,n);         \
+  } while (0)
+#endif
+\end{code}
+
+
+\begin{code}
+#define wait_sends()  /* donothing */
+\end{code}
+
+\begin{code}
+#define nonblock_probe(src,type,wait) (extest(src,type)>=0)
+
+#ifdef SANITY_CHECK
+#define block_probe(src,type)               \
+  do {                                      \
+    if (exbtest(src,type)<0)                \
+        bsp_abort("{block_probe} failed");  \
+  } while(0)
+#else  
+#define block_probe(src,type) \
+  do {                        \
+    exbtest(src,type);        \
+  } while(0)
+#endif
+\end{code}
+
+\begin{code}                                     
+#define messg_comm_status(x) /* do nothing */
+
+#define messg_active_procs(x) /* Do nothing */
+
+#define messg_stopall()    abort(0)
+
+#define messg_exit(status) exit(0); 
+\end{code}
+
+
+\begin{code} 
+#define barrier_sync() _bsp_software_barrier()
+
+#else
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{MPI library}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#ifdef MPASS_MPI
+#define PID_DONTCARE   MPI_ANY_SOURCE
+#define comm_handle MPI_Request*
+#define status_handle MPI_Status
+
+#define cwhatis_nprocs_mypid(refargc,refargv,refnprocs,refpid) \
+  (MPI_Init(refargc,refargv)                               || \
+   MPI_Comm_rank(MPI_COMM_WORLD,refpid)                    || \
+   (_bspmpass_errno=MPI_Comm_size(MPI_COMM_WORLD,refnprocs),  \
+     (_mpass.group = MPI_COMM_WORLD,_bspmpass_errno)))
+
+#ifdef UNDERSCORE
+#define f77MPI_Init mpi_init_
+#else
+#ifdef DOUBLEUNDERSCORE
+#define f77MPI_Init mpi_init__
+#else
+#ifdef UPPERCASE
+#define f77MPI_Init MPI_INIT
+#else
+#define f77MPI_Init mpi_init
+#endif
+#endif
+#endif
+
+#define f77whatis_nprocs_mypid(refnprocs,refpid) \
+  ((f77MPI_Init(&_bspmpass_errno),_bspmpass_errno)         || \
+   MPI_Comm_rank(MPI_COMM_WORLD,refpid)                    || \
+   (_bspmpass_errno=MPI_Comm_size(MPI_COMM_WORLD,refnprocs),  \
+     (_mpass.group = MPI_COMM_WORLD,_bspmpass_errno)))
+
+#define setup_group_before_kill_unwanted(nprocs,refgids)                  \
+  do {                                                                    \
+    if (MPI_Comm_group(MPI_COMM_WORLD,&_bspmpi_group_world))              \
+      bsp_abort("{bsp_start} failed to create an MPI comm group");        \
+    if (MPI_Group_incl(_bspmpi_group_world,nprocs,refgids,&_bspmpi_group))\
+      bsp_abort("{bsp_start} failed to add to an MPI comm group");        \
+    if (MPI_Comm_create(MPI_COMM_WORLD,_bspmpi_group,&_mpass.group))      \
+      bsp_abort("{bsp_start}: unable to create communication group");     \
+  } while(0)
+
+#define setup_group_after_kill_unwanted(nprocs,refgids) /*donothing*/
+#define setup_nonblocksend_buffersize(size,refnbuffers,slot,round,latency)\
+  do {                                                                   \
+    _bspmpass_msgid    = CALLOC(_bsp_comm_fifo_size,SIZEOF(MPI_Request));\
+    _bspmpi_status_arr = CALLOC(_bsp_comm_fifo_size,SIZEOF(MPI_Status)); \
+    if (_bspmpass_msgid==NULL || _bspmpi_status_arr==NULL)              \
+      bsp_abort("{setup_nonblocksend_buffersize} failed");              \
+    _bspmpi_next_msgid=0;                                               \
+  } while(0)
+\end{code}
+
+\begin{code}
+#define block_recv(msg,size,from,type,nbytes)             \
+ do {                                                     \
+   if (MPI_Recv(msg,size,MPI_BYTE,*(from),*(type),        \
+                _mpass.group,&_bspmpass_status))          \
+     bsp_abort("{block_recv} failed to MPI_Recv");        \
+   if (MPI_Get_count(&_bspmpass_status,MPI_BYTE,nbytes))  \
+     bsp_abort("{block_recv} failed to MPI_Get_count");   \
+   *(from) = _bspmpass_status.MPI_SOURCE;                 \
+   *(type) = _bspmpass_status.MPI_TAG;                    \
+ } while(0)
+\end{code}
+
+\begin{code}
+#define nonblock_send(msg,size,to,type,lastone)            \
+  (MPI_Isend(msg,size,MPI_BYTE,to,type,_mpass.group,       \
+                  &_bspmpass_msgid[_bspmpi_next_msgid++])? \
+    (bsp_abort("{nonblock_send} failed"),0):1)
+\end{code}
+
+\begin{code}
+#define nonblocksend_blockrecv(o,os,d,t,i,is,s,n) \
+  _bsp_software_nonblocksend_blockrecv(o,os,d,t,i,is,s,n)
+\end{code}
+
+\begin{code}
+#define wait_sends()                                     \
+  do {                                                   \
+    if (MPI_Waitall(_bspmpi_next_msgid,_bspmpass_msgid,  \
+                    _bspmpi_status_arr))                 \
+      bsp_abort("{wait_sends} failed");                  \
+    _bspmpi_next_msgid=0;                                \
+  } while(0)
+\end{code}
+
+Note: Using errno as a local variable that determines if message is available.
+\begin{code}
+#define nonblock_probe(src,type,wait)                \
+  (MPI_Iprobe(*(src),*(type),_mpass.group,           \
+              &_bspmpass_errno,&_bspmpass_status)?   \
+     (bsp_abort("{nonblock_probe} failed"),0):       \
+     (*(src) = _bspmpass_status.MPI_SOURCE,          \
+     (*(type)= _bspmpass_status.MPI_TAG,             \
+     _bspmpass_errno)))                              \
+    
+#define block_probe(src,type)                                   \
+  do {                                                          \
+    if (MPI_Probe(*(src),*(type),_mpass.group,&_bspmpass_status))\
+      bsp_abort("{block_probe} failed");                        \
+    *(src) = _bspmpass_status.MPI_SOURCE;                         \
+    *(type)= _bspmpass_status.MPI_TAG;                            \
+  } while(0)
+\end{code}
+
+\begin{code}
+#define messg_comm_status(x) /* do nothing */
+
+#define messg_active_procs(x) /* Do nothing */
+
+#define messg_stopall() MPI_Abort(MPI_COMM_WORLD,0)
+
+#define MPASS_ATEXIT
+#define messg_exit(status) MPI_Finalize()
+\end{code}
+
+\begin{code}
+#ifdef SANITY_CHECK
+#define barrier_sync()                                    \
+  do {                                                    \
+    if (MPI_Barrier(_mpass.group))                        \
+      bsp_abort("{barrier-sync}: synchronisation failed");\
+  } while(0)
+#else
+#define barrier_sync() MPI_Barrier(_mpass.group); 
+#endif 
+#endif /* MPASS_MPI */
+#endif /* MPASS_EXPRESS */
+#endif /* MPASS_PARMACS */
+#endif /* MPASS_PARIX   */
+#endif /* MPASS_MPL     */
+#endif /* MPASS_TCPIP   */
+#endif /* MPASS_UDPIP   */
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Message matrix}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+typedef unsigned int bsp_bitvec_t;
+
+#define set_bit_in_type(type,x,i)    (x|=(((type) 1) << i))
+#define unset_bit_in_type(type,x,i)  (x&=~(((type) 1) << i))
+#define test_bit_in_type(type,x,i)   ((int) ((x >> i) & 1))
+
+#define messg_matrix_set(i)                                           \
+  do {                                                                \
+    int i_=(i);                                                       \
+    set_bit_in_type(                                                  \
+       bsp_bitvec_t,                                                  \
+       _mpass.proc_comm_exchange_matrix[i_/(sizeof(bsp_bitvec_t)*8)], \
+       MOD_POW2(i_,(sizeof(bsp_bitvec_t)*8)));                        \
+  } while(0) 
+
+#define messg_matrix_unset(i)                                         \
+  do {                                                                \
+    int i_ = (i);                                                     \
+    unset_bit_in_type(                                                \
+       bsp_bitvec_t,                                                  \
+       _mpass.proc_comm_exchange_matrix[i_/(sizeof(bsp_bitvec_t)*8)], \
+       MOD_POW2(i_,(sizeof(bsp_bitvec_t)*8)));                        \
+  } while(0) 
+
+
+#ifdef __GNUC__
+#define messg_matrix_isset(i)                                       \
+  ({int i_ = (i);                                                   \
+    int res_;                                                       \
+    res_ = test_bit_in_type(bsp_bitvec_t,                           \
+                   _mpass.proc_comm_exchange_matrix[i_/             \
+                      (sizeof(bsp_bitvec_t)*8)],                    \
+                   MOD_POW2(i_,(sizeof(bsp_bitvec_t)*8)));          \
+    res_;})
+    
+#else
+
+#define messg_matrix_isset(i)                                       \
+  test_bit_in_type(bsp_bitvec_t,                                    \
+                   _mpass.proc_comm_exchange_matrix[(i)/            \
+                      (sizeof(bsp_bitvec_t)*8)],                    \
+                   MOD_POW2((i),(sizeof(bsp_bitvec_t)*8)))
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{global variables}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Each process has its own copy of the following data-structure.
+\begin{code}
+typedef struct {
+#ifdef MPASS_MPI
+   MPI_Comm         group;
+#else
+   int              group;
+#endif
+   bsp_bitvec_t    *proc_comm_exchange_matrix;
+   bsp_bitvec_t    *proc_comm_exchange_matrix_copy;
+
+   _BSPcomm_thunk **proc_comm_out_fifo;    /* pending comms per proc  */
+   _BSPcomm_thunk **proc_comm_in_fifo;     /* comm coming in          */
+   int             *proc_comm_out_next;    /* next position out       */ 
+   int             *proc_comm_in_next;     /* next position in        */
+   int             *proc_comm_out_size;    /* size of out fifo        */
+   int             *proc_comm_in_size;     /* size of out fifo        */
+} _BSPinfo;
+
+extern _BSPinfo _mpass;
+extern comm_handle   _bspmpass_msgid; 
+extern status_handle _bspmpass_status;
+extern int           _bspmpass_errno;
+extern int           _bspmpass_type;
+
+#ifdef MPASS_MPL
+extern int           _bspmpl_nbytes;
+#endif
+
+#ifdef MPASS_MPI
+extern status_handle *_bspmpi_status_arr;
+extern int           _bspmpi_next_msgid;
+#endif
+
+#ifdef MPASS_PARIX
+extern RR_Message_t _bspparix_message,*_bspparix_received;
+#endif
+
+#ifdef MPASS_EXPRESS
+extern int          _bspexpress_dst; 
+#endif    
+\end{code}

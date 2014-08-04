@@ -1,0 +1,193 @@
+###########################################################################
+##      Copyright (C) 1995,1996,1997 University of Oxford                ##
+##                                                                       ##
+## Permission to use, copy, modify, and distribute this software,        ##
+## and to incorporate it, in whole or in part, into other software,      ##
+## is hereby granted without fee, provided that                          ##
+##   (1) the above copyright notice and this permission notice appear in ##
+##       all copies of the source code, and the above copyright notice   ##
+##       appear in clearly visible form on all supporting documentation  ##
+##       and distribution media;                                         ##
+##   (2) modified versions of this software be accompanied by a complete ##
+##       change history describing author, date, and modifications made; ##
+##       and                                                             ##
+##   (3) any redistribution of the software, in original or modified     ##
+##       form, be without fee and subject to these same conditions.      ##
+###########################################################################
+
+###########################################################################
+##            D O N T  C H A N G E  A N Y T H I N G  !!                  ##
+###########################################################################
+
+SHELL      = /bin/sh
+
+prefix     = @prefix@
+exec_prefix= @exec_prefix@
+bindir     = @bindir@
+includedir = @includedir@
+libdir     = @libdir@
+top_srcdir = @top_srcdir@/../
+
+BSP_ONLINE_PROCS= @BSP_ONLINE_PROCS@
+RANLIB          = @RANLIB@
+GCC             = @GCC@
+INSTALL          = @INSTALL@
+INSTALL_PROGRAM  = @INSTALL_PROGRAM@
+INSTALL_DATA     = @INSTALL_DATA@
+
+mpiincludedir   = @mpiincludedir@
+
+editpl = sed -e 's,@''includedir''@,$(includedir),g'       \
+             -e 's,@''bindir''@,$(bindir),g'               \
+             -e 's,@''binarchdir''@,$(bindir)/$(ARCH)/,g'  \
+             -e 's,@''libdir''@,$(libdir),g'               \
+             -e 's,@''mandir''@,$(mandir),g'               \
+             -e 's,@''GCC''@,$(GCC),g'                     \
+             -e 's,@''G77''@,$(G77),g'                     \
+             -e 's,@''GPLUSPLUS''@,$(GPLUSPLUS),g'         \
+             -e 's,@''mpiincludedir''@,$(mpiincludedir),g' \
+             -e 's,@''mpilibdir''@,$(mpilibdir),g'         \
+             -e 's,@''PERL_DBMOK''@,$(PERL_DBMOK),g'       \
+             -e 's,@''PERL''@,$(PERL),g'                   \
+             -e 's,@''PWD''@,$(PWD),g'
+
+##########################################################################
+# Architecture independent modules
+##########################################################################
+DRIVER_SRCS_LC   = bspkdriver.lc 
+KSTATS_SRCS_LC   = bspkstats.lc
+LIB_SRCS_LC      = bspkernell.lc
+SRCS_LH          = bspdev.lh nic3c90xb.lh bspkernell.lh
+
+.SUFFIXES: .lc .lh .c .tex .c.tex .h.tex .s
+
+#############################################################
+##             Flags and conversions                       ##
+#############################################################
+
+LIBRARIES     = @SOCKET_LIBRARY@ @NSL_LIBRARY@
+INCLUDES      = 
+
+SRCS_O        = $(DRIVER_SRCS_LC:.lc=.o) $(LIB_SRCS_LC:.lc=.o) \
+                $(KSTATS_SRCS_LC:.lc=.o)
+
+SRCS_C        = $(DRIVER_SRCS_LC:.lc=.c) $(LIB_SRCS_LC:.lc=.c) \
+		$(KSTATS_SRCS_LC:.lc=.c)
+
+SRCS_H        = $(SRCS_LH:.lh=.h)
+
+SRCS_TEX      = $(SRCS_LH:.lh=.h.tex) $(DRIVER_SRCS_LC:.lc=.c.tex) \
+		$(KSTATS_SRCS_LC:.lc=.c.tex) $(LIB_SRCS_LC:.lc=.c.tex)
+
+CC         = gcc
+CFLAGS     =  -O ${BUILD_DEFINES}  -DMPASS_3C905B -DLINUX
+LIBNAME    = "libbspkernel"
+
+.SUFFIXES: .lc .lh .h .c .tex .c.tex .h.tex
+
+#############################################################
+##             Compilation rules                           ##
+#############################################################
+
+
+.lh.h:
+	rm -f $*.h $*.tmp;				\
+	litToPgm $<;					\
+	$(editpl) $*.h > $*.tmp && mv $*.tmp $*.h
+
+
+.lc.o:
+	rm -f $*.c $*.tmp;				\
+	litToPgm $<;					\
+	$(editpl) $*.c > $*.tmp && mv $*.tmp $*.c;	\
+	${CC} ${CFLAGS} $(INCLUDES) -c $*.c 
+
+.lc.c:
+	litToPgm $<;					\
+	rm -f $*.tmp;					\
+	$(editpl) $*.c > $*.tmp && mv $*.tmp $*.c
+
+.y.c:
+	${YACC} $<
+
+.l.c:
+	${LEX} -t $< > $*.c
+
+.c.o:
+	${CC} ${CFLAGS} $(INCLUDES) -c $*.c 
+
+.lh.h.tex:
+	litToTex $<
+
+.lc.c.tex:
+	litToTex $<
+
+
+
+#############################################################
+##             Main Targets                                ##
+#############################################################
+all::
+
+sample: 
+	@make machine;					\
+	litToPgm sample.lc;				\
+	${CC} -DBSPTCP_SETENV sample.c bsptcpl.o -o sample -lnsl -lsocket;\
+        rm -f sample.c
+
+build:
+	@$(MAKE) clean; $(MAKE) device
+
+develop:
+	@$(MAKE) device
+
+#############################################################
+##             Generic Compilation targets                 ##
+#############################################################
+
+objects: ${SRCS_H} ${SRCS_O}
+
+delit: ${SRCS_C} ${SRCS_H} 
+
+root.dvi: $(SRCS_TEX)
+	latex root.tex
+
+kstats:
+	$(CC) ${CFLAGS} -o bspkstats bspkstats.o
+
+device:
+	@$(MAKE) banner TYPE="Device bspkdriver"     			 \
+              FOR="flags are $(CFLAGS)";                                 \
+	$(MAKE) delit;							 \
+	$(MAKE) objects SRCS_LC="${SRCS_LC}" SRCS_LH="${SRCS_LH}"        \
+                        SRCS_O="${SRCS_O}" CFLAGS="${CFLAGS} @DEFS@"     \
+                        CC="${CC}";					 \
+	$(MAKE) kstats;							 \
+	if [ ! -d ${top_srcdir}/lib/`bsparch -arch` ] ;                  \
+        then  mkdir -p ${top_srcdir}/lib/`bsparch -arch`; fi;            \
+	if [ ! -d ${top_srcdir}/bin/`bsparch -arch` ] ;                  \
+        then  mkdir -p ${top_srcdir}/bin/`bsparch -arch`; fi;            \
+        rm -f ${top_srcdir}/lib/`bsparch -arch`/${LIBNAME}.a;            \
+	${AR} crv ${top_srcdir}/lib/`bsparch -arch`/${LIBNAME}.a         \
+                  $(LIB_SRCS_LC:.lc=.o);                                 \
+        ${RANLIB} ${top_srcdir}/lib/`bsparch -arch`/${LIBNAME}.a;	 \
+	${INSTALL_PROGRAM} bspkdriver.o					 \
+	   $(top_srcdir)/bin/`bsparch -arch`/bspkdriver.o;		 \
+	${INSTALL_PROGRAM} bspkstats					 \
+	   $(top_srcdir)/bin/`bsparch -arch`/bspkstats
+
+            
+
+clean:
+	rm -f $(SRCS_O) $(SRCS_ANY_O) $(BINARY_TARGET)   \
+              $(SRCS_H) $(SRCS_TEX) mon.out $(SRCS_C)    
+
+banner:
+	@echo "#########################################################"; \
+        echo  "#####   ${TYPE} = ${FOR}";                                  \
+        echo  "#########################################################"
+
+
+#############################################################
+##             Dependencies                                ##
+#############################################################

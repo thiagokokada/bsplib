@@ -1,0 +1,48 @@
+.TH "bsp_pop_reg" 3 "1.4 25/9/98" "Oxford BSP Toolset" "BSPlib FUNCTIONS"
+.SH NAME
+bsp_pop_reg \- remove the visibility of a previously registered
+data-structure. 
+
+.SH C SYNOPSIS
+.nf
+.B #include \&"bsp.h\&"
+.PP
+.BI "void  bsp_popregister(const void *" ident ");
+.fi
+.SH FORTRAN SYNOPSIS 
+.nf
+.BI "SUBROUTINE bsppopregister(" ident ")"
+.BI "<TYPE>, intent(IN) :: " ident
+.fi
+
+.SH DESCRIPTION
+
+A registration association is destroyed when each process calls
+.B bsp_pop_reg(3)
+and provides the address of its local area participating in that
+registration. A runtime error will be raised if these addresses (i.e.,
+one address per process) do not refer to the same registration
+association. In line with superstep semantics, 
+.I "de-registration takes effect at the"
+.I "next barrier synchronisation."
+ 
+.SH "SEE ALSO"
+drma(3),bsp_push_reg(3), bsp_put(3), bsp_hpput(3), bsp_get(3),
+bsp_hpget(3)
+
+.I ``BSPlib: The BSP Programming Library''
+Jonathan M. D. Hill, Bill McColl, Dan C. Stefanescu, Mark W. Goudreau,
+Kevin Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and Rob
+Bisseling. Parallel Computing, to appear 1998. See
+.I http://www.bsp-worldwide.org
+for more details.
+
+.SH BUGS
+Problems and bug reports should be mailed to 
+.I bsplib-bugs@comlab.ox.ac.uk
+
+.SH AUTHORS
+The Oxford BSP Toolset implementation of BSPlib was written by
+Jonathan.Hill@comlab.ox.ac.uk
+.br
+.B http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html

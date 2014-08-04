@@ -1,0 +1,190 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{\texttt{bsp\_bcast}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#include "bsp.h"
+#include "bsp_level1.h"
+#include "bsp_f77_names.h"
+#include <limits.h>
+#include <stdio.h>
+\end{code}
+
+The broadcast operation assumes that the destination data-structure
+that holds the broadcast data has been previously registered.  There
+are currently two implementations ofbroadcast, where the
+implementation chooses between them depending upon the values of $p$,
+$l$ and $g$:
+
+\paragraph{Simple}
+Performs $p$ puts from the broadcasting process into every other
+process.  The cost of the algorithm is:
+\begin{equation}
+\label{eqn:simple}
+(p-1)ng\left(\frac{\nhalf{}}{n}+1\right) +l
+\end{equation}
+
+\paragraph{Two phase}
+The data is initially partitioned into $n/p$ chunks and distribututed
+among all the prcoesses. These distributed blocks are then total
+exchanged. The cost of the algorithm is:
+\begin{equation}
+\label{eqn:complex}
+\frac{2n(p-1)g}{p}\left(\frac{p\nhalf{}}{n}+1\right) + 2l
+\end{equation}
+
+For small amounts of data, the first algorithm will be better than the
+latter. The algorithm with cost shown in equation~\ref{eqn:complex}
+becomes more viable when the data size $n$ is greater than
+
+% Maple
+% latex(solve( ((2*n*(p-1)*g)/p)*(((p*nhalf)/n)+1) + 2*l = \
+%              (((p-1)*n*g*((nhalf/n)+1))+l),{n}));
+\begin{equation}
+n> -{\frac {gp^{2}{\nhalf}-gp{\nhalf}+lp}{3\,gp-2\,g-gp^{
+2}}}
+\end{equation}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Initialisation}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+static int bsp_bcast_breakeven;
+void bsp_bcast_init() \{
+  double p,l,g, top,bot;
+  int nhalf;
+
+
+  p    = (double) bsp_nprocs();
+  l    = bsp_l();
+  g    = bsp_g(); 
+  nhalf=bsp_nhalf();
+  top = -((g*p*p*nhalf - g*p*nhalf + l*p)*4.0);
+  bot = 3.0*g*p - 2.0*g - g*p*p;
+  bsp_bcast_breakeven = (bot==0.0)?0:((int)(top/bot));
+  if (bsp_bcast_breakeven<(sizeof(int)*bsp_nprocs()))
+    bsp_bcast_breakeven = sizeof(int)*bsp_nprocs();
+  
+#ifdef DEBUG
+  bsp_debug("\{bsp_bcast_init\} using two-stage bcast when n>%d bytes",
+            bsp_bcast_breakeven);
+#endif
+ \}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Statistics output}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_bcast_stat(FILE *fptr) \{
+  fprintf(fptr,"bsp_bcast cost:\\n"
+               "\\tmin (simple,two-stage)\\n"
+               "\\twhere simple    = (p-1)ng +l\\n"
+               "\\t      two-stage = 2(p-1)(n/p)g + 2l\\n"
+               "\\t      n         = size of structure broadcast\\n\\n");
+  fprintf(fptr,"\\tusing simple bcast when n < l/(2g/p + pg - 3g)\\n");
+  fprintf(fptr,"\\t                        n < %d bytes\\n\\n",bsp_bcast_breakeven);
+ \}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{The routine}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{code}
+#undef bsp_bcast
+void bsp_bcast(int pid, void *src, void *dst, int nbytes) \{
+  bsp_bcast_cpp(pid,src,dst,nbytes,0,"unknown .c file");
+ \}
+
+void bsp_bcast_cpp(int pid, void *src, void *dst, int nbytes,
+		   int lineno, char *filename) \{
+  int i, n_over_p, last_n_over_p, mypid, nprocs;
+  char *totex_table;
+
+#ifdef SANITY_CHECK
+  if (!bsp_constantI(pid))
+    bsp_abort("\{bsp_bcast\} line %d of \\"%s\\"\\n"
+              "\\tThe broadcasting pid is not constant on all the processors",
+	      lineno,filename);
+
+  if (!bsp_constantI(nbytes))
+    bsp_abort("\{bsp_bcast\} line %d of \\"%s\\"\\n"
+              "\\tThe broadcasting nbytes is not constant on all "
+              "the processors",lineno,filename);
+#endif
+
+  
+  mypid       = bsp_pid();
+  nprocs      = bsp_nprocs();
+#ifdef CRAYT3D
+  if ((nbytes < bsp_bcast_breakeven) || ((nbytes/nprocs)%sizeof(void*))) \{
+#else
+  if (nbytes < bsp_bcast_breakeven) \{
+#endif
+
+#ifdef DEBUG
+    bsp_debug("\{bsp_bcast\} simple bcast of %d bytes on %d",nbytes,pid);
+#endif
+    /* Simple broadcast */
+    if (mypid==pid) 
+      for(i=0;i<nprocs;i++) 
+        bsp_put(i,src,dst,0,nbytes);
+    bsp_sync();
+  \} else \{
+#ifdef DEBUG
+    bsp_debug("\{bsp_bcast\} two-stage bcast of %d bytes from %d",nbytes,pid);
+#endif
+
+    n_over_p      = nbytes / nprocs;
+    last_n_over_p = nbytes - (n_over_p * (nprocs-1));
+#ifdef DEBUG
+    bsp_debug("\{bsp_bcast\} n/p = %d and %d on last processor",
+              n_over_p,last_n_over_p);
+#endif
+\end{code}
+First we have to use a put because we don't want to write into dst too
+early. i.e., seen on the remote processor before entry to broadcast.
+\begin{code}
+    if (mypid==pid) \{
+      for(i=0;i<nprocs;i++) \{
+        bsp_put(i,
+                ((char*) src)+(n_over_p*i),
+                dst,
+                (n_over_p*i),
+                (i==(nprocs-1))?last_n_over_p:n_over_p);
+      \}
+    \}
+    bsp_sync();
+    for(i=0;i<nprocs;i++) 
+      bsp_hpput(i,
+                ((char*) dst)+(n_over_p*mypid),
+                dst,
+                (n_over_p*mypid),
+                (mypid==(nprocs-1))?last_n_over_p:n_over_p);
+    bsp_sync();       
+  \}
+ \}
+\end{code}
+
+\begin{code}
+void BSPBCAST(int *pid, void *src, void *dst, int *nbytes) \{
+  bsp_bcast(*pid,src,dst,*nbytes);
+ \}
+\end{code}
+

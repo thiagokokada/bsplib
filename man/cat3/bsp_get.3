@@ -1,0 +1,396 @@
+
+
+
+bsp_get(3)              BSPlib FUNCTIONS               bsp_get(3)
+
+
+
+NAME
+     bsp_get, bsp_hpget -  copy  data  from  a  remote  processes
+     memory
+
+
+C SYNOPSIS
+     #include "bsp.h"
+
+     void bsp_get(int _p_i_d,const void *_s_r_c, int _o_f_f_s_e_t,void *_d_s_t,int _n_b_y_t_e_s);
+
+     void bsp_hpget(int _p_i_d,const void *_s_r_c, int _o_f_f_s_e_t,void *_d_s_t,int _n_b_y_t_e_s);
+
+FORTRAN SYNOPSIS
+     SUBROUTINE  bspget(_p_i_d,_s_r_c,_o_f_f_s_e_t,_d_s_t,_n_b_y_t_e_s)
+       INTEGER, intent(IN)  :: _p_i_d,_o_f_f_s_e_t,_n_b_y_t_e_s
+       <TYPE>,  intent(IN)  :: _s_r_c
+       <TYPE>,  intent(OUT) :: _d_s_t
+
+     SUBROUTINE  bsphpget(_p_i_d,_s_r_c,_o_f_f_s_e_t,_d_s_t,_n_b_y_t_e_s)
+       INTEGER, intent(IN)  :: _p_i_d,_o_f_f_s_e_t,_n_b_y_t_e_s
+       <TYPE>,  intent(IN)  :: _s_r_c
+       <TYPE>,  intent(OUT) :: _d_s_t
+
+DESCRIPTION
+     The bsp_get(3) and bsp_hpget(3) operations  reach  into  the
+     local   memory   of  another  process  and  copy  previously
+     registered remote data held there into a data  structure  in
+     the local memory of the process that initiated them.
+
+     The semantics _b_u_f_f_e_r_e_d _o_n _s_o_u_r_c_e, _b_u_f_f_e_r_e_d _o_n _d_e_s_t_i_n_a_t_i_o_n is
+     used  for  bsp_get(3)  communications.  This semantics means
+     that the value taken from the source on the  remote  process
+     by  the  get, is the value available once the remote process
+     finishes executing all its superstep computations.  Further-
+     more,  writing  the  value  from the remote process into the
+     destination memory area on the initiating process only takes
+     effect  at  the  end of the superstep after all remote reads
+     from any other  bsp_get(3)  operations  are  performed,  _b_u_t
+     _b_e_f_o_r_e  any  data  is  written by any bsp_put(3). Therefore,
+     computation and buffered communication operations  within  a
+     superstep can be _t_h_o_u_g_h_t to occur in the following order:
+
+
+     1    local computation is performed; also, when a bsp_put(3)
+          is excecuted, the associated source data is read;
+
+
+     2    the source data associated with all  bsp_get(3)  opera-
+          tions are read;
+
+
+     3    data associated with any bsp_put(3) or  bsp_get(3)  are
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    1
+
+
+
+
+
+
+bsp_get(3)              BSPlib FUNCTIONS               bsp_get(3)
+
+
+
+          written into the destination data structures.
+
+          A high-performance version of get,  bsp_hpget(3),  pro-
+          vides  the _u_n_b_u_f_f_e_r_e_d _o_n _s_o_u_r_c_e, _u_n_b_u_f_f_e_r_e_d _o_n _d_e_s_t_i_n_a_-
+          _t_i_o_n semantics in which the two-way  communication  can
+          take effect at any time during the superstep.
+
+
+EXAMPLES
+     1)   The  procedure  _g_e_t__a_r_r_a_y  is  the  dual  of  _p_u_t__a_r_r_a_y
+          defined  in  the  manual  page for bsp_put(3). The pro-
+          cedure is semantically  equivalent  to  the  concurrent
+          assignment:
+
+          forall i in {0,..,n-1} xs[i] := xs[xs[i]]
+
+          void get_array(int *xs, int n) {
+            int i,pid,local_idx,n_over_p=n/bsp_nprocs();
+            if (n % bsp_nprocs())
+              bsp_abort("{get_array} %d not divisible by %d",
+                        n,bsp_nprocs());
+            bsp_push_reg(xs,n_over_p*sizeof(int));
+            bsp_sync();
+
+            for(i=0;i<n_over_p;i++) {
+              pid       = xs[i]/n_over_p;
+              local_idx = xs[i]%n_over_p;
+              bsp_get(pid,xs,local_idx*sizeof(int),&xs[i],sizeof(int));
+            }
+            bsp_sync();
+            bsp_pop_reg(xs);
+          }
+
+          Similarly, the function can be defined in Fortran as:
+
+                  SUBROUTINE getarray(xs,n)
+                    INCLUDE 'fbsp.h'
+                    INTEGER xs(*),n
+                    INTEGER i,pid,localidx,noverp
+
+                    noverp=n/bspnprocs()
+                    IF (MOD(n,bspnprocs()) .NE. 0) THEN
+                      CALL bspabort('N not divisible by p')
+                    END IF
+                    CALL bsppushreg(xs,noverp*BSPINT)
+                    CALL bspsync()
+                    DO i=1,noverp
+                      pid      = xs(i)/noverp
+                      localidx = MOD(xs(i),noverp)
+                      CALL bspget(pid,xs,localidx*BSPINT,xs(i),BSPINT)
+                    END DO
+                    CALL bspsync()
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    2
+
+
+
+
+
+
+bsp_get(3)              BSPlib FUNCTIONS               bsp_get(3)
+
+
+
+                    CALL bsppopreg(xs)
+                  END
+
+          In this example buffering  is  necessary  as  processes
+          need to read data before it is overwritten. Thus, for a
+          given array  element  _x_s[_i],  all  reads  generated  by
+          bsp_get(3)  are performed ahead of the writes generated
+          by any buffered operation, including those due  to  the
+          bsp_get(3) of the process on which _x_s[_i] resides.
+
+
+     2)   The function _b_s_p__s_u_m defined below is a collective com-
+          munication  (i.e., all processes have to call the func-
+          tion), such that when process _i calls the function with
+          an  array _x_s containing _n_e_l_e_m__i, then the result on _a_l_l
+          the processes will be the sum of all  the  arrays  from
+          all the processes.
+
+          int bsp_sum(int *xs, int nelem) {
+            int *local_sums,i,j,result=0;
+            for(j=0;j<nelem;j++) result += xs[j];
+            bsp_push_reg(&result,sizeof(int));
+            bsp_sync();
+
+            local_sums = calloc(bsp_nprocs(),sizeof(int));
+            if (local_sums==NULL)
+              bsp_abort("{bsp_sum} no memory for %d int",bsp_nprocs());
+            for(i=0;i<bsp_nprocs();i++)
+              bsp_hpget(i,&result,0,&local_sums[i],sizeof(int));
+            bsp_sync();
+
+            result=0;
+            for(i=0;i<bsp_nprocs();i++) result += local_sums[i];
+            bsp_pop_reg(&result);
+            free(local_sums);
+            return result;
+          }
+
+          Similarly, the function can be defined in Fortran as:
+
+                  INTEGER FUNCTION bspsum(xs,nelem)
+                    INCLUDE 'fbsp.h'
+                    INTEGER xs(*),nelem,MAXPROCS
+                    PARAMETER (MAXPROCS=40)
+                    INTEGER i,j,result,localsums(MAXPROCS)
+
+                    result=0
+                    DO j=1,nelem
+                      result = result + xs(j)
+                    END DO
+
+                    CALL bsppushreg(result,BSPINT)
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    3
+
+
+
+
+
+
+bsp_get(3)              BSPlib FUNCTIONS               bsp_get(3)
+
+
+
+                    CALL bspsync()
+                    DO i=0,bspnprocs()-1
+                      CALL bsphpget(i,result,0,localsums(i+1),BSPINT)
+                    END DO
+                    CALL bspsync()
+
+                    result=0
+                    DO i=1,bspnprocs()
+                      result=result+localsums(i)
+                    END DO
+                    CALL bsppopreg(result)
+                    bspsum=result
+                  END
+
+          The function contains three supersteps. In  the  first,
+          the  local  array  _x_s  of  each  process  is summed and
+          assigned to the variable _r_e_s_u_l_t. This variable is  then
+          registered  for  communication in the subsequent super-
+          step. Next, each local _r_e_s_u_l_t  is  broadcast  into  the
+          _b_s_p__p_i_d()_t_h  element  of  _l_o_c_a_l__s_u_m_s} on every process.
+          Unlike the previous examples, an unbuffered  communica-
+          tion  is  used  in  preference to a buffered bsp_get(3)
+          because the variable _r_e_s_u_l_t is not used  in  any  local
+          computation during the same superstep as the communica-
+          tion.  In the final superstep of  the  algorithm,  each
+          process  returns  the sum of the _p values obtained from
+          each process.
+
+
+     3)   Consider a function _c_y_c_l_i_c__s_h_i_f_t executed on each  pro-
+          cess,  that  takes  an  integer  _x as its argument, and
+          returns the value of _x on its  left  neighbouring  pro-
+          cess.
+
+          int cyclic_shift(int x) {
+            bsp_push_reg(&x,sizeof(int));
+            bsp_sync();
+            bsp_get( (bsp_pid()==0)?(bsp_nprocs()-1):bsp_pid()-1,
+                     &x,0,
+                     &x,
+                     sizeof(int));
+            bsp_sync();
+            bsp_pop_reg(&x);
+            return result;
+          }
+
+
+     4)   An alternative definition of _c_y_c_l_i_c _s_h_i_f_t that  uses  a
+          high performance get.
+          int cyclic_shift(int x) {
+            int result;
+            bsp_push_reg(&x,sizeof(int));
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    4
+
+
+
+
+
+
+bsp_get(3)              BSPlib FUNCTIONS               bsp_get(3)
+
+
+
+            bsp_sync();
+            bsp_hpget( (bsp_pid()==0)?(bsp_nprocs()-1):bsp_pid()-1,
+                       &x,0,
+                       &result,
+                       sizeof(int));
+            bsp_sync();
+            bsp_pop_reg(&result);
+            return result;
+          }
+
+
+     5)   Consider  an  alternative  definition  of  a   function
+          _b_s_p__a_l_l_s_u_m_s  that  calculates  the  running  sums  of _p
+          values stored on _p processors using a logorithmic tech-
+          nique.  i.e.,  if  _x__i is stored on process _i, then the
+          result on each processor is _x__0 + .. _x__i.
+
+          #include "bsp.h"
+          #include <stdio.h>
+
+          int bsp_allsums(int x) {
+            int i, left, right;
+
+            bsp_push_reg(&right,sizeof(int));
+            bsp_sync();
+
+            right=x;
+            for(i=1;i<bsp_nprocs();i*=2) {
+              if (bsp_pid() >= i)
+                bsp_get(bsp_pid()-i,&right,0,&left,sizeof(int));
+              bsp_sync();
+              if (bsp_pid()>=i) right=left+right;
+            }
+            bsp_pop_reg(&right);
+            return right;
+          }
+
+          void main() {
+            int y;
+            bsp_begin(bsp_nprocs());
+            y = bsp_pid()+1;
+            printf("y=%d sums=%d\n",y,bsp_allsums(y));
+            bsp_end();
+          }
+
+          A compilation, and an example run on four processors is
+          shown below:
+
+          pippin> bspcc allsums.c
+          pippin> ./a.out
+          y=4 sums=10
+          y=2 sums=3
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    5
+
+
+
+
+
+
+bsp_get(3)              BSPlib FUNCTIONS               bsp_get(3)
+
+
+
+          y=1 sums=1
+          y=3 sums=6
+
+
+
+SEE ALSO
+     drma(3),   bsp_push_reg(3),   bsp_pop_reg(3),    bsp_put(3),
+     bsp_hpput(3)
+
+     ``_B_S_P_l_i_b: _T_h_e _B_S_P _P_r_o_g_r_a_m_m_i_n_g _L_i_b_r_a_r_y'' Jonathan M. D. Hill,
+     Bill  McColl,  Dan  C.  Stefanescu,  Mark W. Goudreau, Kevin
+     Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and
+     Rob  Bisseling.  Parallel  Computing,  to  appear  1998. See
+     _h_t_t_p://_w_w_w._b_s_p-_w_o_r_l_d_w_i_d_e._o_r_g for more details.
+
+
+
+NOTES
+     i    The source  memory  area  used  in  a  get  has  to  be
+          registered.  It is an error to fetch from a data struc-
+          ture that has not been registered.
+
+
+     ii   The  destination  of  a  get  does  _n_o_t  _h_a_v_e   _t_o   _b_e
+          _r_e_g_i_s_t_e_r_e_d.
+
+
+     iii  If the source memory area _s_r_c is registered  with  size
+          _x,  then it is a bounds error to perform the communica-
+          tion _b_s_p__g_e_t(_p_i_d,_s_r_c,_o,_d_s_t,_n) if _o+_n>_x.
+
+
+     iv   A communication of zero bytes does nothing.
+
+
+     v    A process can  read  from  its  own  memory  if  _p_i_d  =
+          _b_s_p__p_i_d().  However, due to the _b_u_f_f_e_r_e_d _a_t _d_e_s_t_i_n_a_t_i_o_n
+          semantics of bsp_get(3), the  memory  copy  only  takes
+          effect  _a_t  _t_h_e  _e_n_d _o_f _t_h_e _s_u_p_e_r_s_t_e_p ; i.e, the source
+          data is read and then written at the end of the  super-
+          step.
+
+
+BUGS
+     Problems  and  bug  reports  should  be  mailed  to  _b_s_p_l_i_b-
+     _b_u_g_s@_c_o_m_l_a_b._o_x._a_c._u_k
+
+
+AUTHORS
+     The Oxford BSP Toolset implementation of BSPlib was  written
+     by Jonathan.Hill@comlab.ox.ac.uk
+     http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    6
+
+
+

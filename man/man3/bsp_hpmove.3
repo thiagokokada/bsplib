@@ -1,0 +1,59 @@
+.TH "bsp_hpmove" 3 "1.4 25/9/98" "Oxford BSP Toolset" "BSPlib FUNCTIONS"
+.SH NAME
+bsp_hpmove \- a lean method for moving a BSMP packet from the system queue.
+
+.SH C SYNOPSIS
+.nf
+.B #include \&"bsp.h\&"
+.PP
+.BI "int bsp_hpmove(void **" tag_ptr_buf ",void **" payload_ptr_buf ");"
+.fi
+
+.SH DESCRIPTION
+
+The operation
+.B bsp_hpmove
+is a non-copying method of
+receiving messages that is available in languages with pointers such
+as C, but not vanilla Fortran. 
+.B bsp_hpmove
+is a function which returns -1, if the
+system buffer is empty. Otherwise it returns the length of the
+payload of the first message in the buffer and:
+
+.IP a)
+places a pointer to the tag in
+.I tag_ptr_buf\c
+\&; 
+
+.IP b) 
+places a pointer to the payload in
+.I payload_ptr_buf\c
+\&; 
+
+.IP c) 
+removes the message from from the incoming system buffer.
+
+
+.SH "SEE ALSO"
+bsmp(3) ,bsp_send(3), bsp_set_tagsize(3), bsp_qsize(3),
+bsp_get_tag(3), bsp_move(3)
+
+.I ``A proposal for the BSP Worldwide 
+.I Standard Library (preliminary version)''
+Mark W. Goudreau, Jonathan M. D. Hill, Kevin Lang, Bill McColl, Satish
+B. Rao, Dan C. Stefanescu, Torsten Suel, Thanasis Tsantilas. Oxford
+University Computing Laboratory, April 1996. See
+.I http://www.bsp-worldwide.org
+for more details.
+
+
+.SH BUGS
+Problems and bug reports should be mailed to 
+.I bsplib-bugs@comlab.ox.ac.uk
+
+.SH AUTHORS
+The Oxford BSP Toolset implementation of BSPlib was written by
+Jonathan.Hill@comlab.ox.ac.uk
+.br
+.B http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html

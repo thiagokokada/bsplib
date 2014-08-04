@@ -1,0 +1,66 @@
+
+
+
+bsp_get_tag(3)          BSPlib FUNCTIONS           bsp_get_tag(3)
+
+
+
+NAME
+     bsp_get_tag - check the tag on a BSMP packet.
+
+
+C SYNOPSIS
+     #include "bsp.h"
+
+     void bsp_get_tag(int *_s_t_a_t_u_s, void *_t_a_g);
+
+FORTRAN SYNOPSIS
+     SUBROUTINE  bspgettag(_s_t_a_t_u_s,_t_a_g)
+     INTEGER, intent(OUT) ::_s_t_a_t_u_s
+     <TYPE>,  intent(OUT) ::_t_a_g
+
+
+DESCRIPTION
+     To receive a message, the user  should  use  the  procedures
+     bsp_get_tag  and  bsp_move(3).  The  effect of the operation
+     bsp_get_tag is that the argument _s_t_a_t_u_s  has  the  value  -1
+     assigned  to  it  if  system  buffer is empty.  Otherwise it
+     becomes the length of the payload of the  first  message  in
+     the buffer. This length can be used to allocate an appropri-
+     ately sized data structure for  copying  the  payload  using
+     bsp_move(3).  The  memory  referenced by _t_a_g is unchanged if
+     the system buffer is empty. Otherwise it is assigned the tag
+     of the first message in the buffer.
+
+
+SEE ALSO
+     bsmp(3)  ,bsp_send(3),   bsp_set_tagsize(3),   bsp_qsize(3),
+     bsp_move(3), bsp_hpmove(3)
+
+     ``_B_S_P_l_i_b: _T_h_e _B_S_P _P_r_o_g_r_a_m_m_i_n_g _L_i_b_r_a_r_y'' Jonathan M. D. Hill,
+     Bill  McColl,  Dan  C.  Stefanescu,  Mark W. Goudreau, Kevin
+     Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and
+     Rob  Bisseling.  Parallel  Computing,  to  appear  1998. See
+     _h_t_t_p://_w_w_w._b_s_p-_w_o_r_l_d_w_i_d_e._o_r_g for more details.
+
+
+BUGS
+     Problems  and  bug  reports  should  be  mailed  to  _b_s_p_l_i_b-
+     _b_u_g_s@_c_o_m_l_a_b._o_x._a_c._u_k
+
+
+AUTHORS
+     The Oxford BSP Toolset implementation of BSPlib was  written
+     by Jonathan.Hill@comlab.ox.ac.uk
+     http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    1
+
+
+

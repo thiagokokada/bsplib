@@ -1,0 +1,168 @@
+head	1.1;
+access;
+symbols;
+locks
+	jonh:1.1; strict;
+comment	@% @;
+
+
+1.1
+date	95.08.02.11.00.46;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+% $Id$ 
+% $Log$
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+\chapter{High level BSP operations} 
+\label{sect:bspirix}
+
+Operations such as \texttt{reduce}, \texttt{broadcast} and
+\texttt{scan} would normally be defined in terms of the BSP library.
+The routines given here are built directly ontop of the IRIX IPC
+library, which use the data-structures available from the IRIX
+implementation of the library.
+
+\begin{code}
+#include "bsp_lib.h"
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Broadcast function}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+The \texttt{src} and \texttt{dst} addresses should be
+disjoint. 
+
+\begin{code}
+void bsp_broadcast(int pid, void *src, void *dst, int nbytes) {
+  int   togo_nbytes  = nbytes;
+  int   chunk_nbytes;
+  void *chunk_dst    = dst;
+  void *chunk_src    = src;
+
+#ifdef 0
+  if (bsp_sum(pid) != pid * _shmem->nprocs)
+    bsp_error("{bsp_broadcast} the broadcasting pid is not constant "
+              "on all the processors");
+
+  if (bsp_sum(nbytes) != nbytes * _shmem->nprocs)
+    bsp_error("{bsp_broadcast} the broadcasting nbytes is not constant "
+              "on all the processors");
+#endif
+  while (togo_nbytes>0) {
+    if (togo_nbytes > BSP_BUFFER_SIZE) {
+      togo_nbytes -= BSP_BUFFER_SIZE;
+      chunk_nbytes = BSP_BUFFER_SIZE;
+    } else {
+      chunk_nbytes = togo_nbytes;
+      togo_nbytes  = 0;
+    }
+    if (pid == _bsp_pid) {
+#ifdef DEBUG
+      bsp_debug("{broadcast}:Copying %d bytes to shared memory buffer",nbytes);
+#endif
+      memcpy((char *)_shmem->buffer,(char*)chunk_src,chunk_nbytes);
+    } 
+    barrier(_shmem->sync,_shmem->nprocs);
+#ifdef DEBUG
+    bsp_debug("{broadcast}: Copying shared memory buffer to dst");
+#endif
+    memcpy((char *)chunk_dst,(char *)_shmem->buffer, chunk_nbytes);
+    barrier(_shmem->sync,_shmem->nprocs);
+    chunk_src = ((char *)chunk_src) + chunk_nbytes;
+    chunk_dst = ((char *)chunk_dst) + chunk_nbytes;
+  }
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Scan function}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+The \texttt{src} and \texttt{dst} addresses should be
+disjoint. 
+
+\begin{code}
+void bsp_scanreduce(void (*op)(void*,void*,void*,int),
+                    void *src, void *dst, int nbytes,int isscan) {
+  int i,temp;
+  int res_offset = 0;
+  int arg_offset = nbytes;
+
+  if (_shmem->nprocs > 1) {
+#ifdef BOUNDS_CHECK
+    if (nbytes > (BSP_BUFFER_SIZE/2)) 
+      bsp_error("{bsp_scan}: internal buffer too small");
+#endif
+#ifdef DEBUG
+    bsp_debug("{scan}: All processors writing to shared memory");
+#endif
+    ussetlock(_shmem->proc_buffer_write[_bsp_pid]);
+    memcpy((char*)_shmem->proc_buffer[_bsp_pid], (char*) src, nbytes);
+    usunsetlock(_shmem->proc_buffer_write[_bsp_pid]);
+    barrier(_shmem->sync,_shmem->nprocs);
+  
+    for (i=1; i< _shmem->nprocs; i=2*i) {
+#ifdef DEBUG
+      bsp_debug("{scan} Performing scan at iteration %d",i);
+#endif
+      temp       = res_offset;
+      res_offset = arg_offset;
+      arg_offset = temp;
+      /* Alternate the copying of the result into disjoint sections of */
+      /* each processors buffer. Make sure that those processors that  */
+      /* have fallen out of the scan do a memory copy so that the      */
+      /* result is in the same segment as all other processors results */
+      if (_bsp_pid >= i) 
+        op( (char*) _shmem->proc_buffer[_bsp_pid]  +res_offset,
+            (char*) _shmem->proc_buffer[_bsp_pid-i]+arg_offset,
+            (char*) _shmem->proc_buffer[_bsp_pid]  +arg_offset,
+            nbytes); 
+      else
+        memcpy((char*) _shmem->proc_buffer[_bsp_pid]+res_offset,
+               (char*) _shmem->proc_buffer[_bsp_pid]+arg_offset,
+               nbytes);       
+      barrier( _shmem->sync,_shmem->nprocs); 
+    }
+#ifdef DEBUG
+    bsp_debug("{scan} Copying scanned result from last process to all");
+#endif
+    if (isscan)
+       memcpy((char*) dst, 
+              (char*) _shmem->proc_buffer[_bsp_pid]+res_offset,
+              nbytes);
+    else
+       memcpy((char*) dst, 
+              (char*) _shmem->proc_buffer[_shmem->nprocs-1]+res_offset,
+              nbytes);
+    barrier( _shmem->sync,_shmem->nprocs); 
+    /* Wait until the copy is complete,otherwise another operation */
+    /* could start stomping on the buffer.                         */
+  }
+}
+\end{code}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Scan and reduce functions}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_reduce(void (*op)(void*,void*,void*,int),
+              void *src, void *dst, int nbytes) {
+  bsp_scanreduce(op,src,dst,nbytes,0);
+}
+
+void bsp_scan(void (*op)(void*,void*,void*,int),
+              void *src, void *dst, int nbytes) {
+  bsp_scanreduce(op,src,dst,nbytes,1);
+}
+\end{code}
+@

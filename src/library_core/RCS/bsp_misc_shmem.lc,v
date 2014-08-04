@@ -1,0 +1,189 @@
+head	1.1;
+access;
+symbols;
+locks
+	jonh:1.1; strict;
+comment	@% @;
+
+
+1.1
+date	95.08.31.16.34.19;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995, University of Oxford                         %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id$
+% $Log$
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Miscellaneous library functions used in the IRIX IPC BSP library}
+\label{sect:bspirixmisc}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Includes and defines}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+#include "bsp_lib.h"
+#include <stdarg.h>
+\end{code}
+  
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Error function: \texttt{bsp\_error}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+An error routine to be called when the program is running in
+parallel mode.
+
+\begin{code}
+char *pprSignal(int signal_no) {
+  switch(signal_no) {
+  case 1:  return "Hangup";
+  case 2:  return "Interrupt";
+  case 3:  return "Quit";
+  case 10: return "Bus Error";
+  case 11: return "Segmentation fault";
+  default: return "other signal";
+  }
+}
+
+void kill_all_processors(int signal_no) {
+  printf("\nProcess %d caught SIGNAL %d \"%s\"\n",_bsp_pid,signal_no,
+         pprSignal(signal_no));
+  if (_bsp_pid==0) {
+    /* This will cause a SIGHUP to be sent to all children */
+    exit(1);
+  } else {
+    /* Kill my parent, which will inturn cause a SIGHUP to all children */
+    kill(getppid(),SIGHUP);
+    exit(1);
+  }
+}
+
+void kill_process() {
+  exit(1);
+}
+
+void bsp_error(char* format, ...) {
+va_list args;
+
+  set_spinlock(_shmem->lock);
+  va_start(args, format);
+  fprintf(stderr, "\nERROR(pid%3d)",_bsp_pid);
+  vfprintf(stderr, format, args);
+  fprintf(stderr, "\n");
+  va_end(args);
+  fflush(stderr);
+  unset_spinlock(_shmem->lock);
+  kill_all_processors(-1);    
+}
+
+void bottom(char* format, ...) {
+va_list args;
+
+  va_start(args, format);
+  fprintf(stderr, "\nERROR: ");
+  vfprintf(stderr, format, args);
+  fprintf(stderr, "\n");
+  va_end(args);
+  fflush(stderr);
+  exit(1);
+}
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Debugging functions}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_debug_start(char *text) {
+  set_spinlock(debug_lock);
+  fprintf(stderr,"\nSTART DEBUG(pid%3d) :\"%s\"\n",_bsp_pid,text);
+}
+
+void bsp_debug_end(char *text) {
+  fprintf(stderr,"END DEBUG(pid%3d)   :\"%s\"\n\n",_bsp_pid,text);
+  unset_spinlock(debug_lock);
+}
+
+void bsp_debug_block(char* format, ...) {
+va_list args;
+
+   va_start(args, format);
+   fprintf(stderr, " DEBUG(pid%3d): ",_bsp_pid);
+   vfprintf(stderr, format, args);
+   fprintf(stderr, "\n");
+   va_end(args);
+}
+
+void bsp_debug(char* format, ...) {
+  va_list args;
+  set_spinlock(debug_lock);
+  va_start(args, format);
+  fprintf(stderr, "DEBUG(pid%3d): ",_bsp_pid);
+  vfprintf(stderr, format, args);
+  fprintf(stderr, "\n");
+  va_end(args);
+  unset_spinlock(debug_lock);
+}
+
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Order preserving prining functions}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+void bsp_print_start(char *text) {
+  set_spinlock(print_lock);
+  fprintf(stderr,"\nSTART PRINT(pid%3d) :\"%s\"\n",_bsp_pid,text);
+}
+
+void bsp_print_end(char *text) {
+  fprintf(stderr,"END PRINT(pid%3d)   :\"%s\"\n\n",_bsp_pid,text);
+  unset_spinlock(print_lock);
+}
+
+void bsp_print_block(char* format, ...) {
+va_list args;
+
+   va_start(args, format);
+   vfprintf(stderr, format, args);
+   va_end(args);
+}
+
+void bsp_print(char* format, ...) {
+  va_list args;
+  set_spinlock(print_lock);
+  va_start(args, format);
+  vfprintf(stderr, format, args);
+  va_end(args);
+  unset_spinlock(print_lock);
+}
+
+\end{code}
+
+
+
+@

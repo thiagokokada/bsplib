@@ -1,0 +1,4 @@
+#!/bin/csh
+/sbin/rmmod bspkdriver
+/sbin/insmod ./bspkdriver.o bsp_major=125
+tail -f /var/log/messages

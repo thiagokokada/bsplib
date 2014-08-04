@@ -1,0 +1,132 @@
+
+
+
+Level 1(3)              BSPlib FUNCTIONS               Level 1(3)
+
+
+
+NAME
+     BSPlib level  1 -  Collective  communications  and  language
+     specific libraries for BSPlib.
+
+
+DESCRIPTION
+     The core bsplib(3) library provides a  low  level  mechanism
+     for  managining  communication  within  the Bulk Synchronous
+     Parallel model. In contrast, the _B_S_P_l_i_b _l_e_v_e_l _1 library pro-
+     vides  language specific operations, and a variety of speci-
+     alised collective communications. These are  not  considered
+     as  part of the core library, as they can be easily realised
+     in terms of the core. The level 1 library is  summarised  in
+     the  table below. Manual pages are available for each of the
+     operations.
+
+          BSP Parameters      bsp_s
+                              bsp_l
+                              bsp_g
+                              bsp_nhalf
+          F77 library         bspput_common
+                              bsphpput_common
+                              bspget_common
+                              bsphpget_common
+                              bspsync_number
+          Broadcast           bsp_bcast
+          Gather              bsp_gather
+          Scatter             bsp_scatter
+          Reduction           bsp_fold
+                              bsp_all
+                              bsp_any
+                              bsp_sumI
+                              bsp_sumD
+                              bsp_productI
+                              bsp_productR
+                              bsp_productD
+                              bsp_minI
+                              bsp_minR
+                              bsp_minD
+                              bsp_maxI
+                              bsp_maxR
+                              bsp_maxD
+          Parallel Prefix     bsp_scan
+                              bsp_sumI_prefix
+                              bsp_sumD_prefix
+                              bsp_productI_prefix
+                              bsp_productR_prefix
+                              bsp_productD_prefix
+                              bsp_minI_prefix
+                              bsp_minR_prefix
+                              bsp_minD_prefix
+                              bsp_maxI_prefix
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    1
+
+
+
+
+
+
+Level 1(3)              BSPlib FUNCTIONS               Level 1(3)
+
+
+
+                              bsp_maxR_prefix
+                              bsp_maxD_prefix
+
+
+
+SEE ALSO
+     bsplib(3),      bsp_l(3),      bsp_g(3),       bsp_nhalf(3),
+     bspput_common(3),    bsphpput_common(3),   bspget_common(3),
+     bsphpget_common(3),     bspsync_number(3),     bsp_bcast(3),
+     bsp_gather(3),   bsp_scatter(3),   bsp_fold(3),  bsp_all(3),
+     bsp_any(3),   bsp_sumI(3),   bsp_sumD(3),   bsp_productI(3),
+     bsp_productR(3),  bsp_productD(3), bsp_minI(3), bsp_minR(3),
+     bsp_minD(3),    bsp_maxI(3),    bsp_maxR(3),    bsp_maxD(3),
+     bsp_sumI_prefix(3),                      bsp_sumD_prefix(3),
+     bsp_productI_prefix(3),              bsp_productR_prefix(3),
+     bsp_productD_prefix(3),                  bsp_minI_prefix(3),
+     bsp_minR_prefix(3), bsp_minD_prefix(3),  bsp_maxI_prefix(3),
+     bsp_maxR_prefix(3), bsp_maxD_prefix(3)
+
+     ``_B_S_P_l_i_b: _T_h_e _B_S_P _P_r_o_g_r_a_m_m_i_n_g _L_i_b_r_a_r_y'' Jonathan M. D. Hill,
+     Bill  McColl,  Dan  C.  Stefanescu,  Mark W. Goudreau, Kevin
+     Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and
+     Rob  Bisseling.  Parallel  Computing,  to  appear  1998. See
+     _h_t_t_p://_w_w_w._b_s_p-_w_o_r_l_d_w_i_d_e._o_r_g for more details.
+
+     The Oxford BSP toolset web pages can be found  at:
+     _h_t_t_p://_w_w_w._b_s_p-_w_o_r_l_d_w_i_d_e._o_r_g/_i_m_p_l_m_n_t_s/_o_x_t_o_o_l/
+
+
+BUGS
+     Problems  and  bug  reports  should  be  mailed  to  _b_s_p_l_i_b-
+     _b_u_g_s@_c_o_m_l_a_b._o_x._a_c._u_k
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    2
+
+
+

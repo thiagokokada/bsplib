@@ -1,0 +1,77 @@
+\begin{code}#! @PERL@
+$bindir        = "@bindir@";
+$includedir    = "@includedir@";
+$libdir        = "@libdir@";
+$mandir        = "@mandir@";
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% $Id$
+%% $Log$
+
+\begin{code}
+push(@INC,$includedir);
+push(@INC,$bindir);
+require "bsputil";
+
+select(STDERR); $| = 1; select(STDOUT); # no STDERR buffering, please.
+($Pgm = $0) =~ s|.*/||;
+$Version        = "1.3, 25th Nov 1997";
+$bug_reports_to = 'bsplib-bugs@comlab.ox.ac.uk';
+
+$ShortUsage = "\n$Pgm usage: for basic information, try the `-help' option\n";
+\end{code}
+
+\begin{code}
+$Verbose        = 0;
+$Arch           = &backtick("$bindir/bsparch -arch");
+$Arch           = &backtick("bsparch -arch")  if ($Arch eq "");
+$RefreshRate    = 0;
+\end{code}
+
+
+\begin{code}
+  arg: while ($_ = $ARGV[0]) {
+  shift(@ARGV);
+  #--------HELP------------------------------------------------
+  /^-(help|man)$/     && do {&FormatManual("bspkstats.1");exit(0);};
+
+  /^-v$/              && do {$Verbose = 1; next arg;};
+
+  /^-r$/              && do {$RefreshRate = &grab_next_arg("-r");
+			     if (!($RefreshRate =~ /^\d+$/)) {
+			       printf STDERR "%s: invalid refresh \"%s\"\n",
+					     $Pgm,$RefreshRate;
+			       $Status++;
+			     }
+			     next arg;
+			     };		
+
+  print STDERR "Unrecognised option \"",$_,"\"\n";
+  $Status++;
+  }
+  if ($Status>0) {
+    print STDERR $ShortUsage;
+    exit(1);
+  }
+  print STDERR "$Pgm: ($Version)\n" if $Verbose;
+  $runcmd  = "$bindir/$Arch/bspkstats ";
+  $runcmd .= "r$RefreshRate " if $RefreshRate>0;
+  &run_something($runcmd,"Stats for 3Com 3C905B kernel module");
+  exit(0);
+\end{code}

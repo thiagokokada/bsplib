@@ -1,0 +1,321 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id$
+% $Log$
+
+\section{Header file for DRMA architecture}
+This file contains macros that provide implementations for the 
+following systems that provide Direct Remote Memory Access (DRMA):
+\begin{description}
+\item[\texttt{DRMA\_SHMEM}]      Native drma on the Cray T3\*
+\end{description}
+
+\begin{code}
+#ifdef DRMA_SHMEM
+#include <mpp/shmem.h>
+#endif
+\end{code}
+
+\texttt{BSP\_MAX\_PROCS} is the largest number of processors that will
+be given to a BSP user. 
+\begin{code}
+#ifdef BSP_ONLINE_PROCS
+#define BSP_MAX_PROCS BSP_ONLINE_PROCS
+#else
+#define BSP_MAX_PROCS 1024
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{DRMA operations}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+All communications are assumed to be of messages upto the size
+\texttt{BSP\_MESSAGE\_SIZE}. The sematics of the primitive DRMA
+operations that \bsplib{} will be built upon can informally be
+described as:
+\begin{description}
+\item[puts] Primitive DRMA operation that copies multiple of
+  \verb!SIZEOF(void*)!  bytes from a data-structure on one process into a
+  data-structure within the address space of the remote process.
+
+\item[gets] Primitive DRMA operation that fetches a message that has
+  size modulo \verb!SIZEOF(void*)!  from a data-structure on a
+  remote process.
+
+\item[barrier] Perform a barrier synchronisation of all processors.
+\end{description}
+i.e., the above operations have a semantics exactly the same as the
+Cray Shmem library (and by coincidence, the Oxford BSP library ;-)
+
+%%%%%%%%%%%%%%%%
+\subsubsection{Macro Prototypes:}
+%%%%%%%%%%%%%%%%
+
+If the following macros were defined in C, then they would have the
+following prototypes:
+\begin{verbatim}
+void f77whatis_nprocs_mypid(int*,int*);
+void cwhatis_nprocs_mypid(int *,char***,int*,int*);
+void drma_put(int,void*,void*,int)
+void drma_get(int,void*,void*,int)
+void barrier_sync();
+\end{verbatim}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Cray T3D library}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Determine the number of processors running in a SPMD manner at program
+startup.
+\begin{code}
+#ifdef DRMA_SHMEM
+#ifdef CRAYMPP
+#define cwhatis_nprocs_mypid(refargc,refargv,refnprocs,refpid) \
+  (*(refnprocs) = shmem_n_pes(),                               \
+  (*(refpid)    = shmem_my_pe(),                               \
+  (shmem_set_cache_inv(),0)))
+#else
+#define cwhatis_nprocs_mypid(refargc,refargv,refnprocs,refpid) \
+  (*(refnprocs) = _num_pes(),                                  \
+  (*(refpid)    = _my_pe(),0))
+#endif
+
+#define f77whatis_nprocs_mypid(refnprocs,refpid) \
+  cwhatis_nprocs_mypid(ohshit,ohshit,refnprocs,refpid)
+\end{code}
+
+Perform a primitive put operation to and from a word-aligned
+data-structure. The library makes sure that no message that is not
+word aligned calls this macro. [\texttt{Note}: For some strange reason,
+when I change the division by \texttt{SIZEOF(long)} by a rightwards
+shift of three, the communication doesn't work on the T3D.]
+\begin{code}
+#ifdef CRAYMPP
+#define drma_word_size() (SIZEOF(long))
+#else
+#define drma_word_size() (SIZEOF(int))
+#endif
+
+#ifdef SGIORIGIN
+#define shmem_put(tgt,src,len,pe) shmem_put32(tgt,src,len,pe)
+#define shmem_get(tgt,src,len,pe) shmem_get32(tgt,src,len,pe)
+#endif
+
+#ifdef SANITY_CHECK
+#define drma_put(pid,src,dst,nbytes)                                 \
+  do {                                                               \
+    if (nbytes % drma_word_size())                                   \
+      bsp_abort("{drma_put} %d bytes not word chunked line %d of %s",\
+                nbytes,__LINE__,__FILE__);                           \
+    if (((long int) ((char*) src)) % drma_word_size())               \
+      bsp_abort("{drma_put} source not word aligned: line %d of %s", \
+                __LINE__,__FILE__);                                  \
+    if (((long int) ((char*) dst)) % drma_word_size())               \
+      bsp_abort("{drma_put} dest not word aligned: line %d of %s",   \
+                __LINE__,__FILE__);                                  \
+    shmem_put((long*)(dst),(long*)(src),                             \
+              nbytes/drma_word_size(),pid_mapping(pid));             \
+  } while(0)
+#else
+#define drma_put(pid,src,dst,nbytes)   \
+  shmem_put((long*)(dst),(long*)(src), \
+            (nbytes)/drma_word_size(),pid_mapping(pid))
+#endif
+
+#ifdef SANITY_CHECK
+#define drma_put_int(pid,src,dst) drma_put(pid,src,dst,SIZEOF(int))
+#else
+#define drma_put_int(pid,src,dst) shmem_int_p(dst,*(src),pid_mapping(pid))
+#endif
+\end{code}
+
+
+Perform a primitive get operation to and from a word-aligned
+data-structure. The library makes sure that no message that is not
+word aligned calls this macro.
+\begin{code}
+#ifdef SANITY_CHECK
+#define drma_get(pid,src,dst,nbytes) \
+  do {                                                               \
+    if (nbytes % drma_word_size())                                   \
+      bsp_abort("{drma_get} %d bytes not word chunked line %d of %s",\
+               nbytes,__LINE__,__FILE__);                            \
+    if (((long int) ((char*) src)) % drma_word_size())               \
+      bsp_abort("{drma_get} source not word aligned: line %d of %s", \
+                __LINE__,__FILE__);                                  \
+    if (((long int) ((char*) dst)) % drma_word_size())               \
+      bsp_abort("{drma_get} dest not word aligned: line %d of %s",   \
+                __LINE__,__FILE__);                                  \
+    shmem_get((long*)(dst),(long*)(src),                             \
+              nbytes/drma_word_size(),pid_mapping(pid));             \
+  } while(0)
+#else
+#define drma_get(pid,src,dst,nbytes)   \
+   shmem_get((long*)(dst),(long*)(src),\
+             (nbytes)/drma_word_size(),pid_mapping(pid))
+#endif
+
+#ifdef SANITY_CHECK
+#define drma_get_int(pid,src,dst) drma_get(pid,src,dst,SIZEOF(int))
+#else
+#define drma_get_int(pid,src,dst) *(dst)=shmem_int_g(src,pid_mapping(pid))
+#endif
+\end{code}
+
+Normally, if more processors are started than are needed for a
+\bsplib{} computation, then the excess are killed off. The problem
+with this approach is that barrier synchronisation of a non power of
+two number of processors can be very expensive. Therefore when running
+in \texttt{TURBO} mode, the excess processes continually barrier
+synchronise, therefore participating in a full barrier with the proper
+\bsplib{} processors. This is useful as the T3D only allows a power of
+two nummber of processors to be started. 
+\begin{code}
+#define init_barrier()                        \
+  do {                                        \
+    _drma.syncs=0;                            \
+  } while(0)
+\end{code}
+
+\begin{code}
+#ifdef CRAYPVP
+#define barrier_sync()                                \
+  do {                                                \
+    if (_bsp_fork_nprocs>1) {                         \
+      _drma.syncs++;                                  \
+      shmem_barrier_all();                            \
+    }                                                 \
+  } while(0)
+
+#else
+#define barrier_sync()                                \
+  do {                                                \
+    if (_bsp_fork_nprocs>1) {                         \
+      _drma.syncs++;                                  \
+      barrier();                                      \
+    }                                                 \
+  } while(0)
+#endif
+\end{code}
+
+One process, kills all. The \texttt{tracebk} function on the Cray
+prints out a stack trace.
+\begin{code}
+#define drma_exit(status) exit(status)
+#ifdef CRAYMPP
+#define drma_stopall()    \
+  do {                    \
+    tracebk(10,stderr);   \
+    globalexit(1);        \
+  } while(0)
+
+#else
+#define drma_stopall()    error-should-never-inline-this
+#endif
+#endif
+\end{code}
+
+A lock (0-1) semaphore is used to ensure that only one process prints
+out an error message when \texttt{bsp\_abort} is called. These locks
+are \emph{not} used in any part of the library.
+\begin{code}
+#define drma_lock_type long int
+#define init_drma_lock(i) i=0;
+#define drma_set_lock(i) shmem_set_lock(&i)
+\end{code}
+  
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Global variables}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Each process has its own copy of the following data-structure which is
+used to record all the global variables required by the DRMA version
+of the library.
+\begin{code}
+typedef struct {
+   int              syncs;
+   drma_lock_type   mutex;
+   _BSPcomm_thunk **proc_comm_put_fifo;    /* pending comms per proc  */
+   int             *proc_comm_put_next;    /* next position out       */ 
+   int             *proc_comm_put_size;    /* next position out       */ 
+   _BSPcomm_thunk **proc_comm_get_fifo;    /* pending comms per proc  */
+   int             *proc_comm_get_next;    /* next position out       */ 
+   int             *proc_comm_get_size;    /* next position out       */ 
+   int             *bsmp_sizes;
+   int             *pid_map;           
+} _BSPinfo;
+  
+extern _BSPinfo _drma;
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection{Generic mapping of real pid to BSP pid}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+To avoid anomolies due to the locality of processors, \bsplib{} uses a
+random mapping of processes to processors. Patterns of communication
+in the program's structure are then unlikely to interact with the
+pattern implicit in the target processor's interconnection
+topology. Thus the destination processors of a set of communications
+approximate a permutation of processor addresses with high
+probability.
+
+This is particularly useful on the T3D when a power of two number of
+processes is started, and a smaller number is actually used in the BSP
+implementation. Instead of idling a set of processors with real pid
+from \texttt{bsp\_nprocs} to the number of processors actually
+allocated, a random set of processors will be idled. This makes better
+use of the communication network by placing ``idle'' processors within
+the ``space'' of the working set. Remember to keep process zero the
+same however---for I/O reasons!
+
+\begin{code}
+#ifdef CRAYMPP
+#define BSP_RANDOMISE_PIDS
+#endif
+
+#ifdef BSP_RANDOMISE_PIDS
+#define init_pid_mapping(nprocs,refpid)                            \
+  do {                                                             \
+    int i_macro, temp_macro, idx;                                  \
+    _drma.pid_map=CALLOC(nprocs,SIZEOF(int));                      \
+    if (_drma.pid_map==NULL)                                       \
+      bsp_abort("{init_pid_mapping} failed to allocate storage");  \
+    for(i_macro=0;i_macro<nprocs;i_macro++)                        \
+      _drma.pid_map[i_macro]=i_macro;                              \
+    RAND_SEED(nprocs);                                             \
+    for(i_macro=1;i_macro<nprocs;i_macro++) {                      \
+      idx        = 1+ (RAND()%(nprocs-1));                         \
+      temp_macro = _drma.pid_map[idx];                             \
+      _drma.pid_map[idx]=_drma.pid_map[i_macro];                   \
+      _drma.pid_map[i_macro]=temp_macro;                           \
+    }                                                              \
+    for(i_macro=0;i_macro<nprocs;i_macro++) {                      \
+      if (_drma.pid_map[i_macro]==*(refpid)) {                     \
+        *(refpid)=i_macro;                                         \
+        break;                                                     \
+      }                                                            \
+    }                                                              \
+  } while(0) 
+
+#define pid_mapping(realpid) _drma.pid_map[realpid]
+#else
+#define init_pid_mapping(nprocs,refpid) /* do nothing */
+#define pid_mapping(realpid) realpid
+#endif
+\end{code}
+      

@@ -1,0 +1,477 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997,1998 University of Oxford           %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% Written by: Vasil P Vasilev <Vasil.P.Vasilev@comlab.ox.ac.uk>
+
+%% $Id$
+%% $Log$
+
+\section*{Implementation of the functions}
+
+\begin{code}
+#ifdef CALLGRAPH_PROFILE
+#include <stdio.h>
+#include <stdlib.h>
+#ifndef WIN32
+#include <unistd.h>
+#endif
+#include <string.h>
+#include <malloc.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include "bsp_callstack.h"
+#include "bsp_lib.h"
+#ifdef OSF1
+#include <excpt.h>
+#endif /* OSF1 */
+#if defined(SGI) || defined(SGIN32) ||defined(SGICHALL64) || defined(SGIORIGIN)
+#include <sys/signal.h>
+#include <exception.h>
+#endif /* SGI */
+\end{code}
+
+\section*{Architecture Dependent Macros}
+
+The macros below define machine specific offsets, loader function
+name to be ignored, and ways to unwind the callstack.  For
+architectures where \texttt{nm(1)} is used, the name of the starting
+function should be without the leading \texttt{"\_"} as this is
+removed when the \texttt{nm(1)} output is parsed by \texttt{bspnm(1)}. 
+
+On Sparc (SunOS or Solaris) and SP2, \texttt{cs\_regsp} returns the
+contents of the register \texttt{sp} (stack pointer). On Sparc this is
+the \texttt{sp} of the current function. \texttt{cs\_regsp} also
+ensures that all the register windows are saved on the stack. On SP2
+and RS6K it is the \texttt{sp} of \texttt{cs\_regsp}. The frame
+pointer is in [sp]. In general it is possible for the previous \texttt{pc}
+(program counter) to be held in \texttt{lr} (special register to hold
+the return address of the caller). This is only possible if the
+current function is a leaf function. \texttt{bsp\_get\_callstack} 
+calls other functions, such as \texttt{cs\_regsp}, so it is not a leaf
+one.  On Intel PC (LINUX i386) \texttt{cs\_regsp} returns the contents
+of the register \texttt{ebp} (used as a frame pointer), which is the
+\texttt{sp} of the current function. On CRAYMPP machines
+\texttt{cs\_regfp} returns the contents of the register \texttt{fp}
+(frame pointer). On CRAYPVP machines \texttt{cs\_regfp} returns the
+register \texttt{b02} (frame pointer). 
+
+On OSF1 or SGI/SGICHALL64 there is no need for such functions as there
+are system routines to virtually unwind the stack.
+
+For Sparc (SunOS and Solaris), RS6000 (SP2), Intel PC(Linux i386,
+SunOS/Solaris i386), CRAYs: \texttt{CS\_ofs\_pc} and
+\texttt{CS\_ofs\_fp} is the offset from the frame pointer of the old
+pc and fp. 
+
+We rely on the size of a pointer being the same as that of the general
+use (not floating point) registers. Pointers are used because integers
+are not necessary always the same size as the registers, whose size
+changes quite often.
+
+Unless \texttt{CS\_NO\_NAME} is defined the symbol information is kept
+in memory, by the program itself.
+
+\begin{code}
+#if (defined(sparc) || defined(__sparc)) && \
+    (defined(SunOS) || defined(Solaris))
+#define CS_sparc
+#endif   /* SunOS on sparc */
+
+#if (defined(i386) || defined(__i386)) && \
+    (defined(SunOS) || defined(SolarisX86) || defined(LINUX)  )
+#define CS_i386
+#endif /* SunOS or LINUX on Intel PC */
+\end{code}
+
+On  Sparc (SunOS, Solaris), RS6000 (SP2), i386 (LINUX, SunOS,
+Solaris), CRAY's (CRAYT3D and CRAYT3E (CRAYMPP) checked, CRAY C90,
+J90, YMP, XEA, EL, T90 (all CRAYPVP) are expected to be OK) - the
+offsets are consistent. Therefore it is simple to unwind the stack.
+There are no system routines to unwind the stack at the moment. Hence
+the actual unwinding is done in the function itself. On Sparc, RS6000,
+i386, these offsets are processor, rather than OS, dependant as
+storing of the frame pointer and program counter is done with
+processor instructions. Therefore it is expected that
+\texttt{bsp\_get\_callstack} will work on other OS based on these
+processors. i386 includes i386 compatible Intel processors (checked 
+upto Pentium-Pro). Add OS based on SPARC or Intel PC (i386)
+respectively in the above (lines 85-92) 2 conditional definitions if
+necessary.
+
+\begin{code}
+#ifdef CS_sparc
+extern int cs_regsp();
+
+#define CS_ofs_pc 0x3c
+#define CS_ofs_fp 0x38
+#define CS_start "start"
+#define CS_CAPTURE_CONTEXT() sp=cs_regsp()
+#endif /* CS_sparc */
+
+#ifdef SP2
+extern void cs_regsp(unsigned int *sp);
+
+#define CS_ofs_pc 8
+#define CS_ofs_fp 0
+#define CS_start "start"
+#define CS_CAPTURE_CONTEXT() do {   \
+    cs_regsp(&sp);                  \
+    sp=*(int *)(sp+CS_ofs_fp);      \
+  } while (0)
+ /* regsp returns its sp */
+#endif /* SP2 */
+
+#ifdef CS_i386
+extern long int cs_regsp();
+
+#define CS_ofs_pc 4
+#define CS_ofs_fp 0
+#define CS_start "start"
+
+#define CS_CAPTURE_CONTEXT() sp=cs_regsp()
+#endif /* CS_i386 */
+
+#ifdef WIN32
+long int cs_regsp() {
+	__asm {
+        	mov eax,ebp
+	}
+}
+#define CS_ofs_pc 4
+#define CS_ofs_fp 0
+#define CS_start "mainCRTStartup"
+
+#define CS_CAPTURE_CONTEXT() sp=cs_regsp()
+#endif /* WIN32 */
+
+
+#if defined(CS_sparc) || defined(SP2) || defined(CS_i386) || defined(WIN32)
+#define CS_VARIABLES unsigned int sp,*spc,*sfp
+#define CS_FIRST_UNWIND()  do{                               \
+    sfp=(unsigned int *)(sp+CS_ofs_fp);   /* old fp */       \
+    spc=(unsigned int *)(sp+CS_ofs_pc);   /* old pc */       \
+  } while (0)
+#define CS_UNWIND()        do {                              \
+    sp=*sfp;                                                 \
+    sfp=(unsigned int *)(sp+CS_ofs_fp);   /* old fp */       \
+    spc=(unsigned int *)(sp+CS_ofs_pc);   /* old pc */       \
+  } while (0)
+#define CS_CHECK_CONTEXT (((unsigned int)sfp)>1000)
+#define CS_CONTEXT_PC *spc
+#define CS_NO_NAMES 1
+#endif
+\end{code}
+
+On CRAYMPP machines (CRAYT3D, CRAYT3E) the name of function is stored
+in SSIB table of each function. This is a documented feature and is
+expected to remain in future releases of the OS. It is used because it
+speeds up the execution - there is no need to read the symbol
+information from the executable.
+
+\begin{code}
+#ifdef CRAYMPP
+extern cs_regfp();
+
+#define CS_ofs_pc -8             /* not used but here for clarity */
+#define CS_ofs_fp -16
+#define CS_ofs_ssib -32
+#define CS_ofs_name 40
+#define CS_start "$START$"
+#define CS_VARIABLES unsigned long int fp, ssib
+#define CS_CAPTURE_CONTEXT() fp=cs_regfp()
+#define CS_CHECK_CONTEXT fp
+#define CS_UNWIND_NAME()  do {                                         \
+     fp=*(int *)(fp+CS_ofs_fp);         /* old fp */                   \
+     if (fp) ssib=* (unsigned int *)(fp + CS_ofs_ssib);                \
+  } while (0)
+     /* SSIB= Static Subprogram Information Block; The name of the
+                                           subroutine is kept there.  */
+#define CS_FIRST_UNWIND_NAME() CS_UNWIND_NAME()
+#define CS_NAME (char *)(ssib+CS_ofs_name)
+#endif /* CRAYMPP */
+\end{code}
+
+On CRAYPVP machines (C90 , J90, YMP, XEA, EL, T90 expected) the name
+of the function is kept in the function itself and there is a pointer
+to it in the each frame. The name of the function together with the
+saving of the pointer to it in the current frame on the stack is put
+in the program by the compiler to be used by \texttt{trbk(3)} whenever a
+crash of the program occurs.
+
+The least significant byte at \texttt{fp+CS\_ofs\_nameptr} is the length of the
+name of the function (without \verb!\0!). The actual string ends at this
+address. Ensure that \texttt{fp} and \texttt{nameptr} are 1 word (8
+bytes) wide. 
+
+\begin{code}
+#if !defined(SGIORIGIN) && defined(CRAYPVP)
+extern cs_regfp();
+                 /* don't know where old pc is kept, but don't need it */
+#define CS_ofs_fp 3                  /* offsets here are 8-byte words */
+#define CS_ofs_nameptr 0
+#define CS_start "$START$"
+#define CS_VARIABLES unsigned int fp, nameptr, size;                    \
+                     char name[TRUNCATE_CALLSTACK_FUNNAME]
+#define CS_CAPTURE_CONTEXT() fp=cs_regfp()
+#define CS_CHECK_CONTEXT fp
+#define CS_UNWIND_NAME() do {                                           \
+     fp=*(int *)(fp+CS_ofs_fp);      /* old fp */                       \
+     if (fp) {                                                          \
+          nameptr = *(unsigned int *)(fp+CS_ofs_nameptr);               \
+          size    = *(unsigned int *)name % 0x100;                      \
+          nameptr-= size / 8 + ((size % 8>0)?1:0);                      \
+          if (size>TRUNCATE_CALLSTACK_FUNNAME)                          \
+             size=TRUNCATE_CALLSTACK_FUNNAME;                           \
+          else name[size-1]="\0";                                       \
+       }                                                                \
+   } while (0)
+ /* \0 in name will be needed later, when it has been initialized      */
+ /* divide by 8 since the address on this machine are in 8-byte words; */
+#define CS_FIRST_UNWIND_NAME() CS_UNWIND_NAME()
+#define CS_NAME strncpy(name,(char *) nameptr, size)
+
+#endif /* CRAYPVP */
+\end{code}
+
+On SGI, SGICHALL64, OSF1, the offsets in the stack, where the caller's
+frame pointer (fp) and program counter (pc) are, differ. The correct
+offset can be determined by information created by the compiler and/or
+the loader. The format and/or the ways of obtaining this information
+may change in the future. Usually it involves calling system
+routines. Therefore it is better to use directly the system routines 
+for unwinding the callstack rather than calculating the offset of the
+caller's fp and pc, and then unwinding the callstack in these functions.
+
+\begin{code}
+#ifdef OSF1 
+#define CS_start "start"
+#define CS_VARIABLES CONTEXT context
+#define CS_CAPTURE_CONTEXT() exc_capture_context(&context)
+#define CS_FIRST_UNWIND() exc_virtual_unwind(0,&context);
+#define CS_UNWIND() CS_FIRST_UNWIND()
+#define CS_CHECK_CONTEXT context.sc_pc
+#define CS_CONTEXT_PC CS_CHECK_CONTEXT
+#define CS_NO_NAMES 1
+#endif /* OSF1 */
+\end{code}
+
+On SGI or SGICHALL64 the system routines can sometimes obtain the
+function name, but not always. For each particular machine this is
+checked during the initial configuration. If it is not possible,
+\texttt{CS\_SGI\_NO\_NAMES} is defined.
+On new versions of the machines, the exception system library is
+upgraded and the routines have different names. The version is defined
+by the macro \texttt{\_MIPS\_SIM}.
+
+\begin{code}
+#if defined(SGICHALL64) || defined(SGI) || defined(SGIN32) ||defined(SGIORIGIN)
+
+#define CS_VARIABLES          \
+   char *name;                \
+   struct sigcontext context
+#define CS_CAPTURE_CONTEXT() exc_setjmp(&context)
+#define CS_CHECK_CONTEXT context.sc_pc
+
+#if (_MIPS_SIM == _MIPS_SIM_ABI32)
+#define CS_UNWIND() unwind(&context,0)
+#else /* _MIPS_SIM == _MIPS_SIM_ABI64 || _MIPS_SIM_NABI32*/
+#define CS_UNWIND() exc_unwind(&context,0)
+#endif /* if o32 MIPS */
+#define CS_FIRST_UNWIND() CS_UNWIND()
+#define CS_start "start"
+#define CS_NO_NAMES 1
+#define CS_CONTEXT_PC CS_CHECK_CONTEXT
+#endif /* SGI */
+\end{code}
+
+\section*{Architecture Independent Part}
+
+The symbol information is kept in the array \texttt{symb} if necessary
+(\texttt{CS\_NO\_NAMES} defined). The space for it is allocated in
+\texttt{bsp\_init\_callstack}.
+
+\begin{code}
+#if defined(CALLGRAPH_PROFILE) && defined(CS_NO_NAMES)
+
+static int last_symb;
+static int globldiff=0;
+
+struct t_symb {                              /* symbol table */
+  char name[TRUNCATE_CALLSTACK_FUNNAME];
+  unsigned long int offset;                       
+} *symb;
+#endif
+\end{code}
+
+\texttt{bsp\_get\_callstack} virtually unwinds the callstack in order
+to obtain the names of the functions. If \texttt{CS\_NO\_NAMES} is
+defined, only the addresses of the functions are found. Then the symbol
+information stored by \texttt{bsp\_init\_callstack} is used to find
+the function names by performing Binary Search. Otherwise obtain the
+function names from system routines or symbol tables in the program
+code in the memory. 
+
+\begin{code}
+void bsp_get_callstack(char funcs[TRUNCATE_CALLSTACK_DEPTH]
+                                 [TRUNCATE_CALLSTACK_FUNNAME]) {
+#ifdef CALLGRAPH_PROFILE
+  unsigned int j; /* counter */
+#ifdef CS_NO_NAMES
+
+  long int i,k;  /* variables for the binary search */
+  CS_VARIABLES;
+  CS_CAPTURE_CONTEXT();    /* The first function is the current and is not returned. */
+  CS_FIRST_UNWIND();
+
+  j=0; 
+  while ((j<TRUNCATE_CALLSTACK_DEPTH) && (CS_CHECK_CONTEXT) && 
+         (j?(strcmp(funcs[j-1],CS_start) && strcmp(funcs[j-1],"main")):1)) {
+
+      i=last_symb / 2 + last_symb % 2;k=i;            /* Binary Search */
+      while ((k>1) && (i>=0)) {
+	k=k / 2 + k % 2;
+	if (CS_CONTEXT_PC>symb[i].offset+globldiff) i+=k; else i-=k;
+      }
+      /* maybe not necessary */ 
+      while ((i>=0)&&(CS_CONTEXT_PC<=symb[i].offset+globldiff)) i--;
+
+     if ((i<last_symb) || (i<0))
+	strcpy(funcs[j],symb[i].name);
+     else strcpy(funcs[j],CS_start);   /* The function isn't in the program */
+     j++;
+     CS_UNWIND();
+  }
+
+#else
+  
+  CS_VARIABLES;
+  CS_CAPTURE_CONTEXT();
+           /* The first function is the current and is not returned. */
+  CS_FIRST_UNWIND_NAME();
+
+  j=0;
+  while ((j<TRUNCATE_CALLSTACK_DEPTH) && (CS_CHECK_CONTEXT) &&
+         (j?strcmp(funcs[j-1],CS_start):1)) { 
+       strncpy(funcs[j],CS_NAME,TRUNCATE_CALLSTACK_FUNNAME-1);
+       funcs[j][TRUNCATE_CALLSTACK_FUNNAME-1]='\0';
+       CS_UNWIND_NAME();
+       j++;
+  }   
+#endif /* CS_NO_NAMES */
+
+  /* Removes "start" function, which is always there before "main" */
+  if (!strcmp(funcs[j-1],CS_start))
+    funcs[j-1][0]='\0';
+  else funcs[j][0]='\0';
+#endif
+}
+\end{code}
+
+\texttt{bsp\_init\_callstack} checks whether the expected file with
+the symbol information exists and is up to date. Usually this file is
+created and written at linking time. If it is not up to date
+\texttt{bspnm(1)} is executed to convert the output from
+\texttt{nm(1)}. The expected format of the file is  
+\verb!<address in decimal> <function_name>!
+
+The following conditional definitions are there because there is no
+need of this function unless \texttt{CS\_NO\_NAMES} is defined.
+ 
+\begin{code}
+#if defined(CALLGRAPH_PROFILE) && defined(CS_NO_NAMES)
+
+static FILE *file;
+/* Used in system quick sort */
+static int t_symb_comp(struct t_symb *i,struct t_symb *j) {
+   return((*i).offset-(*j).offset);
+}
+#define StrLength 160
+
+#endif
+
+void bsp_init_callstack() {
+#if defined(CALLGRAPH_PROFILE) && defined(CS_NO_NAMES)
+  char temp[StrLength],temp1[StrLength], filename[L_tmpnam],
+       thisfunc[20]="bsp_init_callstack";
+  char ch, *env;
+  int CURM_symb=SYMBOL_TABLE_INC_SIZE;
+  FILE *fptr;
+  struct stat buf;
+  time_t time1;
+
+  int i,j;
+
+  if (!(long int)(symb=(struct t_symb *) CALLOC(SYMBOL_TABLE_INC_SIZE,
+						SIZEOF(struct t_symb)) ))
+    bsp_abort("{bsp_init_callstack} Not enough memory.");
+
+  if (stat(_bsp_exec_file,&buf)) {   /* file doesn't exist or cannot be read */
+    env = getenv("BSP_EXEC");       /* try different file name */
+    if (env) {                      /* set by bsprun */
+      _bsp_exec_file=MALLOC(SIZEOF(env+1));
+      strcpy(_bsp_exec_file,env);
+      if (stat(_bsp_exec_file,&buf))
+        bsp_abort("{bsp_begin}\n"
+		  "\tCall-graph profiler can not access executable.\n"
+		  "\tError with bsprun(1)");
+    } else {
+      bsp_abort("{bsp_begin}\n"
+                "\tCall-graph profiler can not access executable.\n"
+                "\tPlease run program with bsprun(1)");
+    }
+  }
+  time1=buf.st_mtime;
+  strcpy(filename,_bsp_exec_file);
+  strcat(filename,".tab");
+  if ((stat(filename,&buf))?1:(buf.st_mtime<time1)) { /* file with symbol
+                            information doesn't exist or is not up to date */ 
+    sprintf(temp,"bspnm -o %s %s",filename,_bsp_exec_file);
+    if (system(temp)) bsp_abort("{bsp_init_callstack} bspnm had trouble");
+   }    
+ 
+  file=fopen(filename,"r");
+  if (file==NULL)
+     bsp_abort("{bsp_init_callstack} unable to open \"%s\"",filename);
+
+  i=0;
+  while (fgets(temp,StrLength,file)) {
+    if (!sscanf(temp,"%ld %s",&symb[i].offset,temp1))
+      bsp_abort("{bsp_init_callstack} incorrect format in output from bspnm");
+    strncpy(symb[i].name,temp1,TRUNCATE_CALLSTACK_FUNNAME-1);
+    symb[i].name[TRUNCATE_CALLSTACK_FUNNAME-1]='\0';
+	if (i+1>=CURM_symb)
+	  if (! (long int)(symb=(struct t_symb *)realloc(symb,
+		 (CURM_symb+=SYMBOL_TABLE_INC_SIZE)*SIZEOF(struct t_symb) ))){
+	    bsp_abort("bsp_init_callstack:Not enough memory. Aborting...");
+	  }
+	if (!strcmp(symb[i].name,thisfunc))  
+          globldiff=((long int)bsp_init_callstack-symb[i].offset);
+	i++;
+       }    /* while (fgets ...) */
+    last_symb=i-1;
+    fclose(file);
+
+    qsort((char *)symb,last_symb+1,SIZEOF(struct t_symb),
+          (int(*)(const void*,const void*)) t_symb_comp);
+/* Sorts the address to make binary search later. Although the input   */
+/* might be already sorted, does this because sometimes there are      */
+/* inconsistency of the options of nm. If the input is already sorted, */
+/* this doesn't take long. Consider sorting in bspnm(1) and removing this. */
+
+#endif
+}
+#endif
+\end{code}

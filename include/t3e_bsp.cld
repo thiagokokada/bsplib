@@ -1,0 +1,2 @@
+stack(init)=0x700000
+stack(incr)=0

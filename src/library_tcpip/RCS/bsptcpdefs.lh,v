@@ -1,0 +1,125 @@
+head	1.1;
+access;
+symbols;
+locks
+	jonh:1.1; strict;
+comment	@# @;
+
+
+1.1
+date	97.07.11.10.28.15;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@% $Id$
+% $Log$
+
+\begin{code}
+  /*
+   * Header file for BSP/TCP components: 
+   * - bsptcpd.c - Processor request processing daemon.
+   * - bsptcpm.c - Master processor controlling process.
+   * - bsptcps.c - Slave processor controlling process.
+   * - bsptcpl.c - Library interface routines for BSPLib.
+   */
+
+#ifndef MSG_WAITALL
+#define MSG_WAITALL           0             /* missing socket define */
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%
+\section{Tunable paramaters}
+%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{enumerate}
+\item Ethernet payload size is 1500
+\item Minus 24 bytes for IP header
+\item Minus 24 bytes for TCP header
+\item Minus  8 bytes for BSP/TCP header
+\item Gives 1446 payload size.
+\end{enumerate}
+
+\begin{code}
+#define BSPTCP_MAX_PACKET     1400  /* maximum packet size--dont change*/
+#define BSPTCP_MIN_PACKETS      10  /* minimum no. snd/rcv buffers  */
+#define BSPTCP_LPORT          4444  /* default port to listen on */
+#define BSPTCP_BACKLOG           5  /* default backlogged requests */
+#define BSPTCP_TIMEOUT_HIGH 345600  /* select fd inactivity timeout (secs) */
+#define BSPTCP_TIMEOUT_LOW     180  /* select fd inactivity timeout (secs) */
+#define BSPTCP_MAX_ATTEMPTS     50  /* limit number of connect attempts */
+#define BSPTCP_LINGER_INT       10  /* linger on socket close if data */
+#define BSPTCP_MAX_SESSIONS     20  /* max BSP processes per workstation */
+#define BSPTCP_MAX_BACKOFF 4194304  /* usec send backoff wait ceiling */
+   
+  /*
+   * Component paths and names:
+   */
+
+#ifdef BSPTCP_UNITTEST
+#define BSPTCP_MASTER_PATH "/users/sd/BSPTCPIP/bsptcpm"
+#define BSPTCP_SLAVE_PATH  "/users/sd/BSPTCPIP/bsptcps"
+#else
+#define BSPTCP_MASTER_PATH "@@binarchdir@@/bsptcpm"
+#define BSPTCP_SLAVE_PATH  "@@binarchdir@@/bsptcps"
+#endif
+
+typedef struct bsptcp_msghdr bsptcp_msghdr_t;
+struct bsptcp_msghdr
+   {
+   char msgtype;    /* indicates content of payload */
+   short msglen;    /* payload length (must be signed) */
+   short msgspid;    /* source BSP process */
+   short msgdpid;    /* destination BSP process */
+   };
+
+  /*
+   * msgtype values indicating message payload:
+   */
+
+#define BSPTCP_MSG_STDOUT 1       /* Data to send to PID 0 stdout */
+#define BSPTCP_MSG_STDERR 2       /* Data to send to PID 0 stderr */
+#define BSPTCP_MSG_PASSWD 3       /* Password file entry details */
+#define BSPTCP_MSG_ACK    4       /* positive acknowledgement */
+#define BSPTCP_MSG_CDATA  5       /* master/slave control data */
+#define BSPTCP_MSG_EXIT   6       /* process is exiting */
+#define BSPTCP_MSG_ABORT  7       /* severe error - halt all execution */
+#define BSPTCP_MSG_SIGNAL 8       /* Signal to/from SPMD PID */
+
+#define BSPTCP_MIN_TYPE   BSPTCP_MSG_STDOUT
+#define BSPTCP_MAX_TYPE   BSPTCP_MSG_SIGNAL
+
+  /*
+   * Some systems don't have setenv():
+   */
+
+#ifndef __USE_BSD
+#ifdef BSPTCP_SETENV
+int setenv(char *name, char *value, int set)
+   {
+   char envstring[200];
+   char *usestr;
+
+   if (!set)
+      if (getenv(name)) 
+         return 0;
+
+   sprintf(envstring,"%s=%s",name,value);
+   usestr = malloc(strlen(envstring)+1);
+   strcpy(usestr,envstring);
+   return putenv(usestr);
+   }
+#endif
+#endif
+\end{code}
+@

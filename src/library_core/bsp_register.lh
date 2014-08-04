@@ -1,0 +1,64 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996,1997 University of Oxford                %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+typedef struct _bsp_registration {
+  void  *local_id;
+  int    global_id;  
+#ifdef BSP_DRMA
+  void **remote_ids;
+  int   *remote_sizes;
+#else
+  int    local_size;
+#endif
+  int   lineno;
+  char *filename;
+
+  struct _bsp_registration *next_local;
+  struct _bsp_registration *next_global;
+} bsp_registration;
+
+extern void*              _bsp_reg_cached_local;
+extern int                _bsp_reg_cached_global;
+extern bsp_registration  *_bsp_reg_cached_registration;
+\end{code}
+
+\texttt{REG\_TABLE\_SIZE} is the size of the hash table and has to be
+a power of 2.
+\begin{code}
+#define REG_TABLE_SIZE 1024
+
+#define hash_local(addr) MOD_POW2((((long int)addr)>>2),REG_TABLE_SIZE)
+#define hash_global(num) MOD_POW2(num,REG_TABLE_SIZE)
+
+#define bsp_register_local_to_global(addr)      \
+   ((_bsp_reg_cached_local==(addr))?            \
+      (_bsp_reg_cached_global):\
+      (_bsp_register_local_to_global(addr)))
+
+#ifdef BSP_DRMA
+#define bsp_register_global_to_local(global,pid)      \
+   ((_bsp_reg_cached_global==global)?                 \
+      ((char*)_bsp_reg_cached_registration->remote_ids[pid]):\
+      (_bsp_register_global_to_local(global,pid)))
+  
+#else
+#define bsp_register_global_to_local(global,pid)      \
+   ((_bsp_reg_cached_global==global)?                 \
+      ((char*)_bsp_reg_cached_registration->local_id):\
+      (_bsp_register_global_to_local(global,pid)))
+#endif
+\end{code}

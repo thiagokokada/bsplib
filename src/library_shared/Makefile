@@ -1,0 +1,130 @@
+# Generated automatically from Makefile.in by configure.
+###########################################################################
+##      Copyright (C) 1995,1996,1997 University of Oxford                ##
+##                                                                       ##
+## Permission to use, copy, modify, and distribute this software,        ##
+## and to incorporate it, in whole or in part, into other software,      ##
+## is hereby granted without fee, provided that                          ##
+##   (1) the above copyright notice and this permission notice appear in ##
+##       all copies of the source code, and the above copyright notice   ##
+##       appear in clearly visible form on all supporting documentation  ##
+##       and distribution media;                                         ##
+##   (2) modified versions of this software be accompanied by a complete ##
+##       change history describing author, date, and modifications made; ##
+##       and                                                             ##
+##   (3) any redistribution of the software, in original or modified     ##
+##       form, be without fee and subject to these same conditions.      ##
+###########################################################################
+
+###########################################################################
+##            D O N T  C H A N G E  A N Y T H I N G  !!                  ##
+###########################################################################
+
+SHELL      = /bin/sh
+
+prefix     = /amd/tmp_mnt/garnet/fs25/jonh/BSP
+exec_prefix= ${prefix}
+bindir     = ${exec_prefix}/bin
+includedir = ${prefix}/include
+libdir     = ${exec_prefix}/lib
+top_srcdir = ../../../
+
+BSP_ONLINE_PROCS= 8
+RANLIB          = ranlib
+GCC             = gcc
+INSTALL          = ../.././install-sh -c
+INSTALL_PROGRAM  = ${INSTALL}
+INSTALL_DATA     = ${INSTALL} -m 644
+
+mpiincludedir   = 
+
+editpl = sed -e 's,@''includedir''@,$(includedir),g'       \
+             -e 's,@''bindir''@,$(bindir),g'               \
+             -e 's,@''binarchdir''@,$(bindir)/$(ARCH)/,g'  \
+             -e 's,@''libdir''@,$(libdir),g'               \
+             -e 's,@''mandir''@,$(mandir),g'               \
+             -e 's,@''GCC''@,$(GCC),g'                     \
+             -e 's,@''G77''@,$(G77),g'                     \
+             -e 's,@''GPLUSPLUS''@,$(GPLUSPLUS),g'         \
+             -e 's,@''mpiincludedir''@,$(mpiincludedir),g' \
+             -e 's,@''mpilibdir''@,$(mpilibdir),g'         \
+             -e 's,@''PERL_DBMOK''@,$(PERL_DBMOK),g'       \
+             -e 's,@''PERL''@,$(PERL),g'                   \
+             -e 's,@''PWD''@,$(PWD),g'
+
+##########################################################################
+# Architecture independent modules
+##########################################################################
+SRCS_LC   = 
+
+SRCS_LH   = bsp_types.lh
+
+.SUFFIXES: .lc .lh .c .tex .c.tex .h.tex .s
+
+#############################################################
+##             Flags and conversions                       ##
+#############################################################
+
+LIBRARIES     = 
+INCLUDES      = 
+
+SRCS_O        = $(SRCS_LC:.lc=.o) 
+
+SRCS_C        = $(SRCS_LC:.lc=.c)
+
+SRCS_H        = $(SRCS_LH:.lh=.h)
+
+SRCS_TEX      = $(SRCS_LH:.lh=.h.tex) $(SRCS_LC:.lc=.c.tex)
+
+CC         = cc
+YACC       = bison -y
+LEX        = flex
+CFLAGS     =  ${BUILD_DEFINES}  
+LIBNAME    = 
+
+.SUFFIXES: .lc .lh .h .c .tex .c.tex .h.tex
+
+#############################################################
+##             Compilation rules                           ##
+#############################################################
+
+
+.lh.h:
+	rm -f $*.h $*.tmp;				\
+	litToPgm $<;					\
+	$(editpl) $*.h > $*.tmp && mv $*.tmp $*.h
+
+
+.lc.o:
+	rm -f $*.c $*.tmp;				\
+	litToPgm $<;					\
+	$(editpl) $*.c > $*.tmp && mv $*.tmp $*.c;	\
+	${CC} ${CFLAGS} $(INCLUDES) -c $*.c 
+
+.lc.c:
+	litToPgm $<;					\
+	rm -f $*.tmp;					\
+	$(editpl) $*.c > $*.tmp && mv $*.tmp $*.c
+
+.y.c:
+	${YACC} $<
+
+.l.c:
+	${LEX} -t $< > $*.c
+
+.c.o:
+	${CC} ${CFLAGS} $(INCLUDES) -c $*.c 
+
+.lh.h.tex:
+	litToTex $<
+
+.lc.c.tex:
+	litToTex $<
+
+
+
+#############################################################
+##             Main Targets                                ##
+#############################################################
+build: ${SRCS_H}
+develop: ${SRCS_H}

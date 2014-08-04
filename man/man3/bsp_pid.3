@@ -1,0 +1,48 @@
+.TH "bsp_pid" 3 "1.4 25/9/98" "Oxford BSP Toolset" "BSPlib FUNCTIONS"
+.SH NAME
+bsp_pid \- determines the process identifier of a BSP process.
+
+.SH C SYNOPSIS
+.nf
+.B #include \&"bsp.h\&"
+.PP
+.B int bsp_pid();
+.fi
+.SH FORTRAN SYNOPSIS 
+.nf
+.B INCLUDE 'fbsp.h'
+.PP
+.B INTEGER FUNCTION bsppid()
+.fi
+
+.SH DESCRIPTION
+
+The function
+.B bsp_pid
+returns the process identifier of the process executing the function
+call; where
+.I 0 <= bsp_pid()
+.I < bsp_nprocs()\c
+\&.
+
+.SH "SEE ALSO"
+bsplib(3), bsp_nprocs(3)
+
+.I ``BSPlib: The BSP Programming Library''
+Jonathan M. D. Hill, Bill McColl, Dan C. Stefanescu, Mark W. Goudreau,
+Kevin Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and Rob
+Bisseling. Parallel Computing, to appear 1998. See
+.I http://www.bsp-worldwide.org
+for more details.
+
+.SH BUGS
+Problems and bug reports should be mailed to 
+.I bsplib-bugs@comlab.ox.ac.uk
+
+.SH AUTHORS
+The Oxford BSP Toolset implementation of BSPlib was written by
+Jonathan.Hill@comlab.ox.ac.uk
+.br
+.B http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+

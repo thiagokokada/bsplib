@@ -1,0 +1,252 @@
+head	1.3;
+access;
+symbols;
+locks
+	jonh:1.3; strict;
+comment	@% @;
+
+
+1.3
+date	96.09.09.16.09.29;	author jonh;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	96.03.11.09.09.05;	author jonh;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	95.08.31.16.39.36;	author jonh;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.3
+log
+@Just about to add WYSIWYG profiling information
+@
+text
+@%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1995,1996 University of Oxford                     %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it, in whole or in part, into other software,      %%
+%% is hereby granted without fee, provided that                          %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% $Id: bsp_profile.lh,v 1.2 1996/03/11 09:09:05 jonh Exp jonh $
+% $Log: bsp_profile.lh,v $
+% Revision 1.2  1996/03/11  09:09:05  jonh
+% removing accumulated profile
+%
+% Revision 1.1  1995/08/31  16:39:36  jonh
+% Initial revision
+%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Buffer sizes}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{itemize}
+\item[Comm]  The size of the buffer used to put info as each super-step
+             is executed
+\item[Sstep] The maximum number of distinct super-steps within a program.
+\end{itemize}
+
+\begin{code}
+#define PROFILE_COMM_BUFFER_SIZE    500
+#define PROFILE_SSTEP_BUFFER_SIZE   100
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{File IO for profiling stats}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+File IO routines that are only guarenteed to work from process zero.
+\begin{code}
+#ifdef MPASS_EXPRESS
+#define PROF_FILETYPE FILE*
+#define PROF_DATETYPE int
+#define prof_fopen(filename)   fopen(filename,"wA")
+#define prof_fflush(fptr)      fflush(fptr)
+#define prof_fclose(fptr)      fclose(fptr)
+#define prof_datestring(clock) "date unknown\n"
+#else
+
+#define PROF_FILETYPE FILE*
+#define PROF_DATETYPE          time_t
+#define prof_fopen(filename)   fopen(filename,"w")
+#define prof_fflush(fptr)      fflush(fptr)
+#define prof_fclose(fptr)      fclose(fptr)
+#define prof_datestring(clock) (time(&clock), ctime(&clock))
+#endif
+\end{code}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Include for profiling statistics}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+typedef struct {
+   int    super_steps;
+   int    packet_puts_src;
+   int    packet_puts_srcnbytes;
+   int    packet_puts_dst;
+   int    packet_puts_dstnbytes;
+   int    buffer_high_water_mark;
+   int    write_waits;
+   int    read_waits;
+   int    combput_fails;
+   int    combput_hits;
+ } _BSPstat_info;
+
+extern _BSPstat_info _bspstat;
+\end{code}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Include for profiling statistics}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{code}
+typedef struct {
+   int    lineno;
+   char  *filename;
+} _BSPprof_sstep_info;
+\end{code}
+
+The value for \texttt{time\_fix} represents a reference point to which
+all other timings are made.
+\begin{code}
+typedef struct {
+  int     sstep_info;  /* Reference to array of _BSPprof_sstep_info */
+  double  time_delta_start;
+  double  time_fix;
+  double  time_delta_end;
+  int     in_bytes;
+  int     out_bytes;
+  int     no_in;
+  int     no_out;
+} _BSPprof_comm_info;
+\end{code}
+
+\begin{code}
+extern void bspstat_init();
+extern void bspstat_create();
+extern void bspstat_close();
+extern void bspstat_incoming(int,int);
+extern void bspstat_finalise();
+extern void bspprof_init();
+extern void bspprof_create();
+extern void bspprof_close();
+extern void bspprof_sstep_start();
+extern void bspprof_sstep_fix();
+extern void bspprof_sstep_end();
+\end{code}
+
+@
+
+
+1.2
+log
+@removing accumulated profile
+@
+text
+@d2 1
+a2 1
+%%      Copyright (C) 1995, University of Oxford                         %%
+d17 1
+a17 1
+% $Id: bsp_profile.lh,v 1.1 1995/08/31 16:39:36 jonh Exp jonh $
+d19 3
+d27 37
+d69 4
+a72 4
+   int    packet_stores_src;
+   int    packet_stores_srcnbytes;
+   int    packet_stores_dst;
+   int    packet_stores_dstnbytes;
+d76 2
+a77 4
+   int    malloc_no;
+   int    malloc_bytes;
+   int    combstore_fails;
+   int    combstore_hits;
+a88 1
+   int    sstep_id;
+d92 1
+d94 3
+a96 9
+typedef struct {
+   int      sstep_info;  /* Reference to array of _BSPprof_sstep_info */
+   int      entered;
+   double   comp_time;
+   double   commcomp_time;
+   double   wait_time;
+   double   comm_time;
+} _BSPprof_accum_info;
+
+d99 3
+a101 2
+  double  time_start;
+  double  time_end;
+d110 10
+a119 9
+extern void initStatistics();
+extern void createStatisticsLog();
+extern void closeStatisticsLog();
+extern void initProfile();
+extern void createProfileLog();
+extern void closeProfileLog();
+extern void bspprof_sstep_self_comm(int);
+extern void bspprof_sstep_start(int,int,char*);
+extern void bspprof_sstep_comm();
+a120 3
+extern void bspprof_sstep_inout_comm(int,int,char*);
+extern void bspprof_sstep_inout_colcomm(int,int,char*,int,int,int,int);
+extern void bspprof_sstep_inout_scancomm(int,char*);
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d17 5
+a21 2
+% $Id$
+% $Log$
+d24 1
+a24 1
+\section{Include for profiling routines}
+d28 13
+a40 13
+   int super_steps;
+   int packet_stores_src;
+   int packet_stores_srcnbytes;
+   int packet_stores_dst;
+   int packet_stores_dstnbytes;
+   int gather_nbytes;
+   int broadcast_nbytes;
+   int buffer_high_water_mark;
+   int write_waits;
+   int empty_waits;
+   int malloc_no;
+   int malloc_bytes;
+ } _BSPprofinfo;
+d42 32
+a73 1
+extern _BSPprofinfo _bspprof;
+d77 3
+d81 9
+@

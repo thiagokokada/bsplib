@@ -1,0 +1,132 @@
+
+
+
+BSPlib(3BSPlib)         BSPlib FUNCTIONS          BSPlib(3BSPlib)
+
+
+
+NAME
+     BSPlib - The Bulk Synchronous Parallel  World-Wide  standard
+     library.
+
+
+DESCRIPTION
+     BSPlib is a library of C and Fortran 77 bindings for  paral-
+     lel programming using the BSP model. User programs are writ-
+     ten in a Single Program Multiple Data (SPMD) style, and  the
+     library  supports both bulk synchronous direct remote memory
+     access drma(3) (i.e., memory copy  between  processors)  and
+     bulk  synchronous  message passing bsmp(3). The set of basic
+     operations provided by BSPlib are shown in the  table  below
+     (a manual page is available for each operation):
+
+          Initialisation      bsp_init
+                              bsp_begin
+                              bsp_end
+          Halt                bsp_abort
+          Enquiry             bsp_pid
+                              bsp_nprocs
+                              bsp_time
+          Synchronisation     bsp_sync
+          DRMA                bsp_push_reg
+                              bsp_pop_reg
+                              bsp_put
+                              bsp_get
+          BSMP                bsp_set_tagsize
+                              bsp_send
+                              bsp_qsize
+                              bsp_get_tag
+                              bsp_move
+          High Performance
+                              bsp_hpput
+                              bsp_hpget
+                              bsp_hpmove
+
+
+     A higher-level library, summarised in bsplib_level1(3)
+      provides language specific operations,  and  a  variety  of
+     specialised  collective  communication operations. These are
+     not considered as part of the core library, as they  can  be
+     easily realised in terms of the core.
+
+
+NOTES
+     Programs  written  using  BSPlib  should  be  compiled  with
+     bspfront(1).
+
+
+SEE ALSO
+     bsp_level1(3),   bsp_init(3),   bsp_begin(3),    bsp_end(3),
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    1
+
+
+
+
+
+
+BSPlib(3BSPlib)         BSPlib FUNCTIONS          BSPlib(3BSPlib)
+
+
+
+     bsp_pid(3),    bsp_nprocs(3),    bsp_time(3),   bsp_sync(3),
+     drma(3),        bsp_isregistered(3),        bsp_push_reg(3),
+     bsp_pop_reg(3),    bsp_put(3),   bsp_get(3),   bsp_hpput(3),
+     bsp_hpget(3),  bsmp(3),   bsp_set_tagsize(3),   bsp_send(3),
+     bsp_qsize(3),bsp_get_tag(3),   bsp_move(3),   bsp_hpmove(3),
+     bsp_abort(3)
+
+     ``_B_S_P_l_i_b: _T_h_e _B_S_P _P_r_o_g_r_a_m_m_i_n_g _L_i_b_r_a_r_y'' Jonathan M. D. Hill,
+     Bill  McColl,  Dan  C.  Stefanescu,  Mark W. Goudreau, Kevin
+     Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and
+     Rob  Bisseling.  Parallel  Computing,  to  appear  1998. See
+     _h_t_t_p://_w_w_w._b_s_p-_w_o_r_l_d_w_i_d_e._o_r_g for more details.
+
+     ``_A _p_r_o_p_o_s_a_l _f_o_r _t_h_e _B_S_P _W_o_r_l_d_w_i_d_e _S_t_a_n_d_a_r_d _L_i_b_r_a_r_y (_p_r_e_l_i_m_-
+     _i_n_a_r_y  _v_e_r_s_i_o_n)''  Mark  W.  Goudreau,  Jonathan M. D. Hill,
+     Kevin Lang, Bill McColl, Satish B. Rao, Dan  C.  Stefanescu,
+     Torsten  Suel, Thanasis Tsantilas. Oxford University Comput-
+     ing Laboratory, April 1996. See _h_t_t_p://_w_w_w._b_s_p-_w_o_r_l_d_w_i_d_e._o_r_g
+     for more details.
+
+     ``_Q_u_e_s_t_i_o_n_s _a_n_d _a_n_s_w_e_r_s _a_b_o_u_t  _B_S_P''  _D_a_v_i_d  _B.  _S_k_i_l_l_i_c_o_r_n,
+     _J_o_n_a_t_h_a_n  McColl.  Journal  of  Scientific  Programming,  to
+     appear 1997. (See also Technical Report  15-96,  Programming
+     Research  Group,  Oxford  University  Computing  Laboratory,
+     August 1996)
+     _f_t_p://_f_t_p._c_o_m_l_a_b._o_x._a_c._u_k/_p_u_b/_P_a_c_k_a_g_e_s/_B_S_P/_p_a_p_e_r_s/_S_k_i_l_l_H_i_l_l_M_c_C_o_l_l__Q_A._p_s._g_z
+
+     The Oxford BSP toolset web pages can be found  at:
+     _h_t_t_p://_w_w_w._b_s_p-_w_o_r_l_d_w_i_d_e._o_r_g/_i_m_p_l_m_n_t_s/_o_x_t_o_o_l/
+
+
+BUGS
+     Problems  and  bug  reports  should  be  mailed  to  _b_s_p_l_i_b-
+     _b_u_g_s@_c_o_m_l_a_b._o_x._a_c._u_k
+
+
+AUTHORS
+     The Oxford BSP Toolset implementation of BSPlib was  written
+     by Jonathan.Hill@comlab.ox.ac.uk
+     http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    2
+
+
+

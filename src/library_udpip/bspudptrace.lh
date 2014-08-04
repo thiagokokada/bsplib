@@ -1,0 +1,38 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%      Copyright (C) 1998 Stephen Donaldson                             %%
+%%                      &  The University of Oxford                      %%
+%%                                                                       %%
+%% Permission to use, copy, modify, and distribute this software,        %%
+%% and to incorporate it into other software, is hereby granted          %%
+%% without fee, provided that                                            %%
+%%   (1) the above copyright notice and this permission notice appear in %%
+%%       all copies of the source code, and the above copyright notice   %%
+%%       appear in clearly visible form on all supporting documentation  %%
+%%       and distribution media;                                         %%
+%%   (2) modified versions of this software be accompanied by a complete %%
+%%       change history describing author, date, and modifications made; %%
+%%       and                                                             %%
+%%   (3) any redistribution of the software, in original or modified     %%
+%%       form, be without fee and subject to these same conditions.      %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+ 
+\begin{code}
+#if defined(BSPUDP_MSC_TRACE) && !defined(MPASS_3C905B)
+#undef sendto
+#undef recvfrom
+#define sendto tsendto
+#define recvfrom trecvfrom
+#endif /* BSPUDP_MSC_TRACE */
+
+#define BSPUDP_MSC_TRACE_DAVINCI 0
+#define BSPUDP_MSC_TRACE_PICL    1
+\end{code}
+
+\begin{code}
+int tsendto(int s, const void *msg, int  len,  unsigned  int
+            flags, const struct sockaddr *to, int tolen);
+
+int trecvfrom(int s, void *buf, int len, unsigned int flags,
+              struct sockaddr *from, int *fromlen);
+
+\end{code}

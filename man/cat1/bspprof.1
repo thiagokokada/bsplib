@@ -1,0 +1,330 @@
+
+
+
+bspprof(1)                User Commands                bspprof(1)
+
+
+
+NAME
+     bspprof - The Oxford BSP Toolset communication profiler  for
+     BSPlib
+
+
+SYNOPSIS
+     bspprof [_i_n_p_u_t-_f_i_l_e] [_o_u_t_p_u_t-_f_i_l_e] [_c_o_m_m_a_n_d-_l_i_n_e-_o_p_t_i_o_n_s]
+
+
+DESCRIPTION
+     The Oxford BSP toolset communication profiler analyses trace
+     files  generated  during  the execution of a BSPlib program.
+     The profiler converts trace files into PostScript (level  2)
+     documents  that  are  suitable  for  visualisation on a wide
+     variety of graphical devices. Trace files are  generated  by
+     adding  the option -_p_r_o_f when compiling BSPlib programs with
+     bspfront(1).
+
+     The profiler produces three types of  PostScript  graphs  as
+     output:
+
+
+     1)   Strata-graphs for either the number of distinct commun-
+          ications  that  occur over time, or the number of bytes
+          communicated. Two graphs are presented per profile:
+
+          a)   the number of bytes (or communications)  going  in
+               to a processor.
+
+          b)   the number of bytes (or communications) going  out
+               from a processor.
+
+
+     2)   _P_r_e_d_i_c_t_i_o_n _g_r_a_p_h_s that are similar to  _1)  except  that
+          the lower graph shows the predicted cost of the commun-
+          ication on the machine the profiler was run on. If the
+          - _a_r_c_h command is used to specify another architecture,
+          then that architectures BSP  parameters  will  be  used
+          instead.  Alternatively,  the  BSP  parameters  of  the
+          architecture which the prediction is for can be entered
+          using the -slg option.
+
+
+     3)   A _G _g_r_a_p_h, which is also based upon _1) except the  bot-
+          tom  graph  shows the effect of g over time. For a true
+          BSP machine, g should be constant.
+
+
+OPTIONS
+     Options must be separate: `-dr' is quite different from `- d
+     - r  '.   Here  is  a summary of all the options, grouped by
+     type. Explanations can be found in the appropriate  sections
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    1
+
+
+
+
+
+
+bspprof(1)                User Commands                bspprof(1)
+
+
+
+     below:
+
+
+     Overall Options
+          -title _s_t_r_i_n_g -zoom _f_r_o_m,_t_o -colo[u]r -letter -bytes -
+          packets -ignore -outline
+
+     Strata Graph Options
+          -comm
+
+     Prediction Graph Options
+          -predict -slg _s,_l,_g,[_n_h_a_l_f] -arch _s_t_r_i_n_g -nhalfmodel -
+          hgmodel -bisselingmodel
+
+     G Graph
+          -ggraph -ceilingg _i_n_t_e_g_e_r -hrelgl
+
+
+OVERALL OPTIONS
+     -t _s_t_r_i_n_g
+          Use _s_t_r_i_n_g as the title of the profile.
+
+     -zoom _f_r_o_m,_t_o
+          Zoom in on the section of the profile between times (in
+          seconds)  _f_r_o_m  and _t_o.  If a superstep stradles either
+          _f_r_o_m or _t_o it is ignored.
+
+     -colo[u]r
+          Use coloured bars when producing the profile in prefer-
+          ence to the default grey-scale hashing.
+
+     -letter
+          Generate a postscript file that will print on  American
+          _l_e_t_t_e_r format paper. The default print area is A4.
+
+     -bytes
+          Displays the number of bytes transferred from each pro-
+          cess during each superstep.
+
+     -packets
+          Displays the number of distinct messages from each pro-
+          cess during each superstep.
+
+     -ignore _f_i_l_e
+          Don't profile any supersteps from the file _s_t_r_i_n_g.
+
+     -outline
+          Only show the accumulated message sizes  for  a  super-
+          step. This option is useful to see the general shape of
+          the profile without generating large postscript files.
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    2
+
+
+
+
+
+
+bspprof(1)                User Commands                bspprof(1)
+
+
+
+STRATA GRAPH OPTIONS
+     -comm
+          Produce a strata-graph  showing  two  graphs  with  the
+          amounts of data entering and exiting each processor for
+          each superstep over time.
+
+PREDICTION GRAPH OPTIONS
+     -predict
+          Produce a graph that contrasts the experimental results
+          with a prediction based upon the BSP cost model.
+
+     -slg _s,_l,_g[,_n_h_a_l_f]
+          When generating the prediction profile, the options to
+          -_s_l_g are numbers which represent the BSP parameters:
+
+          _s    is the _M_e_g_a_f_l_o_p/_s rating for the machine.
+
+          _l    the minimum number of flops  for  a  barrier  syn-
+               chronisation.
+
+          _g    the asymptotic number of flops  required  for  all
+               processors  to  communicate a single 32bit word to
+               another process.
+
+          _n_h_a_l_f
+               the number of words required for the communication
+               performance to deteriorate to 2g.
+     See _b_s_p_p_a_r_a_m(_1) for information concerning the BSP parameter
+     database.
+
+     -arch _s_t_r_i_n_g
+          Specifies that the  program  was  run  on  architecture
+          _s_t_r_i_n_g;  where  _s_t_r_i_n_g is one of the valid architecture
+          options that is returned from bsparch -help.
+
+     -hgmodel
+          The formula h.g is used as the cost of  communicating a
+          h-relation.
+
+     -nhalfmodel
+          The formula h.g.(nhalf/h +1) is used  as  the  cost  of
+          communicating a h-relation. i.e., messages smaller than
+          nhalf are attributed a larger cost to take into  effect
+          communication startup costs. This is the most accurate,
+          and therefore the default cost model used in  the  pro-
+          filer.
+
+     -bisselingmodel
+          The formula h.g.nhalf is used as the cost of   communi-
+          cating  a  h-relation.  This  will give an upper bound,
+          pessimistic cost of communication.
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    3
+
+
+
+
+
+
+bspprof(1)                User Commands                bspprof(1)
+
+
+
+G GRAPH
+     -ggraph
+          For each superstep, assume that l is fixed, and plot  a
+          graph for the variance of g realised for the superstep.
+          Although the BSP model assumes a fixed g,  this  option
+          is  useful when trying to visualise the effects of con-
+          tention in  the  implementation;  or  alternatively  to
+          check if a machine is truly scalable!
+
+     -ceilingg _n_u_m_b_e_r
+          Specify the maximum value of g to show in the  lower  G
+          graph. This option is useful when useful when trying to
+          scale multiple graphs to the same ranges.
+
+     -hrelgl
+          In the ggraph, we assume that l  is  constant,  and  we
+          plot the variance of g. When the size of the h-relation
+          is much smaller than l/g, then a small variance at run-
+          time  in  l  will produce a large variance in g. By de-
+          fault, when generating the profile for the G graph,  h-
+          relations  smaller  than l/g are _i_g_n_o_r_e_d. With this op-
+          tion, they are plotted as small white dots.
+
+FILES
+     The file _R_O_O_T_D_I_R/include/bsp_parameters.ascii  contains  the
+     BSP  parameters for various platforms; where _R_O_O_T_D_I_R is usu-
+     ally set in the top level Makefile of the BSPlib source.
+
+
+SEE ALSO
+     bsplib(3), bspfront(1), bsparch(1)
+
+     ``_T_h_e _t_h_e_o_r_y, _p_r_a_c_t_i_c_e,  _a_n_d  _a  _t_o_o_l  Jonathan  Hill,  Paul
+     Crumpton,  and David Burgess. In EuroPar'96. LNCS, Springer-
+     Verlag, August 1996. See:
+     _f_t_p://_f_t_p._c_o_m_l_a_b._o_x._a_c._u_k/_p_u_b/_D_o_c_u_m_e_n_t_s/_t_e_c_h_p_a_p_e_r_s/_J_o_n_a_t_h_a_n._H_i_l_l/_H_i_l_l_C_r_u_m_p_t_o_n_B_u_r_g_e_s_s__e_u_r_o_p_a_r_9_6._p_s._Z
+
+     The Oxford BSP toolset web pages can be found  at:
+     _h_t_t_p://_w_w_w._b_s_p-_w_o_r_l_d_w_i_d_e._o_r_g/_i_m_p_l_m_n_t_s/_o_x_t_o_o_l/
+
+
+BUGS
+     Problems  and  bug  reports  should  be  mailed  to  _b_s_p_l_i_b-
+     _b_u_g_s@_c_o_m_l_a_b._o_x._a_c._u_k
+
+
+
+COPYING
+     Copyright 1995,1996,1997 University of Oxford
+
+     Permission  to  use,  copy,  modify,  and  distribute   this
+     software,  and  to incorporate it, in whole or in part, into
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    4
+
+
+
+
+
+
+bspprof(1)                User Commands                bspprof(1)
+
+
+
+     other software, is  hereby  granted  without  fee,  provided
+     that:
+
+     i    the above copyright notice and this  permission  notice
+          appear  in all copies of the source code, and the above
+          copyright notice appear in clearly visible form on  all
+          supporting documentation   and distribution media;
+
+     ii    modified versions of this software be accompanied by a
+          complete  change  history  describing author, date, and
+          modifications made;
+
+
+     iii   and any redistribution of the software, in original or
+          modified form, be without fee and subject to these same
+          conditions.
+
+AUTHORS
+     Jonathan.Hill@comlab.ox.ac.uk
+
+     http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    5
+
+
+

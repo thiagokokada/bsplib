@@ -1,0 +1,775 @@
+.TH bspfront 1 "1.4 25/9/98" "Oxford BSP Toolset"
+.SH NAME
+bspfront \- The Oxford BSP Toolset compilation driver for BSPlib
+
+.SH SYNOPSIS
+.B bspfront 
+.RI "[ " options " | " filenames " ].\|.\|."
+.br
+.B bspf77
+.RI "[ " options " | " filenames " ].\|.\|."
+.br
+.B bspcc
+.RI "[ " options " | " filenames " ].\|.\|."
+.br
+.B bspc++
+.RI "[ " options " | " filenames " ].\|.\|."
+.SH DESCRIPTION
+
+Programs written for the 
+.B bsplib(3) 
+parallel programming library should be compiled with the compilation
+driver bspfront. The compilation driver guides each input file through
+some of the possible phases of a compilation: extracting code from a
+literate program (see
+.B litToPgm(1) 
+and
+.B litToTex(1)
+), compilation, assembly, and linking.
+.PP
+For each input file, the phase
+to start with is determined by the file's suffix:
+
+.Sp
+.nf
+.ta \w'\fB.lc++\fPxx'u
+\&\fB.c\fP	C source; preprocess, compile, assemble
+\&\fB.f\fP	Fortran 77 source; compile, assemble
+\&\fB.cc\fP	C++ source; preprocess, compile, assemble
+\&\fB.c++\fP	C++ source; preprocess, compile, assemble
+\&\fB.lc\fP	Literate C source; unlit, preprocess, compile, assemble
+\&\fB.lf\fP	Literate  Fortran 77 source; unlit, compile, assemble
+\&\fB.lcc\fP	Literate  C++ source; unlit, preprocess, compile, assemble
+\&\fB.lc++\fP	Literate  C++ source; unlit, preprocess, compile, assemble
+.fi
+
+Files with other suffixes are passed to the linker.  Common cases
+include:
+
+.Sp
+.nf
+\&\fB.o\fP      Object file
+\&\fB.a\fP      Archive file
+.br
+.fi
+
+.Sp
+Linking is always the last stage unless you use the
+.BR \-c 
+option to avoid it (or unless compilation errors stop the whole
+process).  For the link stage, all
+.B .o
+files corresponding to source files,
+.B \-l
+libraries, unrecognized filenames (including named
+.B .o
+object files and
+.B .a
+archives)
+are passed to the linker in command-line order.
+
+.B bspcc
+is just an alias for 
+.B bspfront\c
+\&, whereas 
+.B bspc++
+and 
+.B bspf77
+have the same operational behaviour as
+.B bspfront -f77
+and 
+.B bspfront -c++
+respectively.
+
+.SH OPTIONS
+Options must be separate: `\|\c
+.B \-dr\c
+\&\|' is quite different from `\|\c
+.B \-d \-r
+\&\|'.
+Any option not recognised by 
+.B bspfront
+is passed straight through to the underlying compiler.  Here is a
+summary of all the options, grouped by type. Explanations can be found
+in the appropriate sections below:
+
+.hy 0
+.na
+.TP
+.B Overall Options
+\-v
+\-c
+.RI "\-o " file
+.RI "\-cflags " options
+.RI "\-f77flags " options
+.RI "\-c++flags " options
+.RI "\-overridecc " command
+.RI "\-overridef77 " command
+.RI "\-overridec++ " command
+.RI "\-overrideld " command
+\-keep
+\-showlog
+.TP
+.B Preprocessor Options
+.RI \-E
+.RI \-I dir
+.RI \-D macro [\|= defn \|]
+.RI \-U macro
+.TP
+.B Debugging Options
+\-g
+\-debug
+\-f\[no\]check-syncs
+.TP
+.B Profiling Options
+\-stat
+\-prof
+\-cgprof
+\-nof77munging
+\-f\[no\]throttle-procs
+.TP
+.B General Optimisation Options
+\-O
+\-O2
+\-O3
+.RI "\-flibrary-level " level
+.RI "\-fcombine-puts-buffer " number,[number,[number]]
+.RI "\-fcontention-resolve " level
+\-f\[no\]combine-puts
+.RI "\-fcombine-puts-buffer " number
+.RI "\-ffixed-bsmp-buffers " number
+.RI "\-finfinite-bsmp-buffers"
+.RI "\-bspbuffer " number
+.RI "\-bspfifo " number
+.TP 
+.B Shared Memory Optimisation Options
+.RI "\-bspbufferstalls " number
+.RI "\-bspnobuffers " number
+
+.TP 
+.B Network Of Workstations (NOW) Optimisation Options
+.RI "\-bspnobuffers " number
+.RI "\-bspslotsize " number
+.RI "\-bspnoslots " number
+.RI "\-bsproundtrip " number
+.RI "\-bspsendlatency " number
+
+.TP 
+.B Process Migration and Fault Tolerance Options
+\-f\[no\]processmigration
+.RI "\-fprocessmigration " number
+\-f\[no\]checkpointing
+.RI "\-fcheckpointing " number
+.TP
+.B Linker Options
+\-c++
+\-f77
+\-mpi
+\-udpip
+\-tcpip
+\-shmemsysv
+\-shmemwin32
+.RI "\-l" library
+.RI "\-ldflags " flags
+.RI "\-device " device
+.TP
+.B Directory Options
+.RI "\-L" directory
+.ad b
+.hy 1
+
+.SH OVERALL OPTIONS
+.TP
+.B \-v
+Print (on standard error output) the commands executed to run the
+stages of compilation.  Also print the version number of the compiler
+driver and the standard compilation options that are set for your
+platform.
+.TP
+.B \-c
+Suppress the loading phase of the compilation and force an object file
+to be produced even if only one program is compiled.
+.TP
+.BI "-o " file
+Place output in \c
+.I file\c
+\&.  This applies regardless to whatever
+sort of output bspfront is producing, whether it be an executable or
+an object file.
+.TP
+.BI "\-cflags " options
+Pass 
+.I options
+straight through to the underlying C compiler. This option is useful
+when an option in the underlying C compiler is required, but it
+clashes with one of
+.B bspfront\c
+\&'s options. For example,
+.I -v 
+turns on bspfront's verbose mode. If the underlying C compilers
+verbose mode is required (which also uses the flag
+.I -v\c
+\&) then use -cflags '-v'.
+.TP
+.BI "\-f77flags " options
+Pass 
+.I options
+straight through to the underlying Fortran 77 compiler
+.TP
+.BI "\-c++flags " options
+Pass 
+.I options
+straight through to the underlying C++ compiler
+.TP
+.BI "\-overridecc " command
+Use
+.I command
+as an alternative C compiler.
+.TP
+.BI "\-overridef77 " command
+Use
+.I command
+as an alternative Fortran 77 compiler.
+.TP
+.BI "\-overridec++ " command
+Use
+.I command
+as an alternative C++ compiler.
+.TP
+.BI "\-overrideld " command
+Use
+.I command
+as an alternative linker.
+.TP
+.B \-keep
+Any temporary files created by the compilation driver in
+.I TMPDIR
+are not removed at the end of compilation
+.TP
+.B \-showlog
+Display a list of users who have been using the compilation
+driver. This option is only valid if  bspfront has been installed to 
+log usage.
+.PP
+
+.SH PREPROCESSOR OPTIONS
+.TP
+.BI \-E
+Preprocess only the named C files and send the result to the standard
+output.  The output will contain preprocessing directives for use by
+the next pass of the compilation system.
+.TP
+.BI \-I dir
+Append directory \c
+.I dir\c
+\& to the list of directories searched for include files.
+.TP
+.BI \-D macro
+Define macro \c
+.I macro\c
+\& with the string `\|\c
+.B 1\c
+\&\|' as its definition.
+.TP
+.BI \-D macro = defn
+Define macro \c
+.I macro\c
+\& as \c
+.I defn\c
+\&.
+.TP
+.BI \-U macro
+Cause any definition of 
+.I macro
+to be undefined, as if by a #undef preprocessing directive. If the
+same name is specified for both -D and - U, 
+.I macro
+is not defined, regardless of the order of the options.
+.PP
+
+.SH DEBUGGING OPTIONS
+
+.TP
+.B \-g
+Turn on standard Unix debugging.
+.TP
+.B \-debug
+Turn on the runtime debugging information in the library (this will 
+probably be meaningless to people other than implementors).
+.TP 
+.B \-f\[no\]check-syncs
+Check that each superstep encountered during execution is delimited by a 
+.BR bsp_sync(3) 
+at the same textual position in the users code (default is \-fcheck-syncs).
+.PP
+
+.SH PROFILING OPTIONS
+.TP
+.B \-stat
+Report statistics on the performance of a BSP program, and the
+theoretical costs of the collective communications. The file
+.I STAT.bsp
+will be written to the current working directory.
+.TP
+.B \-prof
+Generate BSP profiling information suitable for the analysis program
+.B bspprof(1)\c
+\&. The file 
+.I PROF.bsp
+will be written to the current working directory.
+.TP
+.B \-cgprof
+Generate BSP call graph profiling information suitable for the
+analysis program
+.B bspcgprof(1)\c
+\&. The file
+.I PROF.bsp
+will  be written to the current working directory. This option must be
+used during compilation and linking.
+.TP
+.B \-nof77munging
+Turn off the inlining of filename and line numbers into Fortran 77
+code. The information is used by the profiler, and helps to give
+useful error messages when using the 
+.B "\-flibrary-level 0" 
+or 
+.B "\-flibrary-level 1"
+versions of the library.
+.TP
+.B \-f\[no\]throttle-procs
+When this flag is on, then the number of processes that can
+concurrently execute the local computation part of a superstep is
+limited to 1, or the number specified by the environment variable
+.B BSP_THROTTLE_PROCS\c
+\&.
+.PP
+
+.SH GENERAL OPTIMISATION OPTIONS
+.TP
+.B "\-O" "\-O2" or "\-O3"
+Turn on the appropriate optimisation packages in the underlying
+C, C++, or Fortran 77 compilers.
+.TP
+.BI "\-flibrary-level " level
+Request the level of sanity checking to be performed by the
+library. The default level is 0.
+.RS
+.IP 0 
+performs checks on registration, out of bound DRMA, and consistent
+arguments to collective communications. The communication primitives
+at this level of optimisation may not be optimal, but are guaranteed
+to be resource friendly (see
+.BI "\-flibrary-level " 1 
+below).
+.IP 1 
+is a resource friendly version of the library. This means that if more
+processes (including other users processes) are running on the machine
+than processors, then the performance of the library doesn't
+deteriorate.
+.IP 2 
+is an optimised version of the library that has been tuned in such a
+way that it assumes no other major processes are running on the
+parallel machine. When benchmarking, or collecting results, use this
+optimisation level.
+.RE
+.TP
+.BI \-f\[no\]combine-puts
+Where possible, combine multiple puts to the same processor into a single put.
+.TP
+.BI "\-fcombine-puts-buffer " "number[,max,min]"
+Each process has buffers of total size 2*\c
+.I number\c
+*(P-1) for combining puts; where P is the number of processes. If the
+option
+.I max
+is specified, then the total size of the combine buffers across all
+processors will be 
+.I max\c
+\&; and 
+.I min
+the threashold buffer size where the optimisation is turned off as 
+.I "max/P"
+is smaller than
+.I min\c
+\&.
+.TP
+.BI "\-fcontention-resolve " level
+Apply optimisations to automatically eliminate message contention
+within an algorithm. There are three different optimisation levels
+(default level is 1):
+.RS
+.IP 0 
+no contention elimination
+.IP 1 
+always apply contention elimination.
+.IP 2 
+only apply contention elimination to buffered
+transfers. i.e., don't use contention elimination for high-performance
+puts (\c
+.B bsp_hpput(3)\c
+) so that the put can occur asynchronously with computation
+.RE
+.TP
+.BI "\-ffixed-bsmp-buffers " number
+Use fixed sized system buffers for the Bulk Synchronous Message
+passing operations. On some systems (particularly the Cray T3D),
+having arbitrary sized buffers denoted by the 
+.B "-finfinite-bsmp-buffers"
+option incurs a large penalty in  barrier synchronisation latency.
+.TP
+.BI "\-finfinite-bsmp-buffers"
+Use BSMP buffers which dynamically change in size as described in the
+BSPlib proposal.
+.TP
+.BI "\-bspbuffer " number
+Sets the packet size for outgoing messages. If 
+.I number
+ends in a 'K', then the size is in kilobytes; otherwise the size is
+assumed to be bytes (see the results from the -prof option for optimal
+buffer sizes for particular codes). On some systems, this value is
+fixed by the implementation.
+.TP
+.BI "\-bspfifo " number
+In this implementation of BSPlib, all puts and gets are delayed until
+the end of the superstep. This option sets the initial size of an internal
+FIFO queue that holds all delayed communications. If more puts are
+issued during a superstep, then the FIFO is extended in 
+.I number
+sized increments. On some systems, a seperate FIFO is used to hold all
+the gets, and this can not be extended during runtime. This queue will
+only need to be increased if a runtime overflow is raised.
+.PP
+
+.SH SHARED MEMORY OPTIMISATION OPTIONS
+.TP
+.BI "\-bspnobuffers " number
+Each process has a number of incoming buffers associated with it. The
+BSPlib communication occurs in a message passing style through these
+shared memory buffers. The more buffers there are, then there is more
+chance that the sending process will be able to send a message to the
+destination prcocess. However, if too many buffers are allocated, then
+the receiving process may spend too long servicing buffers which are
+empty. This option sets the number of incoming buffers associated with
+each process.
+.TP
+.BI "\-bspbufferstalls " number
+The number of incoming buffers specified by the
+.I \-bspnobuffers 
+option are serviced in a round-robin fashion. After
+.I number
+stalls (i.e., nothing came in), then data is attempted to be sent out
+in a similar manner. i.e.,
+.I number
+attempts are made to send packets. 
+.PP
+
+.SH NETWORK OF WORKSTATIONS (NOW) OPTIMISATION OPTIONS
+.TP
+.BI "\-bspslotsize " varepsilon
+In BSPlib, the mechanism of pacing the transport layer is achieved
+by using a form of statistical time-division multiplexing that works
+as follows. The frame size (\c
+.I -bspbuffer\c
+\&) and the number of processors (\c
+.I bsp_nprocs()\c
+\&) involved in the communication are known. As the processors' clocks
+are not necessarily synchronised, it is not possible to allow the
+processors access in accordance with some permutation, a technique
+applied successfully in more tightly-coupled architectures.  Thus the
+processors choose a slot,
+.I q\c
+\&, uniformly at random in the interval 
+.I [0...Q-1]
+(where 
+.I Q
+is the number of processors communicating at the end of a particular
+superstep), and schedule their transmission for this slot. The choice
+of a random slot is important if the clocks are not synchronised as it
+ensures that the processors do not repeatedly choose a bad
+communication schedule.  Each processor waits for time 
+.I "q * varepsilon"
+microseconds after the start of the cycle, where
+.I varepsilon is a slot
+time, before passing another packet to the transport layer. The length
+of the slot, 
+.I varepsilon\c
+\&, is chosen based on the maximum time that the slot can occupy the
+physical medium, and takes into account collisions that might occur
+when good throughput is being achieved. The mechanism is designed to
+allow the medium to operate at the steady state that achieves a high
+throughput. Since the burstiness of communication has been smoothed by
+this slotting protocol, the erratic behaviour of the low-level
+protocol is avoided, and a high utilisation of the medium is ensured.
+
+.TP 
+.BI "\-bspnoslots " number
+This option specifies the number of time slots required for 
+.I bsp_nprocs()
+processors to simultaneiously send a message to another process. For a
+shared bus or repeater then 
+.I number
+should be equal to
+.I bsp_nprocs()\c
+\&. For a switch with full duplex links and a back plane capacity that
+is the sum of the capacities of each of the links, then 
+.I number
+should be set to one.
+
+.TP
+.BI "\-bsproundtrip " number
+.I number
+is the round trip delay time, in microseconds, of a message that
+contains no payload.
+
+.TP
+.BI "\-bspsendlatency " number
+In the steady state where a process emits a stream of empty packets
+into the network, then 
+.I number
+is the time, in microseconds, at which packets can be emitted. As it is
+usually faster to emit packets than receive them, then this time will
+probably equate to the upload rate of a packet, as a steady state can
+only be achieved when processes are sending and receiving packets at
+the same rate. The parameter should be used to throttle a fast sender
+so that it emits packets at a rate at which the receiver can safely 
+upload them.
+.PP
+
+.SH PROCESS MIGRATION AND FAULT TOLERANCE OPTIONS
+.TP
+.BI "\-fcheckpointing " number
+In the NOW implementation of the library, all processes checkpoint
+themselves every 
+.I number
+seconds. After the process has checkpointed itself, it continues to
+run on the same processor (see 
+.I -fprocessmigration\c
+\&). If the process is interupted, then the program can be restarted
+at the last checkpoint by passing the
+.I "\-restart" 
+option to
+.I bsprun(1)\c
+\&, when the program is re-run.
+
+.TP
+.B \-fnocheckpointing
+Turn off checkpointing. This is equivalent to 
+.I "\-fcheckpointing 0"\c
+\&.
+
+.TP
+.BI "\-fprocessmigration " number
+This option is similar to 
+.I -fcheckpointing\c
+\&. On entry to a 
+.I bsp_sync(3)
+if
+.I number
+seconds has elapsed since the last time process migration occured, then
+all the BSP processes determine if process migration is applicable. This is
+done by contacting the load daemon
+.I bspload(3) 
+to see if there are any processors with a load lower than any
+processor that has a bsp job running on it, minus one. If a less
+loaded process is found, all processes checkpoint themselves, stop,
+and then restart on the
+.I p
+least loaded processors.
+.PP
+
+.SH LINKER OPTIONS
+
+These options come into play when the compiler links object files into
+an executable output file.  They are meaningless if the compiler is
+not doing a link step.
+.TP
+.I object-file-name
+A file name that does not end in a special recognized suffix is
+considered to name an object file or library.  (Object files are
+distinguished from libraries by the linker according to the file
+contents.)  If GCC does a link step, these object files are used as input
+to the linker.
+
+.TP
+.RI \-device " device"
+Determine which communication device should be used for BSPlib
+programs. The default device is speficied by the command 
+.B "bsparch -device"\c
+\&.
+The
+.I device 
+option has to be a valid BSPlib device (see the help
+.B "bsparch -help"\c
+\&), and that device has to be installed.
+
+.TP
+.I -mpi
+Shorthand for the option 
+.RI \-device " MPASS_MPI"\c
+\&.
+
+.TP
+.I -udpip
+Shorthand for the option 
+.RI \-device " MPASS_UDPIP"\c
+\&.
+
+.TP
+.I -tcpip
+Shorthand for the option 
+.RI \-device " MPASS_TCPIP"\c
+\&.
+
+.TP
+.I -shmemsysv
+Shorthand for the option 
+.RI \-device " SHMEM_SYSV"\c
+\&.
+
+
+.TP
+.BI \-l library
+Use the library named \c
+.I library\c
+\& when linking.
+
+.Sp
+The linker searches a standard list of directories for the library,
+which is actually a file named `\|\c
+.B lib\c
+.I library\c
+\&.a\c
+\&\|'.  The linker
+then uses this file as if it had been specified precisely by name.
+
+.Sp
+The directories searched include several standard system directories
+plus any that you specify with `\|\c
+.B \-L\c
+\&\|'.
+
+.Sp
+Normally the files found this way are library files\(em\&archive files
+whose members are object files.  The linker handles an archive file by
+scanning through it for members which define symbols that have so far
+been referenced but not defined.  However, if the linker finds an
+ordinary object file rather than a library, the object file is linked
+in the usual fashion.  The only difference between using an `\|\c
+.B \-l\c
+\&\|' option and specifying a file
+name is that `\|\c
+.B \-l\c
+\&\|' surrounds
+.I library
+with `\|\c
+.B lib\c
+\&\|' and `\|\c
+.B .a\c
+\&\|' and searches several directories.
+.TP
+.B \-c++
+The C compiler is the default linker. This option changes the linker
+to the C++ compiler.
+.TP
+.B \-f77
+Use the Fortran 77 compiler as the linker.
+.BI "\-ldflags " flags
+Pass 
+.I flags
+straight through to the linker.
+.PP
+
+.SH DIRECTORY OPTIONS
+These options specify directories to search for header files, for
+libraries and for parts of the compiler:
+.TP
+.BI "\-I" "dir"
+Append directory \c
+.I dir\c
+\& to the list of directories searched for include files.
+.TP
+.BI "\-L" "dir"
+Append directory \c
+.I dir\c
+\& to the list of directories searched for libraries.
+.PP
+
+.SH FILES
+.nf
+.ta \w'\fIPREFIX\fR/lib/\fImach\fR/libbspcore\(**.axx'u
+file.c	C source file
+file.h	C header (preprocessor) file
+file.f	Fortran 77 file
+file.cc	C++ source file
+file.lc++	Literate C++ source file
+file.lc	Literate C source file
+file.lh	Literate C header (preprocessor) file
+file.lf	Literate Fortran 77 file
+file.lcc	Literate C++ source file
+file.lc++	Literate C++ source file
+file.s	assembly language file
+file.o	object file
+a.out	link edited output
+\fITMPDIR\fR/bspfront\(**	temporary files
+\fITMPDIR\fR/bspfront_\(**_preload.c	start-up routine
+\fIPREFIX\fR/lib/\fImach\fR/libbspcore\(**.a	BSPlib subroutine library
+\fIPREFIX\fR/include	BSPlib include files
+
+.Sp
+.fi
+.I PREFIX
+is the installation prefix set when configuring BSPlib.
+.br
+.I TMPDIR
+comes from the environment variable
+.B TMPDIR
+(default
+.B /usr/tmp
+if available, else
+.B /tmp\c
+\&).
+
+.SH "SEE ALSO"
+bsplib(3), bspprof(1), bsparch(1)
+
+.I ``BSPlib: The BSP Programming Library''
+Jonathan M. D. Hill, Bill McColl, Dan C. Stefanescu, Mark W. Goudreau,
+Kevin Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and Rob
+Bisseling. Parallel Computing, to appear 1998. See
+.I http://www.bsp-worldwide.org
+for more details.
+
+
+The Oxford BSP toolset web pages can be found  at:
+.br
+.I http://www.bsp-worldwide.org/implmnts/oxtool/
+
+.SH BUGS
+Problems and bug reports should be mailed to 
+.I bsplib-bugs@comlab.ox.ac.uk
+
+.SH COPYING
+Copyright 1995,1996,1997,1998 University of Oxford
+.PP
+Permission to use, copy, modify, and distribute this software,  
+and to incorporate it, in whole or in part, into other software,
+is hereby granted without fee, provided that:                    
+.IP i
+the above copyright notice and this permission notice appear in all
+copies of the source code, and the above copyright notice appear in
+clearly visible form on all supporting documentation   and
+distribution media;
+.IP ii
+ modified versions of this software be accompanied by a complete
+change history describing author, date, and modifications made; 
+
+.IP iii
+ and any redistribution of the software, in original or modified
+form, be without fee and subject to these same conditions.
+.LP
+
+.SH AUTHORS
+Jonathan.Hill@comlab.ox.ac.uk
+.PP
+.B http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+

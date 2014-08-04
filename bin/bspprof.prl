@@ -1,0 +1,532 @@
+#! @PERL@
+$bindir        = "@bindir@";
+$includedir    = "@includedir@";
+$libdir        = "@libdir@";
+$mandir        = "@mandir@";
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+push(@INC,$includedir);
+push(@INC,$bindir);
+require "bsputil";
+require "bspprof_strata.prl";
+
+select(STDERR); $| = 1; select(STDOUT); # no STDERR buffering, please.
+($Pgm = $0) =~ s|.*/||;
+$Version        = "1.3, 25th Nov 1997";
+$bug_reports_to = 'bsplib-bugs@comlab.ox.ac.uk';
+
+$Status     = 0;
+$Colour     = 0;
+$barignore  = 0.01;
+$ShortUsage = "\n$Pgm usage: for basic information, try the `-help' option\n";
+
+
+
+$Verbose   = 0;
+$arch      = "";
+$device    = "";
+$libtype   = "";
+$bsp_g     = 0.0;
+$bsp_l     = 0;
+$bsp_s     = 0.0;
+$bsp_real_s= 0.0;
+$bsp_nhalf = 0;
+
+$cmpoints             = 28;
+$a4width              = 842;      # A4     Rotated!!
+$a4height             = 596;      # A4     Rotated!!
+
+$letterwidth          = 782;      # Letter Rotated!!
+$letterheight         = 604;      # Letter Rotated!!
+
+$papertype            = "a4";
+$paperwidth           = $a4width;
+$paperheight          = $a4height;
+
+$comm_col             = 0.5;
+$wait_col             = 0.9;
+$cpu_col              = 0.0;
+$maxlabels_per_column = 16;
+$proclabel_ind        = $cmpoints;
+$ssteplabel_ind       = 1*$cmpoints;
+$strata_ind           = int(1*$cmpoints);
+$key_ind              = 0.5*$cmpoints;
+$strata_key_ind       = 6*$cmpoints;
+$graphwidth           = 0;
+$graphheight          = 0;
+
+$title       = "";
+$outfile     = "";
+$infile      = "PROF.bsp";
+$compileopts = "";
+$profdate    = "";
+$etime_str   = "";
+$etime       = 0.0;
+$machname    = "";
+$sstep_list  = ();
+%sstepnoEnv  = ();
+%cpuEnv      = ();
+%sstepTable_compat= ();
+%sstepTable_line  = ();
+%sstepTable_file  = ();
+$sstepTable_uniq  = 0;
+%sstepCpuEnv = ();
+%sstepCommEnv= ();
+%sstepWaitEnv= ();
+$max_sstepno = 0;
+$max_time    = 315360000.0;
+$min_time    = 0.0;
+$nprocs      = 1;
+$hrel_gl     = 0;
+$ceiling_g   = 0;
+$GraphType   = "Comm";
+$costModelLevel = 1;
+$StrataBytes    = 1;
+$DrawStrata     = 1;
+
+@strata_list     = ();
+@strata_hrelcost = ();
+%ignore_files    = (); #("bsp_profile.c",1);
+$include_file    = "bspprof_strata.prl";
+$zooming         = 0;
+
+
+  arg: while ($_ = $ARGV[0]) {
+  shift(@ARGV);
+  #--------HELP------------------------------------------------
+  /^-(help|man)$/ && do {&FormatManual("bspprof.1"); exit(0);};
+
+  /^-v$/    && do {$Verbose = 1; next arg;};
+
+  #--------GRAPH TYPE------------------------------------------
+  /^-comm$/      && do { $GraphType = "Comm"; 
+                         $include_file = "bspprof_strata.prl";
+                         next arg;};
+
+  /^-theory|-predict$/    && do { $GraphType = "Theory"; 
+                         $include_file= "bspprof_strata.prl";
+                         next arg;};
+
+  /^-ggraph$/    && do { $GraphType = "Ggraph"; 
+                         $include_file = "bspprof_strata.prl";
+                         next arg;};
+
+
+  #--------G GRAPH OPTIONS --------------------------------------
+
+  /^-hrelgl$/    && do { $hrel_gl = 1; next arg;};
+
+  /^-ceilingg$/  && do { $i = shift(@ARGV); 
+                         if ($i=~ /^(\d+)$/) {
+                           $ceiling_g = int($1);
+                         } else {
+                           print STDERR "$Pgm error: -ceilingg <integer>";
+                           $Status++;
+                         }
+                         next arg;};
+
+
+
+
+  #--------BAR GRAPH OPTIONS (now know as a time graph)---------
+
+  /^-timeignore$/ 
+                 && do { $i = shift(@ARGV); 
+                         if ($i=~ /^(\d+).(\d+)/) {
+                           $barignore = "$1.$2"/1.0;
+                         } else {
+                           print STDERR "$Pgm error: -barignore <float>";
+                           $Status++;
+                         }
+                         next arg;};
+
+
+  #--------STRATA GRAPH OPTIONS (now know as a comm graph)------
+  /^-bytes$/    && do { $StrataBytes = 1; next arg;};
+
+  /^-packets$/  && do { $StrataBytes = 0; next arg;};
+
+  /^-zoom$/     && do { $zooming = 1;
+                        $i = shift(@ARGV); 
+                        if ($i=~ /^(\d*\.?\d+),(\d*\.?\d+)$/) {
+                           $min_time = &getNumber($1);
+                           $max_time = &getNumber($2);
+                           if ($min_time > $max_time) {
+                             $tmp      = $min_time;
+                             $min_time = $max_time;
+                             $max_time = $tmp;
+                           }
+                           
+                        } else {
+                          print STDERR "$Pgm error: -zoom <number>,<number>";
+                          $Status++;
+                        }
+                        next arg;};
+
+  #--------THEORY GRAPH OPTIONS--------------------------------
+  /^-slg$/     && do { $i = shift(@ARGV); 
+                       if ($i=~ /^(\d*\.?\d+),(\d*\.?\d+),(\d*\.?\d+),(\d*\.?\d+)$/) {
+                           $bsp_s    = &getNumber($1);
+                           $bsp_l    = &getNumber($2);
+                           $bsp_g    = &getNumber($3);
+                           $bsp_nhalf= &getNumber($4);
+                       } elsif ($i=~ /^(\d*\.?\d+),(\d*\.?\d+),(\d*\.?\d+)$/) {
+                           $bsp_s    = &getNumber($1);
+                           $bsp_l    = &getNumber($2);
+                           $bsp_g    = &getNumber($3);
+                           $bsp_nhalf= 10;
+                       } else {
+                          print STDERR "$Pgm error: -slg float_s,",
+                                       "integer_l,float_g,integer_nhalf";
+                          $Status++;
+                       }
+                        next arg;};
+
+  /^-arch$/          && do {$arch  = shift(@ARGV);next arg;};
+  /^-device$/        && do {$device= shift(@ARGV);next arg;};
+  /^-colou?r$/       && do { $Colour = 1; next arg;};
+  /^-nhalfmodel$/    && do { $costModelLevel = 1;next arg;};
+ 
+  /^-hgmodel/        && do { $costModelLevel = 0;next arg;};
+
+  /^-bisselingmodel/ && do { $costModelLevel = 2;next arg;};
+
+  #--------GENERIC OPTIONS-------------------------------------
+  /^-title$/  && do { $title = shift(@ARGV); next arg;};
+
+  /^-ignore$/ && do { $ignore_files{shift(@ARGV)}=1; next arg;};
+
+  /^-outline$/ && do {$DrawStrata =0; next arg;};
+
+  /^-letter$/  && do {$papertype   = "letter";
+                      $paperwidth  = $letterwidth;
+                      $paperheight = $letterheight;
+                      next arg;};
+  
+  #--------OUTPUT/INPUT FILES----------------------------------
+  /\.ps$/   && do  {$outfile = $_; next arg;}; 
+  /\.bsp$/  && do  {$infile  = $_; next arg;};
+  print STDERR "$Pgm: unrecognised option \"",$_,"\"\n";
+  $Status++;
+  }
+  if ($Status>0) {
+    print STDERR $ShortUsage;
+    exit(1);
+  }
+  if ($outfile eq "") {
+    $infile  =~ /\.bsp$/;
+    $outfile = $` . ".ps";
+  }
+
+  require $include_file;
+  if ($GraphType eq "Theory") {
+    require "bspprof_theory.prl";
+  } elsif ($GraphType eq "Ggraph") {
+    require "bspprof_theory.prl";
+    require "bspprof_ggraph.prl";
+  }
+  print STDERR "$Pgm (v$Version):\tReading from \"$infile\",\n",
+               "\t\t\t\tPostScript output to \"$outfile\"\n\n";  
+  &readProfileData();
+  if (!open(PSFILE,"> $outfile")) {
+    print STDERR "Pgm: unable to open \"$outfile\" for writing\n";
+    exit(1);
+  }
+
+  &psPrologue();
+  $graphwidth     = $paperwidth  - $cmpoints;
+  $graphheight    = int($paperheight - (2.7*$cmpoints));
+  $graphheight   -= 0.75*$cmpoints if (length($title)>0);
+  &strataPrologue();
+  if ($GraphType eq "Comm") {
+    &createStrataGraph();
+  } elsif ($GraphType eq "Theory") {
+    &createTheoryGraph();
+  } else {
+    &createGGraph();
+  }
+  close(PSFILE);
+  exit(0);
+
+
+
+
+
+
+
+
+
+
+
+sub readProfileData {
+  local($sstepid,$sstepno,$cpu,$cpucomm,$wait,$comm,$i,$j,$file);
+  local($time_start,$time_end,$rest,$timenow);
+  local($bytes,$comm,$in,$out);
+  local($h_rel,$h_cost,$h_arity,@xs,@ys);
+
+  if (!open(PROFILE,$infile)) {
+    print STDERR "$Pgm: failed to open profile data in $infile\n";
+    exit(1);
+  }
+  $timenow = time;
+  while (<PROFILE>) {
+    if (/^[Cc]/) {
+      if (/^C\s*(\d+)\s+(\d+)\s+(\S+)\s+(\d+).(\d+)\s+(\d+).(\d+)/o) {
+        # Old style profile logs
+        next if ($ignore_files{$3});
+        if ($sstepTable_compat{"$1 $2 $3"}) {
+          $sstepid = $sstepTable_compat{"$1 $2 $3"};
+        } else {
+          $sstepTable_compat{"$1 $2 $3"} = $sstepTable_uniq;
+          $sstepid = $sstepTable_uniq++;
+        }
+        $sstepTable_line{$sstepid} = $2;
+        $sstepTable_file{$sstepid} = $3;
+        $time_start = "$4.$5"/1.0;
+        $time_end   = "$6.$7"/1.0;
+      } elsif (/^c\s+(\d+)\s+(\d+).(\d+)\s+(\d+).(\d+)/o) {
+        next if ($ignore_files{$sstepTable_file{$1}});
+
+        $sstepid    = $1;
+        $time_start = "$2.$3"/1.0;
+        $time_end   = "$4.$5"/1.0;
+      }
+      chop($rest = $');
+      ($comm,$bytes) = split(/\s+\@\@\s+/,$rest);
+      if ($StrataBytes) {
+        push(@strata_list,"$sstepid \@\@ $time_start ".
+                         "\@\@ $time_end \@\@ $bytes");
+      } else {
+        push(@strata_list,"$sstepid \@\@ $time_start ".
+                          "\@\@ $time_end \@\@ $comm");
+      }
+
+      # Save away the cost of the super-step....
+      if (($GraphType eq "Theory") || ($GraphType eq "Ggraph")) {
+        @xs = split(/\s+/,$bytes);
+        @ys = split(/\s+/,$comm);
+        $h_rel   = 0;
+        $h_arity = 0;
+        foreach $i (@xs) {
+           $j = pop(@ys);
+          if (($i > $h_rel) && ($j>0)) {
+            $h_rel   = $i;
+            $h_arity = $j;
+          } 
+        }
+        if ($h_rel<= 0) {
+          $h_cost = 0;
+        } else {
+          # Convert from bytes to words
+          $h_rel = $h_rel / 4;
+          if      ($costModelLevel==0) {
+            # cost h-rel == h*g
+            $h_cost=$h_rel * $bsp_g;
+          } elsif ($costModelLevel==1) {
+            # cost h-rel with Q messages into a process is approx..
+            # l + hg( N1/2     )
+            #       ( ----  + 1)
+            #       ( (h/Q)    )
+            $h_cost=$h_rel * (((($bsp_nhalf*$h_arity)/($h_rel))+1)*$bsp_g);
+          } elsif ($costModelLevel==2) {
+            # cost-rel with Q messages into a process is approx..
+            # l + N1/2g + hg
+            $h_cost = $h_rel * $bsp_g;
+            $bsp_l  = $bsp_l + ($bsp_nhalf*$bsp_g);
+          }
+          
+        }
+        push(@strata_hrelcost,
+             "$time_start \@\@ $time_end \@\@ $h_cost \@\@ $h_rel");
+      }
+    } elsif      (/^s\s+(\d+)\s+(\d+)\s+/) {
+        $sstepTable_line{$1} = $2;
+        $sstepTable_file{$1} = $';      
+    } elsif      (/^D\s*/) {
+      chop($profdate = $');
+
+    } elsif (/^P\s*/) {
+      $nprocs = int($');
+      if (($GraphType eq "Theory") || ($GraphType eq "Ggraph")) {
+        &setBSPmachineParams($nprocs);
+      }
+
+    } elsif (/^F\s*/) {
+      chop($compileopts = $');
+      $compileopts =~ /.{35,35}/ && ($compileopts = $& . "...");
+
+    } elsif (/^N\s*/) {
+      chop($arch = $') if ($arch eq "");
+      $machname = &backtick("$bindir/bsparch -convertname $arch");
+      if ($machname eq "") {
+         $machname = &backtick("bsparch -convertname $arch");
+      }
+
+    } elsif (/^X\s*/) {
+      chop($device = $') if ($device eq "");
+
+    } elsif (/^E\s*/) {
+      chop($etime_str = $');
+      $etime = $etime_str / 1.0;
+      $etime_str = sprintf("%.3f",$etime);
+      $max_time = $etime if !$zooming;
+    }      
+  }
+  close(PROFILE);
+  printf STDERR "$Pgm: read %d supersteps in %.2f secs\n",
+               $#strata_hrelcost,time-$timenow  if $Verbose;
+
+#  ($max_sstepno%2!=0) && ($max_sstepno++);
+}
+
+
+
+
+
+
+
+sub psPrologue {
+  local($iscolour);
+  
+  if ($Colour) {
+    $iscolour = "true";
+  } else {
+    $iscolour = "false";
+  }
+
+  print PSFILE <<"_END_PS_PROLOGUE_";
+%!PS-Adobe-2.0
+%%Creator:      $Pgm $Version Copyright 1995,1996,1997,1998 Oxford University
+%%Title:        Oxford BSP Toolset profiler
+%%CreationDate: $profdate
+%%Pages: 1
+%%PageOrder: Ascend
+%%Orientation: Landscape
+%%BoundingBox: 0 0 $paperheight $paperwidth 
+%%DocumentPaperSizes: $papertype
+%%EndComments
+%%$Pgm: Written by Jonathan Hill (Jonathan.Hill\@comlab.ox.ac.uk)
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Global Variables
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+/title        ($title)   def
+/pagewidth    $paperwidth    def
+/pageheight   $paperheight   def
+/cm           {28 mul}    def
+/profdate     ($profdate) def
+/etime        ($etime_str seconds elapsed on a $machname) def
+/proftag      (Oxford BSP Toolset [flags $compileopts]) def
+/profcolour   $iscolour   def
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% Draw the border
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+/barDrawBorder
+{
+	gsave
+	newpath
+	0.5 cm 0.5 cm moveto
+	pagewidth 1 cm sub 0 rlineto
+	0 pageheight 1 cm sub rlineto
+        pagewidth neg 1 cm add 0 rlineto         
+	closepath
+	stroke
+        0.5 cm pageheight 1.2 cm sub moveto
+        pagewidth 1 cm sub 0 rlineto
+        stroke
+        /Helvetica findfont 10 scalefont setfont
+        $zooming 0 eq
+        {
+          1.0 cm pageheight 1.0 cm sub moveto
+          proftag show
+        }
+        {
+          1.0 cm pageheight 1.0 cm sub 8 50 9 2 proftag zoomIcon
+        } ifelse
+        1.0 cm pageheight 1.0 cm sub moveto
+        etime stringwidth pop
+        pagewidth 1 cm sub exch sub 2 div
+        0 rmoveto
+        etime show
+
+        pagewidth 1.0 cm sub pageheight 1.0 cm sub moveto
+        profdate stringwidth pop
+        neg 0 rmoveto
+        profdate show
+        title stringwidth pop
+        0 gt
+        {
+         0.5 cm pageheight 1.95 cm sub moveto 
+         pagewidth 1 cm sub 0 rlineto
+         stroke
+         0.5 cm pageheight 1.75 cm sub moveto
+         /Helvetica-BoldOblique findfont 15 scalefont setfont
+         title stringwidth pop
+         pagewidth 1 cm sub exch sub 2 div
+         0 rmoveto
+         title show
+        } if
+	grestore
+} def
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% zoomIcon
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+/zoomIcon {
+  7 dict begin
+  /text     exch def
+  /yoffset  exch def
+  /xfoffset exch def
+  /xoffset  exch def
+  /radius   exch def
+  /y        exch def
+  /x        exch def
+	
+	gsave 
+        newpath x y moveto
+	text show stroke
+	x xoffset add y yoffset add radius 0 360 arc 
+        x xoffset add y yoffset add radius 0 315 arc 
+	radius 2 add dup neg rlineto 
+	6 setlinewidth stroke
+	newpath x xoffset add y yoffset add radius 0 360 arc closepath
+	gsave gsave x xoffset add y yoffset add radius 0 360 arc 
+        1.0 setgray fill grestore clip
+	0.0 setgray
+	/Helvetica findfont 13 scalefont setfont
+	x xfoffset sub y  moveto
+	text show grestore
+	grestore
+  end
+} def
+
+_END_PS_PROLOGUE_
+}
+

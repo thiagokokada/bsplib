@@ -1,0 +1,55 @@
+.TH "bsp_time" 3 "1.4 25/9/98" "Oxford BSP Toolset" "BSPlib FUNCTIONS"
+.SH NAME
+bsp_time \- high-precision real-time clock.
+
+
+.SH C SYNOPSIS
+.nf
+.B #include \&"bsp.h\&"
+.PP
+.B double bsp_time();
+.fi
+.SH FORTRAN SYNOPSIS 
+.nf
+.B INCLUDE 'fbsp.h'
+.PP
+.B "DOUBLE PRECISION FUNCTION bsptime()
+.fi
+
+.SH DESCRIPTION
+The function 
+.B bsp_time
+provides access to a high-precision clock. The accuracy of the timer
+is implementation specific. The function is a local operation of each
+process, and can be issued at any point after
+.B bsp_begin\c
+\&. The result of the timer is the time in seconds since
+.B bsp_begin\c
+\&. The semantics of 
+.B bsp_time 
+is as though there are
+.B bsp_nprocs
+timers, one per process.  BSPlib does 
+.I not impose any synchronisation 
+.I requirements between the 
+.I timers on different processes.
+
+.SH "SEE ALSO"
+bsplib(3)
+
+.I ``BSPlib: The BSP Programming Library''
+Jonathan M. D. Hill, Bill McColl, Dan C. Stefanescu, Mark W. Goudreau,
+Kevin Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and Rob
+Bisseling. Parallel Computing, to appear 1998. See
+.I http://www.bsp-worldwide.org
+for more details.
+
+.SH BUGS
+Problems and bug reports should be mailed to 
+.I bsplib-bugs@comlab.ox.ac.uk
+
+.SH AUTHORS
+The Oxford BSP Toolset implementation of BSPlib was written by
+Jonathan.Hill@comlab.ox.ac.uk
+.br
+.B http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html

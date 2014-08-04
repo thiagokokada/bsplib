@@ -1,0 +1,132 @@
+
+
+
+bsp_hpmove(3)           BSPlib FUNCTIONS            bsp_hpmove(3)
+
+
+
+NAME
+     bsp_abort - stop a BSP computation
+
+
+C SYNOPSIS
+     #include "bsp.h"
+
+     void bsp_abort(char *_f_o_r_m_a_t,...);
+
+FORTRAN SYNOPSIS
+     SUBROUTINE bspabort(_e_r_r__s_t_r_i_n_g)
+     CHARACTER(*), intent(IN)::_e_r_r__s_t_r_i_n_g
+
+
+DESCRIPTION
+     The function bsp_abort can be used to print an error message
+     followed by a halt of the entire bsplib(3) program. The rou-
+     tine is designed not to require a barrier synchronisation of
+     all  processes.  A  single  process  in a potentially unique
+     thread of control can therefore halt  the  entire  bsplib(3)
+     program.
+
+     In the C version of the function, _f_o_r_m_a_t is a C-style format
+     string  as used by printf(3). Any other arguments are inter-
+     preted in the same way as the variable number  of  arguments
+     to printf(3).
+
+     _e_r_r__s_t_r_i_n_g is single error string that is printed  when  the
+     Fortran  routine is executed. All computation ceases after a
+     call to bsp_abort.
+
+
+
+
+SEE ALSO
+     bsplib(3)
+
+     ``_B_S_P_l_i_b: _T_h_e _B_S_P _P_r_o_g_r_a_m_m_i_n_g _L_i_b_r_a_r_y'' Jonathan M. D. Hill,
+     Bill  McColl,  Dan  C.  Stefanescu,  Mark W. Goudreau, Kevin
+     Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and
+     Rob  Bisseling.  Parallel  Computing,  to  appear  1998. See
+     _h_t_t_p://_w_w_w._b_s_p-_w_o_r_l_d_w_i_d_e._o_r_g for more details.
+
+
+NOTES
+     i    If more than one process calls bsp_abort  in  the  same
+          superstep,  then  either  one,  all, or a subset of the
+          processes that called bsp_abort may print their  format
+          string  to the terminal before stopping the BSPlib com-
+          putation.
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    1
+
+
+
+
+
+
+bsp_hpmove(3)           BSPlib FUNCTIONS            bsp_hpmove(3)
+
+
+
+BUGS
+     Problems  and  bug  reports  should  be  mailed  to  _b_s_p_l_i_b-
+     _b_u_g_s@_c_o_m_l_a_b._o_x._a_c._u_k
+
+
+AUTHORS
+     The Oxford BSP Toolset implementation of BSPlib was  written
+     by Jonathan.Hill@comlab.ox.ac.uk
+     http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    2
+
+
+

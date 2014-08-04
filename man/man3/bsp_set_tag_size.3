@@ -1,0 +1,90 @@
+.TH "bsp_set_tagsize" 3 "1.4 25/9/98" "Oxford BSP Toolset" "BSPlib FUNCTIONS"
+.SH NAME
+bsp_set_tagsize \- tag size of a BSMP packet.
+
+.SH C SYNOPSIS
+.nf
+.B #include \&"bsp.h\&"
+.PP
+.BI "void bsp_set_tagsize(int *" tag_bytes ");"
+.fi
+.SH FORTRAN SYNOPSIS 
+.nf
+.BI "SUBROUTINE  bspsettagsize(tag_bytes)
+.BI "  INTEGER, intent(INOUT) :: " tag_bytes
+.fi
+
+.SH DESCRIPTION
+
+Allowing the user to set the tag size enables the use of tags that are
+appropriate for the communication requirements of each superstep.
+This should be particularly useful in the development of subroutines
+either in user programs or in libraries.
+
+The procedure must be called collectively by all processes. A
+change in tag size takes effect in the following superstep; it
+then becomes 
+.I valid\c
+\&.
+
+The value of 
+.I tag_bytes
+on entry to the procedure, specifies the size of the fixed-length
+portion of every message in the current and succeeding supersteps; the
+default tag size is zero. On return from the procedure,
+.I tag_bytes
+is changed to reflect the previous value of the tag size.
+
+.SH "SEE ALSO"
+bsmp(3) ,bsp_send(3), bsp_get_tag(3), bsp_qsize(3),
+bsp_move(3), bsp_hpmove(3)
+
+.I ``BSPlib: The BSP Programming Library''
+Jonathan M. D. Hill, Bill McColl, Dan C. Stefanescu, Mark W. Goudreau,
+Kevin Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and Rob
+Bisseling. Parallel Computing, to appear 1998. See
+.I http://www.bsp-worldwide.org
+for more details.
+
+.SH NOTES
+
+.IP i
+The tag size of outgoing messages is prescribed by the tag size that
+is valid in the current superstep.
+
+.IP ii
+The tag size of messages in the system queue is prescribed by the tag
+size that was valid in the previous superstep.
+
+.IP iii
+.B bsp_set_tagsize(3)
+must be called by 
+.I all 
+processes with the same argument in the same superstep.  In this
+respect, it is similar to 
+.B bsp_push_reg(3)\c
+\&.
+
+.IP iv
+.B bsp_set_tagsize(3)
+takes effect in the next superstep.
+
+
+.IP v
+Given a sequence of
+.B bsp_set_tagsize(3)
+within the same superstep, then the value of the last of these will be
+used as the tag size for the next superstep.
+
+.IP vi
+The default tag size is 0.
+
+.SH BUGS
+Problems and bug reports should be mailed to 
+.I bsplib-bugs@comlab.ox.ac.uk
+
+.SH AUTHORS
+The Oxford BSP Toolset implementation of BSPlib was written by
+Jonathan.Hill@comlab.ox.ac.uk
+.br
+.B http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html

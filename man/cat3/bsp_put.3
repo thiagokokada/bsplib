@@ -1,0 +1,462 @@
+
+
+
+bsp_put(3)              BSPlib FUNCTIONS               bsp_put(3)
+
+
+
+NAME
+     bsp_put, bsp_hpput - deposit data into  a  remote  processes
+     memory
+
+
+C SYNOPSIS
+     #include "bsp.h"
+
+     void bsp_put(int _p_i_d,const void *_s_r_c,void *_d_s_t,int _o_f_f_s_e_t,int _n_b_y_t_e_s);
+
+     void bsp_hpput(int _p_i_d,const void *_s_r_c,void *_d_s_t,int _o_f_f_s_e_t,int _n_b_y_t_e_s);
+
+FORTRAN SYNOPSIS
+     SUBROUTINE  bspput(_p_i_d,_s_r_c,_d_s_t,_o_f_f_s_e_t,_n_b_y_t_e_s)
+       INTEGER, intent(IN)  :: _p_i_d,_o_f_f_s_e_t,_n_b_y_t_e_s
+       <TYPE>,  intent(IN)  :: _s_r_c
+       <TYPE>,  intent(OUT) :: _d_s_t
+
+     SUBROUTINE  bsphpput(_p_i_d,_s_r_c,_d_s_t,_o_f_f_s_e_t,_n_b_y_t_e_s)
+       INTEGER, intent(IN)  :: _p_i_d,_o_f_f_s_e_t,_n_b_y_t_e_s
+       <TYPE>,  intent(IN)  :: _s_r_c
+       <TYPE>,  intent(OUT) :: _d_s_t
+
+DESCRIPTION
+     The aim of bsp_put(3) and  bsp_hpput(3)  is  to  provide  an
+     operation  akin  memcpy(3C) available in the Unix <_s_t_r_i_n_g._h>
+     library.  Both operations copy a specified number of  bytes,
+     from  a byte addressed data structure in the local memory of
+     one process into contiguous memory locations  in  the  local
+     memory of another process. The distinguishing factor between
+     these operations is provided by the buffering choice.
+
+     The semantics _b_u_f_f_e_r_e_d _o_n _s_o_u_r_c_e,  _b_u_f_f_e_r_e_d  _o_n  _d_e_s_t_i_n_a_t_i_o_n
+     (see  drma(3))  is used for bsp_put(3) communications. While
+     the semantics is clean and safety  is  maximised,  puts  may
+     unduly  tax  the memory resources of a system. Consequently,
+     bsplib(3) also provides a  _h_i_g_h  _p_e_r_f_o_r_m_a_n_c_e  _p_u_t  operation
+     bsp_hpput(3)  whose  semantics  is  {_u_n_b_u_f_f_e_r_e_d  _o_n  _s_o_u_r_c_e,
+     _u_n_b_u_f_f_e_r_e_d _o_n  _d_e_s_t_i_n_a_t_i_o_n  .  The  use  of  this  operation
+     requires  care  as  correct data delivery is only guaranteed
+     if: (1) no communications alter the source area; (2) no sub-
+     sequent  local  computations  alter  the source area; (3) no
+     other communications alter the destination area; and (4)  no
+     computation  on  the  remote  process alters the destination
+     area during the entire superstep. The main advantage of this
+     operation  is  its economical use of memory. It is therefore
+     particularly  useful  for  applications   which   repeatedly
+     transfer large data sets.
+
+
+EXAMPLES
+     1)   The  _r_e_v_e_r_s_e  function  shown  below   highlights   the
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    1
+
+
+
+
+
+
+bsp_put(3)              BSPlib FUNCTIONS               bsp_put(3)
+
+
+
+          interaction  between  registration  and  put communica-
+          tions. This example defines a simple collective commun-
+          ication  operation, in which all processes have to call
+          the function within the same superstep. The  result  of
+          the  function  on  process  _i  will be the value of the
+          parameter _x from process _b_s_p__n_p_r_o_c_s()-_i-_1.
+
+          int reverse(int x) {
+            bsp_push_reg(&x,sizeof(int));
+            bsp_sync();
+
+            bsp_put(bsp_nprocs()-bsp_pid()-1,&x,&x,0,sizeof(int));
+            bsp_sync();
+            bsp_pop_reg(&x);
+            return x;
+          }
+
+          The function would be defined in Fortran as:
+
+                  INTEGER FUNCTION reverse(x)
+                    INCLUDE 'fbsp.h'
+                    INTEGER x
+
+                    CALL bsppushreg(x,BSPINT)
+                    CALL bspsync()
+
+                    CALL bspput(bspnprocs()-bsppid()-1,x,x,0,BSPINT)
+                    CALL bspsync()
+                    CALL bsppopreg(x)
+                    reverse=x
+                  END
+
+          By the end of the first superstep,  identified  by  the
+          first   bsp_sync(3),   all   the  processes  will  have
+          registered the  parameter  _x  as  being  available  for
+          remote access by any subsequent drma(3) operation. Dur-
+          ing the second superstep, each  process  transfers  its
+          local copy of the variable _x into a remote copy on pro-
+          cess _b_s_p__n_p_r_o_c_s()-_b_s_p__p_i_d()-_1 . Although communications
+          occur  to  and  from  the same variable within the same
+          superstep, the algorithm does not suffer from  problems
+          of  concurrent  assignment  because  of the buffered on
+          source,   buffered   on   destination   semantics    of
+          bsp_put(3).  This  buffering ensures conflict-free com-
+          munication between the outgoing communication  from  _x,
+          and  any incoming transfers from remote processes.  The
+          popregister at the end of the function  reinstates  the
+          registration  properties  that  were active on entry to
+          the function _a_t _t_h_e _n_e_x_t bsp_sync(3) _e_n_c_o_u_n_t_e_r_e_d _d_u_r_i_n_g
+          _e_x_e_c_u_t_i_o_n.
+
+          As can be seen from the Fortran code  above,  bsplib(3)
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    2
+
+
+
+
+
+
+bsp_put(3)              BSPlib FUNCTIONS               bsp_put(3)
+
+
+
+          defines   a  collection  of  constant  parameters  that
+          specify the size, _i_n  _b_y_t_e_s,  of  the  various  Fortran
+          data-types.   _B_S_P_W_O_R_D,   _B_S_P_I_N_T,  _B_S_P_L_O_G_I_C_A_L,  _B_S_P_R_E_A_L,
+          _B_S_P_D_O_U_B_L_E, and _B_S_P_C_O_M_P_L_E_X can be used by including  the
+          file _f_b_s_p._h within a compilation unit. The relationship
+          between the sizes of each of these types  follows  that
+          of Fortran 77. i.e.,
+
+          BSPWORD   = BSPINT    = BSPLOGICAL = BSPREAL
+          2*BSPWORD = BSPDOUBLE = BSPCOMPLEX
+
+
+     2)   The procedure _p_u_t__a_r_r_a_y _s_h_o_w_n  _b_e_l_o_w  _h_a_s  _a  _s_e_m_a_n_t_i_c_s
+          assignment:
+
+          forall i in {0,..n-1} xs[xs[i]] := xs[i]
+
+          Conceptually, the algorithm manipulates a global  array
+          _x_s  of  _n  elements  that  are  distributed  among  the
+          processes.  The role of bsplib(3)  is  to  provide  the
+          infrastructure  for  the  user to take care of the data
+          distribution, and any implied  communication  necessary
+          to manipulate parts of the data structure that are on a
+          remote process. Therefore, if the user distributes  the
+          global array in a block-wise manner (i.e., process zero
+          gets elements 0 to _n/(_p-_1), process  one  gets  _n/_p  to
+          (_2_n)/(_p-_1), etc.) with each process owning an _n/_p chunk
+          of elements, then the bsplib(3)  communications  neces-
+          sary  to  perform  the  concurrent assignment are shown
+          below.
+
+          void put_array(int *xs, int n) {
+            int i,pid,local_idx,n_over_p= n/bsp_nprocs();
+            if ((n % bsp_nprocs()) != 0)
+              bsp_abort("{put_array} n=%d not divisible by p=%d",
+                        n,bsp_nprocs());
+            bsp_push_reg(xs,n_over_p*sizeof(int));
+            bsp_sync();
+
+            for(i=0;i<n_over_p;i++) {
+              pid       = xs[i]/n_over_p;
+              local_idx = xs[i]%n_over_p;
+              bsp_put(pid,&xs[i],xs,local_idx*sizeof(int),sizeof(int));
+            }
+            bsp_sync();
+            bsp_pop_reg(xs);
+          }
+
+          Similarly, the function can be defined in Fortran as:
+
+                  SUBROUTINE putarray(xs,n)
+                    INCLUDE 'fbsp.h'
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    3
+
+
+
+
+
+
+bsp_put(3)              BSPlib FUNCTIONS               bsp_put(3)
+
+
+
+                    INTEGER xs(*),n
+                    INTEGER i,pid,localidx,noverp
+
+                    noverp=n/bspnprocs()
+                    IF (MOD(n,bspnprocs()) .NE. 0) THEN
+                      CALL bspabort('N not divisible by p')
+                    END IF
+                    CALL bsppushreg(xs,noverp*BSPINT)
+                    CALL bspsync()
+
+                    DO i=1,noverp
+                      pid      = xs(i)/noverp
+                      localidx = MOD(xs(i),noverp)
+                      CALL bspput(pid,xs(i),xs,localidx*BSPINT,BSPINT)
+                    END DO
+                    CALL bspsync()
+                    CALL bsppopreg(xs)
+                  END
+
+          The procedure highlights the use  of  bsp_abort(3)  and
+          the  offset  parameter  in  bsp_put(3).  Each process's
+          local section of the array  _x_s  is  registered  in  the
+          first superstep. Next, _n/_p puts are performed, in which
+          the global numbering  used  in  the  distributed  array
+          (i.e., indices in the range 0 through to _n-_1), are con-
+          verted into  pairs  of  process  identifier  and  local
+          numbering  in  the range 0 to _n/(_p-_1). Once the conver-
+          sion from the global scheme to  process-id/local  index
+          has  been  performed,  elements  of  the  array  can be
+          transferred into the correct index on a remote process.
+          It  should  be  noted that if the value of the variable
+          _p_i_d is the same as bsp_pid(3), then a local  assignment
+          (i.e., memory copy) will occur _a_t _t_h_e _e_n_d _o_f _t_h_e _s_u_p_e_r_-
+          _s_t_e_p.
+
+
+     3)   Consider a function _c_y_c_l_i_c__s_h_i_f_t executed on each  pro-
+          cess,  that  takes  an  integer  _x as its argument, and
+          returns the value of _x on its  left  neighbouring  pro-
+          cess.
+
+          int cyclic_shift(int x) {
+            bsp_push_reg(&x,sizeof(int));
+            bsp_sync();
+            bsp_put( (bsp_pid() + 1) % bsp_nprocs(),
+                     &x,
+                     &x,0,
+                     sizeof(int));
+            bsp_sync();
+            bsp_pop_reg(&x);
+            return x;
+          }
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    4
+
+
+
+
+
+
+bsp_put(3)              BSPlib FUNCTIONS               bsp_put(3)
+
+
+
+     4)   An alternative definition of _c_y_c_l_i_c _s_h_i_f_t that  uses  a
+          high performance put.
+
+          int cyclic_shift(int x) {
+            int result;
+            bsp_push_reg(&result,sizeof(int));
+            bsp_sync();
+            bsp_hpput( (bsp_pid() + 1) % bsp_nprocs(),
+                       &x,
+                       &result,0,
+                       sizeof(int));
+            bsp_sync();
+            bsp_pop_reg(&result);
+            return result;
+          }
+
+
+     5)   Consider a function  _b_s_p__a_l_l_s_u_m_s  that  calculates  the
+          running  sums of _p values stored on _p processors. i.e.,
+          if _x__i is stored on process _i, then the result on  each
+          processor is _x__0 + .. _x__i.
+
+          #include "bsp.h"
+          #include <stdio.h>
+
+          int bsp_allsums(int x) {
+            int i, left, right;
+
+            bsp_push_reg(&left,sizeof(int));
+            bsp_sync();
+
+            right=x;
+            for(i=1;i<bsp_nprocs();i*=2) {
+              if (bsp_pid()+i < bsp_nprocs())
+                bsp_put(bsp_pid()+i,&right,&left,0,sizeof(int));
+              bsp_sync();
+              if (bsp_pid()>=i) right=left+right;
+            }
+            bsp_pop_reg(&left);
+            return right;
+          }
+
+          void main() {
+            int y;
+            bsp_begin(bsp_nprocs());
+            y = bsp_pid()+1;
+            printf("y=%d sums=%d\n",y,bsp_allsums(y));
+            bsp_end();
+          }
+
+          A compilation, and an example run on four processors is
+          shown below:
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    5
+
+
+
+
+
+
+bsp_put(3)              BSPlib FUNCTIONS               bsp_put(3)
+
+
+
+          pippin> bspcc allsums.c
+          pippin> ./a.out
+          y=4 sums=10
+          y=2 sums=3
+          y=1 sums=1
+          y=3 sums=6
+
+
+SEE ALSO
+     drma(3),   bsp_push_reg(3),   bsp_pop_reg(3),    bsp_get(3),
+     bsp_hpget(3)
+
+     ``_B_S_P_l_i_b: _T_h_e _B_S_P _P_r_o_g_r_a_m_m_i_n_g _L_i_b_r_a_r_y'' Jonathan M. D. Hill,
+     Bill  McColl,  Dan  C.  Stefanescu,  Mark W. Goudreau, Kevin
+     Lang, Satish B. Rao, , Torsten Suel, Thanasis Tsantilas, and
+     Rob  Bisseling.  Parallel  Computing,  to  appear  1998. See
+     _h_t_t_p://_w_w_w._b_s_p-_w_o_r_l_d_w_i_d_e._o_r_g for more details.
+
+
+NOTES
+     i    The destination memory area used in a  put  has  to  be
+          registered.  It  is an error to communicate into a data
+          structure that has not been registered.
+
+
+     ii   The source of a put does _n_o_t _h_a_v_e _t_o _b_e _r_e_g_i_s_t_e_r_e_d.
+
+
+     iii  If the destination memory area _d_s_t is  registered  with
+          size  _x,  then it is a bounds error to perform the com-
+          munication _b_s_p__p_u_t(_p_i_d,_s_r_c,_d_s_t},_o,_n) if _o+_n>_x.
+
+
+     iv   A communication of zero bytes does nothing.
+
+
+     v    A process can communicate into its own memory if _p_i_d  =
+          _b_s_p__p_i_d(). However, for bsp_put(3), due to the _b_u_f_f_e_r_e_d
+          _a_t _d_e_s_t_i_n_a_t_i_o_n semantics, the memory  copy  only  takes
+          effect _a_t _t_h_e _e_n_d _o_f _t_h_e _s_u_p_e_r_s_t_e_p.
+
+
+     vi   The process numbering and offset parameter  start  from
+          zero, even for the FORTRAN bindings of the operations.
+
+
+BUGS
+     Problems  and  bug  reports  should  be  mailed  to  _b_s_p_l_i_b-
+     _b_u_g_s@_c_o_m_l_a_b._o_x._a_c._u_k
+
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    6
+
+
+
+
+
+
+bsp_put(3)              BSPlib FUNCTIONS               bsp_put(3)
+
+
+
+AUTHORS
+     The Oxford BSP Toolset implementation of BSPlib was  written
+     by Jonathan.Hill@comlab.ox.ac.uk
+     http://www.comlab.ox.ac.uk/oucl/people/jonathan.hill.html
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Oxford BSP Toolset  Last change: 1.4 25/9/98                    7
+
+
+

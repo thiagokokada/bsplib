@@ -1,0 +1,61 @@
+
+bsparch.lprl,0
+
+bspcgprof.lprl,50
+  arg: while 47,1817
+  if 59,2160
+  if 63,2249
+
+bspcpp.lprl,0
+
+bspfpp.lprl,0
+
+bspfront.lprl,17
+} elsif 70,2614
+
+bspfrontenv.lprl,13
+if 313,9044
+
+bspparam.lprl,61
+  arg: while 47,1857
+  if 58,2195
+sub printParams(71,2473
+
+bspprof.lprl,145
+  arg: while 118,3623
+  if 235,8118
+  if 239,8184
+  if 245,8291
+  } elsif 247,8357
+  if (!open(254,8619
+  if 264,8939
+  } elsif 266,8995
+
+bspprof_bar.lprl,0
+
+bspprof_ggraph.lprl,0
+
+bspprof_strata.lprl,0
+
+bspprof_theory.lprl,0
+
+bspsig.lprl,260
+  arg: while 68,2409
+  if 101,3681
+  if 110,3911
+  if 119,4201
+  if 151,5293
+  foreach $i 170,5863
+  if 182,6274
+  } elsif 186,6403
+  } elsif 190,6531
+  } elsif 194,6684
+  } elsif 198,6828
+  } elsif 203,7008
+  } elsif 207,7135
+  } elsif 212,7327
+
+bsputil.lprl,0
+
+ipcclean.lprl,22
+  arg: while 25,1369
